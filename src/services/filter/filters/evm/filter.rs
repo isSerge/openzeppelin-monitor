@@ -1129,6 +1129,9 @@ mod tests {
 
 	#[test]
 	fn test_gas_price_matching() {
+		let expression = "gas_price > 1000000000".to_string(); // more than 1 Gwei
+		let gas_price_above = U256::from(1500000000); // 1.5 Gwei
+		let gas_price_below = U256::from(500000000); // 0.5 Gwei
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
 		let monitor = create_test_monitor(
@@ -1136,7 +1139,7 @@ mod tests {
 			vec![], // functions
 			vec![TransactionCondition {
 				status: TransactionStatus::Any,
-				expression: Some("gas_price > 1000000000".to_string()),
+				expression: Some(expression.clone()),
 			}], // transactions
 			vec![], // addresses
 		);
@@ -1145,21 +1148,21 @@ mod tests {
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
 			&TestTransactionBuilder::new()
-				.gas_price(U256::from(1500000000))
+				.gas_price(gas_price_above)
 				.build(),
 			&monitor,
 			&mut matched,
 		);
 
 		assert_eq!(matched.len(), 1);
-		assert_eq!(matched[0].expression, Some("gas_price > 1000000000".to_string()));
+		assert_eq!(matched[0].expression, Some(expression));
 
 		// Test transaction with gas price < 1 Gwei
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
 			&TestTransactionBuilder::new()
-				.gas_price(U256::from(500000000))
+				.gas_price(gas_price_below)
 				.build(),
 			&monitor,
 			&mut matched,
