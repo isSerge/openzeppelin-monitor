@@ -7,7 +7,7 @@
 //! - Event log processing and filtering
 //! - ABI-based decoding of function calls and events
 
-use alloy::primitives::U64;
+use alloy::primitives::{U64, U256};
 use anyhow::Context;
 use async_trait::async_trait;
 use ethabi::Contract;
@@ -415,11 +415,11 @@ impl<T> EVMBlockFilter<T> {
 				// Evaluate single condition
 				match param.kind.as_str() {
 					"uint256" | "uint" => {
-						let Ok(param_value) = u128::from_str(&param.value) else {
+						let Ok(param_value) = U256::from_str(&param.value) else {
 							tracing::warn!("Failed to parse parameter value: {}", param.value);
 							return false;
 						};
-						let Ok(compare_value) = u128::from_str(value) else {
+						let Ok(compare_value) = U256::from_str(value) else {
 							tracing::warn!("Failed to parse comparison value: {}", value);
 							return false;
 						};
