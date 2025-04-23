@@ -9,6 +9,7 @@
 pub mod evm {
 	pub mod filter;
 	pub mod helpers;
+	pub mod test_helpers;
 }
 pub mod stellar {
 	pub mod filter;

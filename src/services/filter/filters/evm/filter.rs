@@ -765,8 +765,6 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 
 #[cfg(test)]
 mod tests {
-	use crate::models::EVMBaseTransaction;
-
 	use super::*;
 	use alloy::{
 		consensus::{Eip658Value, Receipt, ReceiptEnvelope, ReceiptWithBloom},
@@ -775,25 +773,12 @@ mod tests {
 	use ethabi::{Function, Param, ParamType};
 	use serde_json::json;
 
+	use crate::services::filter::filters::evm::test_helpers::TestTransactionBuilder;
+
 	fn create_test_filter() -> EVMBlockFilter<()> {
 		EVMBlockFilter::<()> {
 			_client: PhantomData,
 		}
-	}
-
-	fn create_test_transaction(
-		value: U256,
-		from: Option<Address>,
-		to: Option<Address>,
-		input_data: Vec<u8>,
-	) -> EVMTransaction {
-		EVMTransaction(EVMBaseTransaction {
-			from,
-			to,
-			value,
-			input: Bytes(input_data.into()),
-			..Default::default()
-		})
 	}
 
 	/// Creates a test monitor with customizable parameters
@@ -971,7 +956,7 @@ mod tests {
 
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(U256::ZERO, None, None, vec![]),
+			&TestTransactionBuilder::new().build(),
 			&monitor,
 			&mut matched,
 		);
@@ -999,7 +984,7 @@ mod tests {
 		// Test successful transaction
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(U256::ZERO, None, None, vec![]),
+			&TestTransactionBuilder::new().build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1011,7 +996,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Failure,
-			&create_test_transaction(U256::ZERO, None, None, vec![]),
+			&TestTransactionBuilder::new().build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1036,7 +1021,7 @@ mod tests {
 		// Test transaction with value > 100
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(U256::from(150), None, None, vec![]),
+			&TestTransactionBuilder::new().value(U256::from(150)).build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1048,7 +1033,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(U256::from(50), None, None, vec![]),
+			&TestTransactionBuilder::new().value(U256::from(50)).build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1075,7 +1060,7 @@ mod tests {
 		// Test matching 'to' address
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(U256::ZERO, None, Some(test_address), vec![]),
+			&TestTransactionBuilder::new().to(test_address).build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1086,12 +1071,9 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(
-				U256::ZERO,
-				None,
-				Some(Address::from_str("0x0000000000000000000000000000000000004321").unwrap()),
-				vec![],
-			),
+			&TestTransactionBuilder::new()
+				.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
+				.build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1118,7 +1100,7 @@ mod tests {
 		// Test matching 'from' address
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(U256::ZERO, Some(test_address), None, vec![]),
+			&TestTransactionBuilder::new().from(test_address).build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1129,12 +1111,9 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&create_test_transaction(
-				U256::ZERO,
-				Some(Address::from_str("0x0000000000000000000000000000000000004321").unwrap()),
-				None,
-				vec![],
-			),
+			&TestTransactionBuilder::new()
+				.from(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
+				.build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1201,12 +1180,11 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = create_test_transaction(
-			U256::ZERO,
-			Some(Address::from_str("0x0000000000000000000000000000000000001234").unwrap()), /* from address */
-			Some(Address::from_str("0x0000000000000000000000000000000000004321").unwrap()), /* to address matching monitor */
-			encoded,
-		);
+		let transaction = TestTransactionBuilder::new()
+			.from(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
+			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
+			.input(Bytes(encoded.into()))
+			.build();
 
 		// Test function matching
 		filter.find_matching_functions_for_transaction(
@@ -1281,12 +1259,10 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = create_test_transaction(
-			U256::ZERO,
-			None,
-			Some(Address::from_str("0x0000000000000000000000000000000000004321").unwrap()),
-			encoded,
-		);
+		let transaction = TestTransactionBuilder::new()
+			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
+			.input(Bytes(encoded.into()))
+			.build();
 
 		filter.find_matching_functions_for_transaction(
 			&transaction,
@@ -1315,12 +1291,10 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = create_test_transaction(
-			U256::ZERO,
-			None,
-			Some(Address::from_str("0x0000000000000000000000000000000000004321").unwrap()),
-			encoded,
-		);
+		let transaction = TestTransactionBuilder::new()
+			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
+			.input(Bytes(encoded.into()))
+			.build();
 
 		filter.find_matching_functions_for_transaction(
 			&transaction,
@@ -1387,12 +1361,10 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = create_test_transaction(
-			U256::ZERO,
-			None,
-			Some(Address::from_str("0x0000000000000000000000000000000000001234").unwrap()), /* Different address in proper hex format */
-			encoded,
-		);
+		let transaction = TestTransactionBuilder::new()
+			.to(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
+			.input(Bytes(encoded.into()))
+			.build();
 
 		filter.find_matching_functions_for_transaction(
 			&transaction,
@@ -1434,12 +1406,10 @@ mod tests {
 		};
 
 		// Test with invalid input data (less than 4 bytes)
-		let transaction = create_test_transaction(
-			U256::ZERO,
-			None,
-			Some(Address::from_str("0x0000000000000000000000000000000000004321").unwrap()),
-			vec![0x12, 0x34], // Invalid input data
-		);
+		let transaction = TestTransactionBuilder::new()
+			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
+			.input(Bytes(vec![0x12, 0x34].into()))
+			.build();
 
 		filter.find_matching_functions_for_transaction(
 			&transaction,
