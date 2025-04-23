@@ -97,6 +97,12 @@ impl<T> EVMBlockFilter<T> {
 								kind: "string".to_string(),
 								indexed: false,
 							},
+							EVMMatchParamEntry {
+								name: "gas_price".to_string(),
+								value: transaction.gas_price.unwrap_or_default().to_string(),
+								kind: "uint256".to_string(),
+								indexed: false,
+							},
 						];
 
 						if self.evaluate_expression(expr, &Some(tx_params)) {
@@ -1113,6 +1119,47 @@ mod tests {
 			&TransactionStatus::Success,
 			&TestTransactionBuilder::new()
 				.from(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+
+		assert_eq!(matched.len(), 0);
+	}
+
+	#[test]
+	fn test_gas_price_matching() {
+		let filter = create_test_filter();
+		let mut matched = Vec::new();
+		let monitor = create_test_monitor(
+			vec![], // events
+			vec![], // functions
+			vec![TransactionCondition {
+				status: TransactionStatus::Any,
+				expression: Some("gas_price > 1000000000".to_string()),
+			}], // transactions
+			vec![], // addresses
+		);
+
+		// Test transaction with gas price > 1 Gwei
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.gas_price(U256::from(1500000000))
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+
+		assert_eq!(matched.len(), 1);
+		assert_eq!(matched[0].expression, Some("gas_price > 1000000000".to_string()));
+
+		// Test transaction with gas price < 1 Gwei
+		matched.clear();
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.gas_price(U256::from(500000000))
 				.build(),
 			&monitor,
 			&mut matched,
