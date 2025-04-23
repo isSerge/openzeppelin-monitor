@@ -109,6 +109,12 @@ impl<T> EVMBlockFilter<T> {
 								kind: "uint256".to_string(),
 								indexed: false,
 							},
+							EVMMatchParamEntry {
+								name: "max_priority_fee_per_gas".to_string(),
+								value: transaction.max_priority_fee_per_gas.unwrap_or_default().to_string(),
+								kind: "uint256".to_string(),
+								indexed: false,
+							},
 						];
 
 						if self.evaluate_expression(expr, &Some(tx_params)) {
@@ -1217,6 +1223,49 @@ mod tests {
 			&mut matched,
 		);
 		assert_eq!(matched.len(), 0);
+	}
+
+	#[test]
+	fn test_max_priority_fee_per_gas_matching() {
+		let expression = "max_priority_fee_per_gas > 1000000000".to_string(); // more than 1 Gwei
+		let max_priority_fee_per_gas_above = U256::from(1500000000); // 1.5 Gwei
+		let max_priority_fee_per_gas_below = U256::from(500000000); // 0.5 Gwei
+		let filter = create_test_filter();
+		let mut matched = Vec::new();
+		let monitor = create_test_monitor(
+			vec![], // events
+			vec![], // functions
+			vec![TransactionCondition {
+				status: TransactionStatus::Any,
+				expression: Some(expression.clone()),
+			}], // transactions
+			vec![], // addresses
+		);
+
+		// Test transaction with max_priority_fee_per_gas > 1 Gwei
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.max_priority_fee_per_gas(max_priority_fee_per_gas_above)
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 1);
+		assert_eq!(matched[0].expression, Some(expression));
+
+		// Test transaction with max_priority_fee_per_gas < 1 Gwei
+		matched.clear();
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.max_priority_fee_per_gas(max_priority_fee_per_gas_below)
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 0);
+
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
