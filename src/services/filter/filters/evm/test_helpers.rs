@@ -1,7 +1,10 @@
 use crate::models::{
 	EVMBaseReceipt, EVMBaseTransaction, EVMReceiptLog, EVMTransaction, EVMTransactionReceipt,
 };
-use alloy::primitives::{Address, Bytes, LogData, B256, U256, U64};
+use alloy::{
+	primitives::{Address, Bytes, LogData, B256, U256, U64},
+	rpc::types::Index,
+};
 use std::str::FromStr;
 
 /// A builder for creating test EVM transactions with default values.
@@ -117,6 +120,7 @@ pub struct TestReceiptBuilder {
 	from: Option<Address>,
 	to: Option<Address>,
 	contract_address: Option<Address>,
+	transaction_index: Option<Index>,
 }
 
 impl TestReceiptBuilder {
@@ -140,6 +144,12 @@ impl TestReceiptBuilder {
 	/// Sets the gas used for the transaction.
 	pub fn gas_used(mut self, gas_used: U256) -> Self {
 		self.gas_used = Some(gas_used);
+		self
+	}
+
+	/// Sets the transaction index in the block.
+	pub fn transaction_index(mut self, transaction_index: usize) -> Self {
+		self.transaction_index = Some(Index::from(transaction_index));
 		self
 	}
 
@@ -209,6 +219,7 @@ impl TestReceiptBuilder {
 			from: self.from.unwrap_or_default(),
 			to: self.to,
 			contract_address: self.contract_address,
+			transaction_index: self.transaction_index.unwrap_or_default(),
 			..Default::default()
 		};
 

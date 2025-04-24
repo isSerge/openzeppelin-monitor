@@ -144,6 +144,12 @@ impl<T> EVMBlockFilter<T> {
 								kind: "uint256".to_string(),
 								indexed: false,
 							},
+							EVMMatchParamEntry {
+								name: "transaction_index".to_string(),
+								value: tx_receipt.transaction_index.0.to_string(),
+								kind: "uint64".to_string(),
+								indexed: false,
+							},
 						];
 
 						if self.evaluate_expression(expr, &Some(tx_params)) {
@@ -443,7 +449,7 @@ impl<T> EVMBlockFilter<T> {
 
 				// Evaluate single condition
 				match param.kind.as_str() {
-					"uint256" | "uint" => {
+					"uint64" | "uint256" | "uint" => {
 						let Ok(param_value) = U256::from_str(&param.value) else {
 							tracing::warn!("Failed to parse parameter value: {}", param.value);
 							return false;
@@ -1517,6 +1523,52 @@ mod tests {
 		let tx_receipt_non_matching = TestReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.gas_used(gas_used_non_matching)
+			.build();
+
+		matched.clear();
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&tx_non_matching,
+			&tx_receipt_non_matching,
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 0);
+	}
+
+	#[test]
+	fn test_transaction_index_matching() {
+		let expression = "transaction_index == 15".to_string();
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
+		let filter = create_test_filter();
+		let mut matched = Vec::new();
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
+
+		// Test transaction with matching transaction index
+		let tx_matching = TestTransactionBuilder::new().build();
+		let tx_receipt_matching = TestReceiptBuilder::new()
+			.transaction_hash(tx_matching.hash)
+			.transaction_index(15)
+			.build();
+
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&tx_matching,
+			&tx_receipt_matching,
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 1);
+		assert_eq!(matched[0].expression, Some(expression));
+
+		// Test transaction with non-matching transaction index
+		let tx_non_matching = TestTransactionBuilder::new().build();
+		let tx_receipt_non_matching = TestReceiptBuilder::new()
+			.transaction_hash(tx_non_matching.hash)
+			.transaction_index(1)
 			.build();
 
 		matched.clear();
