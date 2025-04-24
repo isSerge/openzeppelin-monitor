@@ -14,8 +14,8 @@ mod core;
 pub use blockchain::{BlockChainType, BlockType, MonitorMatch, ProcessedBlock, TransactionType};
 
 pub use blockchain::evm::{
-	EVMBaseTransaction, EVMBlock, EVMMatchArguments, EVMMatchParamEntry, EVMMatchParamsMap,
-	EVMMonitorMatch, EVMReceiptLog, EVMTransaction, EVMTransactionReceipt,
+	EVMBaseReceipt, EVMBaseTransaction, EVMBlock, EVMMatchArguments, EVMMatchParamEntry,
+	EVMMatchParamsMap, EVMMonitorMatch, EVMReceiptLog, EVMTransaction, EVMTransactionReceipt,
 };
 
 pub use blockchain::stellar::{
