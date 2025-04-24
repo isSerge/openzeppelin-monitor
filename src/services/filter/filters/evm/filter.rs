@@ -132,7 +132,7 @@ impl<T> EVMBlockFilter<T> {
 							},
 							EVMMatchParamEntry {
 								name: "input".to_string(),
-								value: format!("0x{}", hex::encode(transaction.input.clone())),
+								value: format!("0x{}", hex::encode(&transaction.input)),
 								kind: "string".to_string(),
 								indexed: false,
 							},
@@ -473,7 +473,10 @@ impl<T> EVMBlockFilter<T> {
 							"!=" => !param.value.eq_ignore_ascii_case(value),
 							// TODO: consider adding "starts with","ends with", "contains", etc.
 							_ => {
-								tracing::warn!("Unsupported operator for Bytes type: {}", operator);
+								tracing::warn!(
+									"Unsupported operator for string type: {}",
+									operator
+								);
 								false
 							}
 						}
@@ -1175,26 +1178,26 @@ mod tests {
 	#[test]
 	fn test_gas_price_matching() {
 		let expression = "gas_price > 1000000000".to_string(); // more than 1 Gwei
-		let gas_price_above = U256::from(1500000000); // 1.5 Gwei
-		let gas_price_below = U256::from(500000000); // 0.5 Gwei
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
+		let gas_price_matching = U256::from(1500000000); // 1.5 Gwei
+		let gas_price_non_matching = U256::from(500000000); // 0.5 Gwei
+		let tx_matching = TestTransactionBuilder::new()
+			.gas_price(gas_price_matching)
+			.build();
+		let tx_non_matching = TestTransactionBuilder::new()
+			.gas_price(gas_price_non_matching)
+			.build();
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
-		let monitor = create_test_monitor(
-			vec![], // events
-			vec![], // functions
-			vec![TransactionCondition {
-				status: TransactionStatus::Any,
-				expression: Some(expression.clone()),
-			}], // transactions
-			vec![], // addresses
-		);
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
 
 		// Test transaction with gas price > 1 Gwei
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.gas_price(gas_price_above)
-				.build(),
+			&tx_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1206,9 +1209,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.gas_price(gas_price_below)
-				.build(),
+			&tx_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1219,26 +1220,26 @@ mod tests {
 	#[test]
 	fn test_max_fee_per_gas_matching() {
 		let expression = "max_fee_per_gas > 1000000000".to_string(); // more than 1 Gwei
-		let max_fee_per_gas_above = U256::from(1500000000); // 1.5 Gwei
-		let max_fee_per_gas_below = U256::from(500000000); // 0.5 Gwei
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
+		let max_fee_per_gas_matching = U256::from(1500000000); // 1.5 Gwei
+		let max_fee_per_gas_non_matching = U256::from(500000000); // 0.5 Gwei
+		let tx_matching = TestTransactionBuilder::new()
+			.max_fee_per_gas(max_fee_per_gas_matching)
+			.build();
+		let tx_non_matching = TestTransactionBuilder::new()
+			.max_fee_per_gas(max_fee_per_gas_non_matching)
+			.build();
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
-		let monitor = create_test_monitor(
-			vec![], // events
-			vec![], // functions
-			vec![TransactionCondition {
-				status: TransactionStatus::Any,
-				expression: Some(expression.clone()),
-			}], // transactions
-			vec![], // addresses
-		);
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
 
 		// Test transaction with max_fee_per_gas > 1 Gwei
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.max_fee_per_gas(max_fee_per_gas_above)
-				.build(),
+			&tx_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1249,9 +1250,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.max_fee_per_gas(max_fee_per_gas_below)
-				.build(),
+			&tx_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1261,26 +1260,26 @@ mod tests {
 	#[test]
 	fn test_max_priority_fee_per_gas_matching() {
 		let expression = "max_priority_fee_per_gas > 1000000000".to_string(); // more than 1 Gwei
-		let max_priority_fee_per_gas_above = U256::from(1500000000); // 1.5 Gwei
-		let max_priority_fee_per_gas_below = U256::from(500000000); // 0.5 Gwei
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
+		let max_priority_fee_per_gas_matching = U256::from(1500000000); // 1.5 Gwei
+		let max_priority_fee_per_gas_non_matching = U256::from(500000000); // 0.5 Gwei
+		let tx_matching = TestTransactionBuilder::new()
+			.max_priority_fee_per_gas(max_priority_fee_per_gas_matching)
+			.build();
+		let tx_non_matching = TestTransactionBuilder::new()
+			.max_priority_fee_per_gas(max_priority_fee_per_gas_non_matching)
+			.build();
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
-		let monitor = create_test_monitor(
-			vec![], // events
-			vec![], // functions
-			vec![TransactionCondition {
-				status: TransactionStatus::Any,
-				expression: Some(expression.clone()),
-			}], // transactions
-			vec![], // addresses
-		);
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
 
 		// Test transaction with max_priority_fee_per_gas > 1 Gwei
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.max_priority_fee_per_gas(max_priority_fee_per_gas_above)
-				.build(),
+			&tx_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1291,9 +1290,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.max_priority_fee_per_gas(max_priority_fee_per_gas_below)
-				.build(),
+			&tx_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1303,26 +1300,26 @@ mod tests {
 	#[test]
 	fn test_gas_limit_matching() {
 		let expression = "gas_limit > 20000".to_string(); // more than 20k
-		let gas_limit_above = U256::from(30000); // 30k
-		let gas_limit_below = U256::from(10000); // 10k
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
+		let gas_limit_matching = U256::from(30000); // 30k
+		let gas_limit_non_matching = U256::from(10000); // 10k
+		let tx_matching = TestTransactionBuilder::new()
+			.gas_limit(gas_limit_matching)
+			.build();
+		let tx_non_matching = TestTransactionBuilder::new()
+			.gas_limit(gas_limit_non_matching)
+			.build();
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
-		let monitor = create_test_monitor(
-			vec![], // events
-			vec![], // functions
-			vec![TransactionCondition {
-				status: TransactionStatus::Any,
-				expression: Some(expression.clone()),
-			}], // transactions
-			vec![], // addresses
-		);
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
 
 		// Test transaction with gas_limit > 20k
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.gas_limit(gas_limit_above)
-				.build(),
+			&tx_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1333,9 +1330,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.gas_limit(gas_limit_below)
-				.build(),
+			&tx_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1345,24 +1340,24 @@ mod tests {
 	#[test]
 	fn test_nonce_matching() {
 		let expression = "nonce == 5".to_string();
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
 		let nonce_matching = U256::from(5);
 		let nonce_not_matching = U256::from(55);
+		let tx_matching = TestTransactionBuilder::new().nonce(nonce_matching).build();
+		let tx_non_matching = TestTransactionBuilder::new()
+			.nonce(nonce_not_matching)
+			.build();
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
-		let monitor = create_test_monitor(
-			vec![], // events
-			vec![], // functions
-			vec![TransactionCondition {
-				status: TransactionStatus::Any,
-				expression: Some(expression.clone()),
-			}], // transactions
-			vec![], // addresses
-		);
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
 
 		// Test transaction with gas_limit > 20k
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new().nonce(nonce_matching).build(),
+			&tx_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1373,9 +1368,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.nonce(nonce_not_matching)
-				.build(),
+			&tx_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1385,24 +1378,27 @@ mod tests {
 	#[test]
 	fn test_input_matching() {
 		let expression = "input == 0x1234".to_string();
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
 		let input_matching = Bytes(hex::decode("1234").unwrap().into());
 		let input_not_matching = Bytes(hex::decode("5678").unwrap().into());
+		let tx_matching = TestTransactionBuilder::new().input(input_matching).build();
+		let tx_non_matching = TestTransactionBuilder::new()
+			.input(input_not_matching)
+			.build();
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
-		let monitor = create_test_monitor(
-			vec![], // events
-			vec![], // functions
-			vec![TransactionCondition {
-				status: TransactionStatus::Any,
-				expression: Some(expression.clone()),
-			}], // transactions
-			vec![], // addresses
-		);
-
-		let tx = TestTransactionBuilder::new().input(input_matching).build();
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
 
 		// Test transaction with matching input
-		filter.find_matching_transaction(&TransactionStatus::Success, &tx, &monitor, &mut matched);
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&tx_matching,
+			&monitor,
+			&mut matched,
+		);
 		assert_eq!(matched.len(), 1);
 		assert_eq!(matched[0].expression, Some(expression));
 
@@ -1410,9 +1406,7 @@ mod tests {
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.input(input_not_matching)
-				.build(),
+			&tx_non_matching,
 			&monitor,
 			&mut matched,
 		);
