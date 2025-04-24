@@ -711,7 +711,7 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 					self.find_matching_transaction(
 						&tx_status,
 						transaction,
-						&receipt,
+						receipt,
 						monitor,
 						&mut matched_transactions,
 					);

@@ -15,8 +15,8 @@ use openzeppelin_monitor::{
 			evm_helpers::{
 				are_same_address, are_same_signature, normalize_address, normalize_signature,
 			},
-			EVMBlockFilter,
 			evm_test_helpers::TestReceiptBuilder,
+			EVMBlockFilter,
 		},
 	},
 };
