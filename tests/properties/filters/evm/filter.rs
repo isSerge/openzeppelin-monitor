@@ -16,6 +16,7 @@ use openzeppelin_monitor::{
 				are_same_address, are_same_signature, normalize_address, normalize_signature,
 			},
 			EVMBlockFilter,
+			evm_test_helpers::TestReceiptBuilder,
 		},
 	},
 };
@@ -541,6 +542,7 @@ proptest! {
 			filter.find_matching_transaction(
 				&status,
 				&tx,
+				&TestReceiptBuilder::new().build(),
 				&monitor,
 				&mut matched_transactions
 			);
@@ -590,10 +592,10 @@ proptest! {
 			},
 			..Default::default()
 		};
-
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
 			&tx,
+			&TestReceiptBuilder::new().build(),
 			&monitor,
 			&mut matched_transactions
 		);

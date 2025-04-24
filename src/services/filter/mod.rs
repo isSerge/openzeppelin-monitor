@@ -14,5 +14,5 @@ pub use filter_match::handle_match;
 
 pub use filters::{
 	evm::helpers as evm_helpers, stellar::helpers as stellar_helpers, BlockFilter, EVMBlockFilter,
-	FilterService, StellarBlockFilter,
+	FilterService, StellarBlockFilter, evm::test_helpers as evm_test_helpers,
 };
