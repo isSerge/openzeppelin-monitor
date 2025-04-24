@@ -121,6 +121,12 @@ impl<T> EVMBlockFilter<T> {
 								kind: "uint256".to_string(),
 								indexed: false,
 							},
+							EVMMatchParamEntry {
+								name: "nonce".to_string(),
+								value: transaction.nonce.to_string(),
+								kind: "uint256".to_string(),
+								indexed: false,
+							},
 						];
 
 						if self.evaluate_expression(expr, &Some(tx_params)) {
@@ -1309,6 +1315,48 @@ mod tests {
 			&TransactionStatus::Success,
 			&TestTransactionBuilder::new()
 				.gas_limit(gas_limit_below)
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 0);
+	}
+
+	#[test]
+	fn test_nonce_matching() {
+		let expression = "nonce == 5".to_string(); 
+		let nonce_matching = U256::from(5); 
+		let nonce_not_matching = U256::from(55); 
+		let filter = create_test_filter();
+		let mut matched = Vec::new();
+		let monitor = create_test_monitor(
+			vec![], // events
+			vec![], // functions
+			vec![TransactionCondition {
+				status: TransactionStatus::Any,
+				expression: Some(expression.clone()),
+			}], // transactions
+			vec![], // addresses
+		);
+
+		// Test transaction with gas_limit > 20k
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.nonce(nonce_matching)
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 1);
+		assert_eq!(matched[0].expression, Some(expression));
+
+		// Test transaction with gas_limit < 20k
+		matched.clear();
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.nonce(nonce_not_matching)
 				.build(),
 			&monitor,
 			&mut matched,
