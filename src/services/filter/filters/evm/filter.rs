@@ -115,6 +115,12 @@ impl<T> EVMBlockFilter<T> {
 								kind: "uint256".to_string(),
 								indexed: false,
 							},
+							EVMMatchParamEntry {
+								name: "gas_limit".to_string(),
+								value: transaction.gas.to_string(),
+								kind: "uint256".to_string(),
+								indexed: false,
+							},
 						];
 
 						if self.evaluate_expression(expr, &Some(tx_params)) {
@@ -1266,6 +1272,48 @@ mod tests {
 		);
 		assert_eq!(matched.len(), 0);
 
+	}
+
+	#[test]
+	fn test_gas_limit_matching() {
+		let expression = "gas_limit > 20000".to_string(); // more than 20k
+		let gas_limit_above = U256::from(30000); // 30k
+		let gas_limit_below = U256::from(10000); // 10k
+		let filter = create_test_filter();
+		let mut matched = Vec::new();
+		let monitor = create_test_monitor(
+			vec![], // events
+			vec![], // functions
+			vec![TransactionCondition {
+				status: TransactionStatus::Any,
+				expression: Some(expression.clone()),
+			}], // transactions
+			vec![], // addresses
+		);
+
+		// Test transaction with gas_limit > 20k
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.gas_limit(gas_limit_above)
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 1);
+		assert_eq!(matched[0].expression, Some(expression));
+
+		// Test transaction with gas_limit < 20k
+		matched.clear();
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.gas_limit(gas_limit_below)
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 0);
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
