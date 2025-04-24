@@ -44,28 +44,19 @@ impl<T> EVMBlockFilter<T> {
 	/// Finds transactions that match the monitor's conditions.
 	///
 	/// # Arguments
-	/// * `tx_receipt` - Transaction receipt
+	/// * `tx_status` - Status of the transaction (success/failure)
 	/// * `transaction` - The transaction to check
+	/// * `tx_receipt` - Transaction receipt
 	/// * `monitor` - Monitor containing match conditions
 	/// * `matched_transactions` - Vector to store matching transactions
 	pub fn find_matching_transaction(
 		&self,
-		tx_receipt: &EVMTransactionReceipt,
+		tx_status: &TransactionStatus,
 		transaction: &EVMTransaction,
+		_tx_receipt: &EVMTransactionReceipt,
 		monitor: &Monitor,
 		matched_transactions: &mut Vec<TransactionCondition>,
 	) {
-		// Get transaction status from receipt
-		let tx_status = if tx_receipt
-			.status
-			.map(|s| s.to::<u64>() == 1)
-			.unwrap_or(false)
-		{
-			TransactionStatus::Success
-		} else {
-			TransactionStatus::Failure
-		};
-
 		if monitor.match_conditions.transactions.is_empty() {
 			// Match all transactions
 			matched_transactions.push(TransactionCondition {
@@ -78,7 +69,7 @@ impl<T> EVMBlockFilter<T> {
 				// First check if status matches (if specified)
 				let status_matches = match &condition.status {
 					TransactionStatus::Any => true,
-					required_status => *required_status == tx_status,
+					required_status => *required_status == *tx_status,
 				};
 
 				if status_matches {
@@ -152,7 +143,7 @@ impl<T> EVMBlockFilter<T> {
 						if self.evaluate_expression(expr, &Some(tx_params)) {
 							matched_transactions.push(TransactionCondition {
 								expression: Some(expr.to_string()),
-								status: tx_status,
+								status: *tx_status,
 							});
 							break;
 						}
@@ -160,7 +151,7 @@ impl<T> EVMBlockFilter<T> {
 						// No expression but status matched
 						matched_transactions.push(TransactionCondition {
 							expression: None,
-							status: tx_status,
+							status: *tx_status,
 						});
 						break;
 					}
@@ -683,6 +674,13 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 						functions: Some(Vec::new()),
 					};
 
+					// Get transaction status from receipt
+					let tx_status = if receipt.status.map(|s| s.to::<u64>() == 1).unwrap_or(false) {
+						TransactionStatus::Success
+					} else {
+						TransactionStatus::Failure
+					};
+
 					// Collect all involved addresses from receipt logs, transaction.to, and
 					// transaction.from
 					let mut involved_addresses = Vec::new();
@@ -699,8 +697,9 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 
 					// Check transaction match conditions
 					self.find_matching_transaction(
-						&receipt,
+						&tx_status,
 						transaction,
+						&receipt,
 						monitor,
 						&mut matched_transactions,
 					);
@@ -960,8 +959,9 @@ mod tests {
 		let receipt = TestReceiptBuilder::new().build();
 
 		filter.find_matching_transaction(
-			&receipt,
+			&TransactionStatus::Success,
 			&TestTransactionBuilder::new().build(),
+			&receipt,
 			&monitor,
 			&mut matched,
 		);
@@ -990,8 +990,9 @@ mod tests {
 
 		// Test successful transaction
 		filter.find_matching_transaction(
-			&receipt_success,
+			&TransactionStatus::Success,
 			&TestTransactionBuilder::new().build(),
+			&receipt_success,
 			&monitor,
 			&mut matched,
 		);
@@ -1004,8 +1005,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&receipt_failure,
+			&TransactionStatus::Failure,
 			&TestTransactionBuilder::new().build(),
+			&receipt_failure,
 			&monitor,
 			&mut matched,
 		);
@@ -1034,7 +1036,13 @@ mod tests {
 			.build();
 
 		// Test transaction with value > 100
-		filter.find_matching_transaction(&tx_receipt_1, &tx_1, &monitor, &mut matched);
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&tx_1,
+			&tx_receipt_1,
+			&monitor,
+			&mut matched,
+		);
 
 		assert_eq!(matched.len(), 1);
 		assert_eq!(matched[0].expression, Some("value > 100".to_string()));
@@ -1047,7 +1055,13 @@ mod tests {
 			.build();
 
 		matched.clear();
-		filter.find_matching_transaction(&tx_receipt_2, &tx_2, &monitor, &mut matched);
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&tx_2,
+			&tx_receipt_2,
+			&monitor,
+			&mut matched,
+		);
 
 		assert_eq!(matched.len(), 0);
 	}
@@ -1076,8 +1090,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1097,8 +1112,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1130,8 +1146,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1151,8 +1168,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1181,8 +1199,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1201,8 +1220,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1231,8 +1251,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1250,8 +1271,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1279,8 +1301,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1298,8 +1321,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1327,8 +1351,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1346,8 +1371,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1373,8 +1399,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1392,8 +1419,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1419,8 +1447,9 @@ mod tests {
 			.build();
 
 		filter.find_matching_transaction(
-			&tx_receipt_matching,
+			&TransactionStatus::Success,
 			&tx_matching,
+			&tx_receipt_matching,
 			&monitor,
 			&mut matched,
 		);
@@ -1438,8 +1467,9 @@ mod tests {
 
 		matched.clear();
 		filter.find_matching_transaction(
-			&tx_receipt_non_matching,
+			&TransactionStatus::Success,
 			&tx_non_matching,
+			&tx_receipt_non_matching,
 			&monitor,
 			&mut matched,
 		);
