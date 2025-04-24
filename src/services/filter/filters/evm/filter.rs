@@ -2028,11 +2028,11 @@ mod tests {
 		assert!(!filter.evaluate_expression("amount > 1000", &args));
 
 		// Test with unsupported parameter type
-		let args = Some(vec![create_test_param("param", "value", "string")]);
+		let args = Some(vec![create_test_param("param", "value", "unsupported_type")]);
 		assert!(!filter.evaluate_expression("param == value", &args));
 
 		// Test with invalid expression format
-		let args = Some(vec![create_test_param("amount", "1000", "uint256")]);
+		let args = Some(vec![create_test_param("amount", "1000", "uint128")]);
 		assert!(!filter.evaluate_expression("amount > ", &args));
 		assert!(!filter.evaluate_expression("amount", &args));
 		assert!(!filter.evaluate_expression("> 1000", &args));
