@@ -53,7 +53,7 @@ impl<T> EVMBlockFilter<T> {
 		&self,
 		tx_status: &TransactionStatus,
 		transaction: &EVMTransaction,
-		_tx_receipt: &EVMTransactionReceipt,
+		tx_receipt: &EVMTransactionReceipt,
 		monitor: &Monitor,
 		matched_transactions: &mut Vec<TransactionCondition>,
 	) {
@@ -136,6 +136,12 @@ impl<T> EVMBlockFilter<T> {
 								name: "input".to_string(),
 								value: format!("0x{}", hex::encode(&transaction.input)),
 								kind: "string".to_string(),
+								indexed: false,
+							},
+							EVMMatchParamEntry {
+								name: "gas_used".to_string(),
+								value: tx_receipt.gas_used.unwrap_or_default().to_string(),
+								kind: "uint256".to_string(),
 								indexed: false,
 							},
 						];
@@ -1463,6 +1469,54 @@ mod tests {
 			.build();
 		let tx_receipt_non_matching = TestReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
+			.build();
+
+		matched.clear();
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&tx_non_matching,
+			&tx_receipt_non_matching,
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 0);
+	}
+
+	#[test]
+	fn test_gas_used_matching() {
+		let expression = "gas_used > 20000".to_string(); // more than 20k
+		let condition = TransactionCondition {
+			status: TransactionStatus::Any,
+			expression: Some(expression.clone()),
+		};
+		let filter = create_test_filter();
+		let mut matched = Vec::new();
+		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
+
+		// Test transaction with gas_used > 20k
+		let gas_used_matching = U256::from(30000); // 30k
+		let tx_matching = TestTransactionBuilder::new().build();
+		let tx_receipt_matching = TestReceiptBuilder::new()
+			.transaction_hash(tx_matching.hash)
+			.gas_used(gas_used_matching)
+			.build();
+
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&tx_matching,
+			&tx_receipt_matching,
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 1);
+		assert_eq!(matched[0].expression, Some(expression));
+
+		// Test transaction with gas_used < 20k
+		let gas_used_non_matching = U256::from(10000); // 10k
+		let tx_non_matching = TestTransactionBuilder::new().build();
+		let tx_receipt_non_matching = TestReceiptBuilder::new()
+			.transaction_hash(tx_non_matching.hash)
+			.gas_used(gas_used_non_matching)
 			.build();
 
 		matched.clear();
