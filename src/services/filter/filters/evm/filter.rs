@@ -7,7 +7,7 @@
 //! - Event log processing and filtering
 //! - ABI-based decoding of function calls and events
 
-use alloy::primitives::{U64, U256};
+use alloy::primitives::{U256, U64};
 use anyhow::Context;
 use async_trait::async_trait;
 use ethabi::Contract;
@@ -111,7 +111,10 @@ impl<T> EVMBlockFilter<T> {
 							},
 							EVMMatchParamEntry {
 								name: "max_priority_fee_per_gas".to_string(),
-								value: transaction.max_priority_fee_per_gas.unwrap_or_default().to_string(),
+								value: transaction
+									.max_priority_fee_per_gas
+									.unwrap_or_default()
+									.to_string(),
 								kind: "uint256".to_string(),
 								indexed: false,
 							},
@@ -125,6 +128,12 @@ impl<T> EVMBlockFilter<T> {
 								name: "nonce".to_string(),
 								value: transaction.nonce.to_string(),
 								kind: "uint256".to_string(),
+								indexed: false,
+							},
+							EVMMatchParamEntry {
+								name: "input".to_string(),
+								value: format!("0x{}", hex::encode(transaction.input.clone())),
+								kind: "string".to_string(),
 								indexed: false,
 							},
 						];
@@ -457,6 +466,18 @@ impl<T> EVMBlockFilter<T> {
 							false
 						}
 					},
+					"string" => {
+						match operator {
+							// case insensitive comparison
+							"==" => param.value.eq_ignore_ascii_case(value),
+							"!=" => !param.value.eq_ignore_ascii_case(value),
+							// TODO: consider adding "starts with","ends with", "contains", etc.
+							_ => {
+								tracing::warn!("Unsupported operator for Bytes type: {}", operator);
+								false
+							}
+						}
+					}
 					_ => {
 						tracing::warn!("Unsupported parameter type: {}", param.kind);
 						false
@@ -1277,7 +1298,6 @@ mod tests {
 			&mut matched,
 		);
 		assert_eq!(matched.len(), 0);
-
 	}
 
 	#[test]
@@ -1324,9 +1344,9 @@ mod tests {
 
 	#[test]
 	fn test_nonce_matching() {
-		let expression = "nonce == 5".to_string(); 
-		let nonce_matching = U256::from(5); 
-		let nonce_not_matching = U256::from(55); 
+		let expression = "nonce == 5".to_string();
+		let nonce_matching = U256::from(5);
+		let nonce_not_matching = U256::from(55);
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
 		let monitor = create_test_monitor(
@@ -1342,9 +1362,7 @@ mod tests {
 		// Test transaction with gas_limit > 20k
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new()
-				.nonce(nonce_matching)
-				.build(),
+			&TestTransactionBuilder::new().nonce(nonce_matching).build(),
 			&monitor,
 			&mut matched,
 		);
@@ -1357,6 +1375,43 @@ mod tests {
 			&TransactionStatus::Success,
 			&TestTransactionBuilder::new()
 				.nonce(nonce_not_matching)
+				.build(),
+			&monitor,
+			&mut matched,
+		);
+		assert_eq!(matched.len(), 0);
+	}
+
+	#[test]
+	fn test_input_matching() {
+		let expression = "input == 0x1234".to_string();
+		let input_matching = Bytes(hex::decode("1234").unwrap().into());
+		let input_not_matching = Bytes(hex::decode("5678").unwrap().into());
+		let filter = create_test_filter();
+		let mut matched = Vec::new();
+		let monitor = create_test_monitor(
+			vec![], // events
+			vec![], // functions
+			vec![TransactionCondition {
+				status: TransactionStatus::Any,
+				expression: Some(expression.clone()),
+			}], // transactions
+			vec![], // addresses
+		);
+
+		let tx = TestTransactionBuilder::new().input(input_matching).build();
+
+		// Test transaction with matching input
+		filter.find_matching_transaction(&TransactionStatus::Success, &tx, &monitor, &mut matched);
+		assert_eq!(matched.len(), 1);
+		assert_eq!(matched[0].expression, Some(expression));
+
+		// Test transaction with non-matching input
+		matched.clear();
+		filter.find_matching_transaction(
+			&TransactionStatus::Success,
+			&TestTransactionBuilder::new()
+				.input(input_not_matching)
 				.build(),
 			&monitor,
 			&mut matched,
