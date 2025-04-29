@@ -481,11 +481,17 @@ impl<T> EVMBlockFilter<T> {
 						}
 					},
 					"string" => {
+						// Perform case-insensitive comparisons for all string operators
+						let param_lower = param.value.to_lowercase();
+						let value_lower = value.to_lowercase();
+
 						match operator {
 							// case insensitive comparison
-							"==" => param.value.eq_ignore_ascii_case(value),
-							"!=" => !param.value.eq_ignore_ascii_case(value),
-							// TODO: consider adding "starts with","ends with", "contains", etc.
+							"==" => param_lower == value_lower,
+							"!=" => param_lower != value_lower,
+							"starts_with" => param_lower.starts_with(&value_lower),
+							"ends_with" => param_lower.ends_with(&value_lower),
+							"contains" => param_lower.contains(&value_lower),
 							_ => {
 								tracing::warn!(
 									"Unsupported operator for string type: {}",
@@ -2209,6 +2215,59 @@ mod tests {
 		assert!(!filter.evaluate_expression("amount > ", &args));
 		assert!(!filter.evaluate_expression("amount", &args));
 		assert!(!filter.evaluate_expression("> 1000", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_string_starts_with() {
+		let filter = create_test_filter();
+
+		// Test data
+		let args = Some(vec![
+			create_test_param("input", "0x1234567890abcdef", "string"),
+		]);
+
+		assert!(filter.evaluate_expression("input starts_with 0x1234", &args));
+		assert!(filter.evaluate_expression("input starts_with 0x1234567890abcdef", &args));
+		// case-insensitivity check
+		assert!(filter.evaluate_expression("input starts_with '0X1234'", &args)); 
+		// should evaluate false
+		assert!(!filter.evaluate_expression("input starts_with 0xabcd", &args));
+		assert!(!filter.evaluate_expression("input starts_with '1234'", &args)); // missing 0x
+	}
+
+	#[test]
+	fn test_evaluate_expression_string_ends_with() {
+		let filter = create_test_filter();
+
+		// Test data
+		let args = Some(vec![
+			create_test_param("input", "0x1234567890abcdef", "string"),
+		]);
+
+		assert!(filter.evaluate_expression("input ends_with abcdef", &args));
+		assert!(filter.evaluate_expression("input ends_with 0x1234567890abcdef", &args));
+		// should evaluate false
+		assert!(!filter.evaluate_expression("input ends_with 0x1234567890", &args));
+		// case-insensitivity check
+		assert!(filter.evaluate_expression("input ends_with 'ABCDEF'", &args)); 
+	}
+
+	#[test]
+	fn test_evaluate_expression_string_contains() {
+		let filter = create_test_filter();
+
+		// Test data
+		let args = Some(vec![
+			create_test_param("input", "0x1234567890abcdef", "string"),
+		]);
+
+		assert!(filter.evaluate_expression("input contains 567890", &args));
+		assert!(filter.evaluate_expression("input contains 0x1234", &args));
+		assert!(filter.evaluate_expression("input contains abcdef", &args));
+		assert!(!filter.evaluate_expression("input contains ffffff", &args));
+		// case-insensitivity checks
+		assert!(filter.evaluate_expression("input contains ABCDEF", &args)); 
+		assert!(filter.evaluate_expression("input contains 90aB", &args));
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
