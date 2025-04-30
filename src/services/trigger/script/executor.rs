@@ -64,7 +64,6 @@ impl ScriptExecutor for PythonScriptExecutor {
 			.stdin(Stdio::piped())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())
-			.kill_on_drop(true)
 			.spawn()
 			.with_context(|| "Failed to spawn python3 process")?;
 
@@ -104,10 +103,8 @@ impl ScriptExecutor for JavaScriptScriptExecutor {
 			.stdin(Stdio::piped())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())
-			.kill_on_drop(true)
 			.spawn()
 			.with_context(|| "Failed to spawn node process")?;
-
 		process_command(cmd, &input_json, timeout_ms, from_custom_notification).await
 	}
 }
@@ -145,7 +142,6 @@ impl ScriptExecutor for BashScriptExecutor {
 			.stdin(Stdio::piped())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())
-			.kill_on_drop(true)
 			.spawn()
 			.with_context(|| "Failed to spawn shell process")?;
 
