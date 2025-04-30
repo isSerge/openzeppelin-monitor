@@ -163,19 +163,45 @@ impl ConfigLoader for Monitor {
 			)?;
 		}
 
+		// Log a warning if the monitor uses an insecure protocol
+		self.validate_protocol();
+
 		Ok(())
+	}
+
+	/// Validate the safety of the protocols used in the monitor
+	///
+	/// Returns if safe, or logs a warning message if unsafe.
+	fn validate_protocol(&self) {
+		// Check script file permissions on Unix systems
+		#[cfg(unix)]
+		for condition in &self.trigger_conditions {
+			use std::os::unix::fs::PermissionsExt;
+			if let Ok(metadata) = std::fs::metadata(&condition.script_path) {
+				let permissions = metadata.permissions();
+				let mode = permissions.mode();
+				if mode & 0o022 != 0 {
+					tracing::warn!(
+						"Monitor '{}' trigger conditions script file has overly permissive write permissions: {}. The recommended permissions are `644` (`rw-r--r--`)",
+						self.name,
+						condition.script_path
+					);
+				}
+			}
+		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::models::core::{
-		AddressWithABI, EventCondition, FunctionCondition, MatchConditions, ScriptLanguage,
-		TransactionCondition, TransactionStatus, TriggerConditions,
+	use crate::{
+		models::core::{ScriptLanguage, TransactionStatus},
+		utils::tests::builders::evm::monitor::MonitorBuilder,
 	};
 	use std::collections::HashMap;
 	use tempfile::TempDir;
+	use tracing_test::traced_test;
 
 	#[test]
 	fn test_load_valid_monitor() {
@@ -318,47 +344,19 @@ mod tests {
 
 	#[test]
 	fn test_validate_monitor() {
-		let valid_monitor = Monitor {
-			name: "TestMonitor".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			addresses: vec![AddressWithABI {
-				address: "0x0000000000000000000000000000000000000000".to_string(),
-				abi: None,
-			}],
-			match_conditions: MatchConditions {
-				functions: vec![FunctionCondition {
-					signature: "transfer(address,uint256)".to_string(),
-					expression: None,
-				}],
-				events: vec![EventCondition {
-					signature: "Transfer(address,address,uint256)".to_string(),
-					expression: None,
-				}],
-				transactions: vec![TransactionCondition {
-					status: TransactionStatus::Success,
-					expression: None,
-				}],
-			},
-			trigger_conditions: vec![],
-			triggers: vec!["trigger1".to_string()],
-		};
+		let valid_monitor = MonitorBuilder::new()
+			.name("TestMonitor")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.address("0x0000000000000000000000000000000000000000")
+			.function("transfer(address,uint256)", None)
+			.event("Transfer(address,address,uint256)", None)
+			.transaction(TransactionStatus::Success, None)
+			.triggers(vec!["trigger1".to_string()])
+			.build();
 
 		assert!(valid_monitor.validate().is_ok());
 
-		let invalid_monitor = Monitor {
-			name: "".to_string(),
-			networks: vec![],
-			paused: false,
-			addresses: vec![],
-			match_conditions: MatchConditions {
-				functions: vec![],
-				events: vec![],
-				transactions: vec![],
-			},
-			trigger_conditions: vec![],
-			triggers: vec![],
-		};
+		let invalid_monitor = MonitorBuilder::new().name("").build();
 
 		assert!(invalid_monitor.validate().is_err());
 	}
@@ -375,36 +373,15 @@ mod tests {
 		std::env::set_current_dir(temp_dir.path()).unwrap();
 
 		// Test with valid script path
-		let valid_monitor = Monitor {
-			name: "TestMonitor".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			addresses: vec![AddressWithABI {
-				address: "0x0000000000000000000000000000000000000000".to_string(),
-				abi: None,
-			}],
-			match_conditions: MatchConditions {
-				functions: vec![FunctionCondition {
-					signature: "transfer(address,uint256)".to_string(),
-					expression: None,
-				}],
-				events: vec![EventCondition {
-					signature: "Transfer(address,address,uint256)".to_string(),
-					expression: None,
-				}],
-				transactions: vec![TransactionCondition {
-					status: TransactionStatus::Success,
-					expression: None,
-				}],
-			},
-			trigger_conditions: vec![TriggerConditions {
-				script_path: "test_script.py".to_string(),
-				timeout_ms: 1000,
-				arguments: None,
-				language: ScriptLanguage::Python,
-			}],
-			triggers: vec![],
-		};
+		let valid_monitor = MonitorBuilder::new()
+			.name("TestMonitor")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.address("0x0000000000000000000000000000000000000000")
+			.function("transfer(address,uint256)", None)
+			.event("Transfer(address,address,uint256)", None)
+			.transaction(TransactionStatus::Success, None)
+			.trigger_condition("test_script.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		assert!(valid_monitor.validate().is_ok());
 
@@ -414,24 +391,12 @@ mod tests {
 
 	#[test]
 	fn test_validate_monitor_with_invalid_script_path() {
-		let invalid_monitor = Monitor {
-			name: "TestMonitor".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			addresses: vec![],
-			match_conditions: MatchConditions {
-				functions: vec![],
-				events: vec![],
-				transactions: vec![],
-			},
-			trigger_conditions: vec![TriggerConditions {
-				script_path: "non_existent_script.py".to_string(),
-				timeout_ms: 1000,
-				arguments: None,
-				language: ScriptLanguage::Python,
-			}],
-			triggers: vec![],
-		};
+		let invalid_monitor = MonitorBuilder::new()
+			.name("TestMonitor")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("non_existent_script.py", 1000, ScriptLanguage::Python, None)
+			.build();
+
 		assert!(invalid_monitor.validate().is_err());
 	}
 
@@ -446,24 +411,12 @@ mod tests {
 		let original_dir = std::env::current_dir().unwrap();
 		std::env::set_current_dir(temp_dir.path()).unwrap();
 
-		let invalid_monitor = Monitor {
-			name: "TestMonitor".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			addresses: vec![],
-			match_conditions: MatchConditions {
-				functions: vec![],
-				events: vec![],
-				transactions: vec![],
-			},
-			trigger_conditions: vec![TriggerConditions {
-				script_path: "test_script.py".to_string(),
-				timeout_ms: 0,
-				arguments: None,
-				language: ScriptLanguage::Python,
-			}],
-			triggers: vec![],
-		};
+		let invalid_monitor = MonitorBuilder::new()
+			.name("TestMonitor")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("test_script.py", 0, ScriptLanguage::Python, None)
+			.build();
+
 		assert!(invalid_monitor.validate().is_err());
 
 		// Restore original directory
@@ -494,39 +447,37 @@ mod tests {
 		];
 
 		for (language, script_path) in test_cases {
-			let monitor = Monitor {
-				name: "TestMonitor".to_string(),
-				networks: vec!["ethereum_mainnet".to_string()],
-				paused: false,
-				addresses: vec![],
-				match_conditions: MatchConditions {
-					functions: vec![],
-					events: vec![],
-					transactions: vec![],
-				},
-				trigger_conditions: vec![TriggerConditions {
-					script_path: script_path.to_string_lossy().into_owned(),
-					timeout_ms: 1000,
-					arguments: None,
-					language: language.clone(),
-				}],
-				triggers: vec![],
-			};
+			let language_clone = language.clone();
+			let script_path_clone = script_path.clone();
+
+			let monitor = MonitorBuilder::new()
+				.name("TestMonitor")
+				.networks(vec!["ethereum_mainnet".to_string()])
+				.trigger_condition(
+					&script_path_clone.to_string_lossy(),
+					1000,
+					language_clone,
+					None,
+				)
+				.build();
+
 			assert!(monitor.validate().is_ok());
 
 			// Test with mismatched extension
 			let wrong_path = temp_path.join("test_script.wrong");
 			fs::write(&wrong_path, "test content").unwrap();
 
-			let monitor_wrong_ext = Monitor {
-				trigger_conditions: vec![TriggerConditions {
-					script_path: wrong_path.to_string_lossy().into_owned(),
+			let monitor_wrong_ext = MonitorBuilder::new()
+				.name("TestMonitor")
+				.networks(vec!["ethereum_mainnet".to_string()])
+				.trigger_condition(
+					&wrong_path.to_string_lossy(),
+					monitor.trigger_conditions[0].timeout_ms,
 					language,
-					timeout_ms: monitor.trigger_conditions[0].timeout_ms,
-					arguments: monitor.trigger_conditions[0].arguments.clone(),
-				}],
-				..monitor
-			};
+					monitor.trigger_conditions[0].arguments.clone(),
+				)
+				.build();
+
 			assert!(monitor_wrong_ext.validate().is_err());
 		}
 
@@ -569,5 +520,50 @@ mod tests {
 		if let Err(ConfigError::FileError(err)) = result {
 			assert!(err.message.contains("monitors directory not found"));
 		}
+	}
+
+	#[cfg(unix)]
+	#[test]
+	#[traced_test]
+	fn test_validate_protocol_script_permissions() {
+		use std::fs::File;
+		use std::os::unix::fs::PermissionsExt;
+		use tempfile::TempDir;
+
+		use crate::models::{MatchConditions, TriggerConditions};
+
+		let temp_dir = TempDir::new().unwrap();
+		let script_path = temp_dir.path().join("test_script.sh");
+		File::create(&script_path).unwrap();
+
+		// Set overly permissive permissions (777)
+		let metadata = std::fs::metadata(&script_path).unwrap();
+		let mut permissions = metadata.permissions();
+		permissions.set_mode(0o777);
+		std::fs::set_permissions(&script_path, permissions).unwrap();
+
+		let monitor = Monitor {
+			name: "TestMonitor".to_string(),
+			networks: vec!["ethereum_mainnet".to_string()],
+			paused: false,
+			addresses: vec![],
+			match_conditions: MatchConditions {
+				functions: vec![],
+				events: vec![],
+				transactions: vec![],
+			},
+			trigger_conditions: vec![TriggerConditions {
+				script_path: script_path.to_str().unwrap().to_string(),
+				timeout_ms: 1000,
+				arguments: None,
+				language: ScriptLanguage::Bash,
+			}],
+			triggers: vec![],
+		};
+
+		monitor.validate_protocol();
+		assert!(logs_contain(
+			"script file has overly permissive write permissions"
+		));
 	}
 }
