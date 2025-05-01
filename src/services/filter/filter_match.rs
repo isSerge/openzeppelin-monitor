@@ -240,3 +240,152 @@ pub async fn handle_match<T: TriggerExecutionServiceTrait>(
 	}
 	Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::{
+		models::{
+			EVMMatchArguments, EVMMatchParamEntry, EVMMatchParamsMap, EVMMonitorMatch,
+			FunctionCondition, MatchConditions, Monitor,
+		},
+		services::{
+			filter::evm_test_helpers::{TestReceiptBuilder, TestTransactionBuilder},
+			trigger::{TriggerError, TriggerExecutionServiceTrait},
+		},
+		utils::tests::evm::monitor::MonitorBuilder,
+	};
+	use std::collections::HashMap;
+	use std::sync::{Arc, Mutex};
+
+	// Mock trigger service for testing
+	struct MockTriggerService {
+		captured_data: std::sync::Arc<std::sync::Mutex<HashMap<String, String>>>,
+	}
+
+	#[async_trait::async_trait]
+	impl TriggerExecutionServiceTrait for MockTriggerService {
+		async fn execute(
+			&self,
+			_triggers: &[String],
+			data: HashMap<String, String>,
+			_matching_monitor: &MonitorMatch,
+			_trigger_scripts: &HashMap<String, (ScriptLanguage, String)>,
+		) -> Result<(), TriggerError> {
+			let mut captured = self.captured_data.lock().unwrap();
+			// Simulate capturing the data that would be used for templating
+			*captured = data;
+			Ok(())
+		}
+
+		async fn load_scripts(
+			&self,
+			_monitors: &[Monitor],
+		) -> Result<HashMap<String, (ScriptLanguage, String)>, TriggerError> {
+			// Return empty scripts for testing
+			Ok(HashMap::new())
+		}
+	}
+
+	/// Create a mock EVM monitor match for testing.
+	fn create_mock_evm_monitor_match(monitor: Monitor) -> EVMMonitorMatch {
+		let transaction = TestTransactionBuilder::new().build();
+		let receipt = TestReceiptBuilder::new().build();
+		EVMMonitorMatch {
+			monitor,
+			transaction,
+			receipt,
+			network_slug: "ethereum_mainnet".to_string(),
+			// Initialize empty, will be filled in by the test
+			matched_on: MatchConditions {
+				functions: vec![],
+				events: vec![],
+				transactions: vec![],
+			},
+			// Initialize empty, will be filled in by the test
+			matched_on_args: None,
+		}
+	}
+
+	#[tokio::test]
+	async fn test_key_collision_between_function_signature_and_arg_signature() {
+		// Define elements for the test
+		let function_signature_string = "dangerousFunc(bytes32 signature)".to_string();
+		let argument_name_colliding = "signature".to_string();
+		let argument_value_string = "0xarg_value_colliding_with_signature".to_string();
+		let expected_colliding_key = "function_0_signature".to_string();
+
+		// Create monitor with function that has "signature" parameter
+		let mut monitor = MonitorBuilder::new().build();
+		monitor.match_conditions.functions.push(FunctionCondition {
+			signature: "dangerousFunc(bytes32 signature)".to_string(),
+			expression: None,
+		});
+
+		// Create match with argument named "signature"
+		let mut evm_match = create_mock_evm_monitor_match(monitor);
+
+		// Set the `matched_on` conditions. This generates the *first* value for the key
+		evm_match.matched_on = MatchConditions {
+			functions: vec![FunctionCondition {
+				signature: function_signature_string.clone(), // This value should be overwritten
+				expression: None,
+			}],
+			events: vec![],
+			transactions: vec![],
+		};
+
+		// Set the `matched_on_args` conditions. This generates the *second* value for the key
+		evm_match.matched_on_args = Some(EVMMatchArguments {
+			functions: Some(vec![EVMMatchParamsMap {
+				signature: function_signature_string.clone(),
+				args: Some(vec![EVMMatchParamEntry {
+					name: argument_name_colliding.clone(), // The argument causing the collision
+					value: argument_value_string.clone(), // The value that will overwrite
+					kind: "bytes32".to_string(),
+					indexed: false,
+				}]),
+				hex_signature: Some("0xdeadbeef".to_string()),
+			}]),
+			events: None,
+		});
+
+		let match_wrapper = MonitorMatch::EVM(Box::new(evm_match));
+
+		// // Create mock execution service
+		let captured_data = Arc::new(Mutex::new(HashMap::new()));
+		let mock_service = MockTriggerService {
+			captured_data: captured_data.clone(),
+		};
+
+		// Process the match
+		handle_match(match_wrapper, &mock_service, &HashMap::new())
+			.await
+			.unwrap();
+
+		let data = captured_data.lock().unwrap();
+
+		// Verify key exists
+		assert!(
+			data.contains_key(&expected_colliding_key),
+			"The key '{}' should exist in the final data map.",
+			expected_colliding_key
+		);
+
+		// Verify value is the argument value, not the function signature
+		let actual_value = data.get(&expected_colliding_key).unwrap();
+
+		assert_eq!(
+			actual_value,
+			&argument_value_string,
+			"Collision Confirmed! The value for key '{}' should be the argument value '{}', but it seems to be overwritten. Expected original value was '{}'.",
+			expected_colliding_key,
+			argument_value_string,
+			function_signature_string
+		);
+
+		// Verify other expected keys are present (sanity check)
+		assert!(data.contains_key("transaction_hash"));
+		assert!(data.contains_key("monitor_name"));
+	}
+}
