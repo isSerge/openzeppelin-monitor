@@ -840,11 +840,8 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		services::filter::filters::evm::test_helpers::{
-			TestReceiptBuilder, TestTransactionBuilder,
-		},
-		utils::tests::evm::monitor::MonitorBuilder,
+	use crate::utils::tests::evm::{
+		monitor::MonitorBuilder, receipt::TestReceiptBuilder, transaction::TestTransactionBuilder,
 	};
 
 	use super::*;

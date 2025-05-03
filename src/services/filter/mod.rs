@@ -13,7 +13,6 @@ pub use error::FilterError;
 pub use filter_match::handle_match;
 
 pub use filters::{
-	evm::helpers as evm_helpers, evm::test_helpers as evm_test_helpers,
-	stellar::helpers as stellar_helpers, BlockFilter, EVMBlockFilter, FilterService,
-	StellarBlockFilter,
+	evm::helpers as evm_helpers, stellar::helpers as stellar_helpers, BlockFilter, EVMBlockFilter,
+	FilterService, StellarBlockFilter,
 };

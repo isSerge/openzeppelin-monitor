@@ -15,11 +15,10 @@ use openzeppelin_monitor::{
 			evm_helpers::{
 				are_same_address, are_same_signature, normalize_address, normalize_signature,
 			},
-			evm_test_helpers::TestReceiptBuilder,
 			EVMBlockFilter,
 		},
 	},
-	utils::tests::evm::monitor::MonitorBuilder,
+	utils::tests::evm::{monitor::MonitorBuilder, receipt::TestReceiptBuilder},
 };
 use proptest::{prelude::*, test_runner::Config};
 use serde_json::json;
