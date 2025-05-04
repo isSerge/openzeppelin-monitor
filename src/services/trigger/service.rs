@@ -3,7 +3,7 @@
 //! Provides functionality to execute triggers with variable substitution
 //! and notification delivery. Manages trigger lookup and execution flow.
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -29,7 +29,7 @@ pub trait TriggerExecutionServiceTrait {
 	) -> Result<(), TriggerError>;
 	async fn load_scripts(
 		&self,
-		monitors: &[Monitor],
+		monitors: &[Arc<Monitor>],
 	) -> Result<HashMap<String, (ScriptLanguage, String)>, TriggerError>;
 }
 
@@ -144,7 +144,7 @@ impl<T: TriggerRepositoryTrait + Send + Sync> TriggerExecutionServiceTrait
 	/// - Returns `TriggerError::ConfigurationError` if script files cannot be read
 	async fn load_scripts(
 		&self,
-		monitors: &[Monitor],
+		monitors: &[Arc<Monitor>],
 	) -> Result<HashMap<String, (ScriptLanguage, String)>, TriggerError> {
 		let mut scripts = HashMap::new();
 

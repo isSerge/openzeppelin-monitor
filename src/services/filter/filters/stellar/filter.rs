@@ -7,6 +7,8 @@
 //! - Evaluate complex matching expressions
 
 use std::marker::PhantomData;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -1030,7 +1032,7 @@ impl<T: BlockChainClient + StellarClientTrait> BlockFilter for StellarBlockFilte
 		client: &Self::Client,
 		network: &Network,
 		block: &BlockType,
-		monitors: &[Monitor],
+		monitors: &[Arc<Monitor>],
 	) -> Result<Vec<MonitorMatch>, FilterError> {
 		let stellar_block = match block {
 			BlockType::Stellar(block) => block,
@@ -1081,10 +1083,10 @@ impl<T: BlockChainClient + StellarClientTrait> BlockFilter for StellarBlockFilte
 		let mut matching_results = Vec::new();
 
 		// Process each monitor first
-		for monitor in monitors {
-			tracing::debug!("Processing monitor: {}", monitor.name);
+		for monitor_arc in monitors {
+			tracing::debug!("Processing monitor: {}", monitor_arc.name);
 
-			let monitored_addresses = monitor
+			let monitored_addresses = monitor_arc
 				.addresses
 				.iter()
 				.map(|addr| normalize_address(&addr.address))
@@ -1104,14 +1106,14 @@ impl<T: BlockChainClient + StellarClientTrait> BlockFilter for StellarBlockFilte
 
 				tracing::debug!("Processing transaction: {:?}", transaction.hash());
 
-				self.find_matching_transaction(transaction, monitor, &mut matched_transactions);
+				self.find_matching_transaction(transaction, monitor_arc, &mut matched_transactions);
 
 				// Decoded events already account for monitored addresses, so no need to pass in
 				// monitored_addresses
 				self.find_matching_events_for_transaction(
 					&decoded_events,
 					transaction,
-					monitor,
+					monitor_arc,
 					&mut matched_events,
 					&mut matched_on_args,
 				);
@@ -1119,12 +1121,12 @@ impl<T: BlockChainClient + StellarClientTrait> BlockFilter for StellarBlockFilte
 				self.find_matching_functions_for_transaction(
 					&monitored_addresses,
 					transaction,
-					monitor,
+					monitor_arc,
 					&mut matched_functions,
 					&mut matched_on_args,
 				);
 
-				let monitor_conditions = &monitor.match_conditions;
+				let monitor_conditions = &monitor_arc.match_conditions;
 				let has_event_match =
 					!monitor_conditions.events.is_empty() && !matched_events.is_empty();
 				let has_function_match =
@@ -1153,7 +1155,7 @@ impl<T: BlockChainClient + StellarClientTrait> BlockFilter for StellarBlockFilte
 
 				if should_match {
 					matching_results.push(MonitorMatch::Stellar(Box::new(StellarMonitorMatch {
-						monitor: monitor.clone(),
+						monitor: monitor_arc.deref().clone(),
 						// The conversion to StellarTransaction triggers decoding of the transaction
 						#[allow(clippy::useless_conversion)]
 						transaction: StellarTransaction::from(transaction.clone()),

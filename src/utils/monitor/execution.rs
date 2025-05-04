@@ -55,13 +55,13 @@ pub async fn execute_monitor<
 	client_pool: T,
 ) -> ExecutionResult<String> {
 	tracing::debug!("Loading monitor configuration");
-	let monitor = monitor_service
+	let monitor_arc = monitor_service
 		.lock()
 		.await
 		.load_from_path(Some(Path::new(monitor_path)), None, None)
 		.map_err(|e| MonitorExecutionError::execution_error(e.to_string(), None, None))?;
 
-	tracing::debug!(monitor_name = %monitor.name, "Monitor loaded successfully");
+	tracing::debug!(monitor_name = %monitor_arc.name, "Monitor loaded successfully");
 
 	let networks_for_monitor = if let Some(network_slug) = network_slug {
 		tracing::debug!(network = %network_slug, "Finding specific network");
@@ -84,7 +84,7 @@ pub async fn execute_monitor<
 			.await
 			.get_all()
 			.values()
-			.filter(|network| has_active_monitors(&[monitor.clone()], &network.slug))
+			.filter(|network| has_active_monitors(&[monitor_arc.clone()], &network.slug))
 			.cloned()
 			.collect()
 	};
@@ -145,7 +145,7 @@ pub async fn execute_monitor<
 
 				tracing::debug!(block = %block_number, "Filtering block");
 				filter_service
-					.filter_block(&*client, &network, block, &[monitor.clone()])
+					.filter_block(&*client, &network, block, &[Arc::clone(&monitor_arc)])
 					.await
 					.map_err(|e| {
 						MonitorExecutionError::execution_error(
@@ -192,7 +192,7 @@ pub async fn execute_monitor<
 				})?;
 
 				filter_service
-					.filter_block(&*client, &network, block, &[monitor.clone()])
+					.filter_block(&*client, &network, block, &[Arc::clone(&monitor_arc)])
 					.await
 					.map_err(|e| {
 						MonitorExecutionError::execution_error(

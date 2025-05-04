@@ -16,6 +16,7 @@ pub mod stellar {
 }
 
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::{
 	models::{BlockType, Monitor, MonitorMatch, Network},
@@ -36,7 +37,7 @@ pub trait BlockFilter {
 		client: &Self::Client,
 		network: &Network,
 		block: &BlockType,
-		monitors: &[Monitor],
+		monitors: &[Arc<Monitor>],
 	) -> Result<Vec<MonitorMatch>, FilterError>;
 }
 
@@ -63,7 +64,7 @@ impl FilterService {
 		client: &T,
 		network: &Network,
 		block: &BlockType,
-		monitors: &[Monitor],
+		monitors: &[Arc<Monitor>],
 	) -> Result<Vec<MonitorMatch>, FilterError> {
 		let filter = T::filter();
 		filter.filter_block(client, network, block, monitors).await

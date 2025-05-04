@@ -518,7 +518,7 @@ async fn main() -> Result<()> {
 
 	let networks_with_monitors: Vec<Network> = networks
 		.values()
-		.filter(|network| has_active_monitors(&active_monitors.clone(), &network.slug))
+		.filter(|network| has_active_monitors(&active_monitors, &network.slug))
 		.cloned()
 		.collect();
 

@@ -6,7 +6,7 @@
 
 #![allow(clippy::result_large_err)]
 
-use std::{collections::HashMap, marker::PhantomData, path::Path};
+use std::{collections::HashMap, marker::PhantomData, path::Path, sync::Arc};
 
 use crate::{
 	models::{ConfigLoader, Monitor, Network, ScriptLanguage, Trigger},
@@ -28,7 +28,7 @@ const LANGUAGE_EXTENSIONS: &[(&ScriptLanguage, &str)] = &[
 #[derive(Clone)]
 pub struct MonitorRepository<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> {
 	/// Map of monitor names to their configurations
-	pub monitors: HashMap<String, Monitor>,
+	pub monitors: HashMap<String, Arc<Monitor>>,
 	_network_repository: PhantomData<N>,
 	_trigger_repository: PhantomData<T>,
 }
@@ -53,8 +53,14 @@ impl<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> MonitorRepository<N, 
 
 	/// Create a new monitor repository from a list of monitors
 	pub fn new_with_monitors(monitors: HashMap<String, Monitor>) -> Self {
+		// Convert the input map's values to Arc<Monitor>
+		let arc_monitors: HashMap<String, Arc<Monitor>> = monitors
+			.into_iter()
+			.map(|(key, monitor)| (key, Arc::new(monitor)))
+			.collect();
+
 		MonitorRepository {
-			monitors,
+			monitors: arc_monitors,
 			_network_repository: PhantomData,
 			_trigger_repository: PhantomData,
 		}
@@ -182,7 +188,7 @@ pub trait MonitorRepositoryTrait<N: NetworkRepositoryTrait, T: TriggerRepository
 		path: Option<&Path>,
 		network_service: Option<NetworkService<N>>,
 		trigger_service: Option<TriggerService<T>>,
-	) -> Result<HashMap<String, Monitor>, RepositoryError>;
+	) -> Result<HashMap<String, Arc<Monitor>>, RepositoryError>;
 
 	/// Load a monitor from a specific path
 	///
@@ -192,17 +198,17 @@ pub trait MonitorRepositoryTrait<N: NetworkRepositoryTrait, T: TriggerRepository
 		path: Option<&Path>,
 		network_service: Option<NetworkService<N>>,
 		trigger_service: Option<TriggerService<T>>,
-	) -> Result<Monitor, RepositoryError>;
+	) -> Result<Arc<Monitor>, RepositoryError>;
 
 	/// Get a specific monitor by ID
 	///
 	/// Returns None if the monitor doesn't exist.
-	fn get(&self, monitor_id: &str) -> Option<Monitor>;
+	fn get(&self, monitor_id: &str) -> Option<Arc<Monitor>>;
 
 	/// Get all monitors
 	///
 	/// Returns a copy of the monitor map to prevent external mutation.
-	fn get_all(&self) -> HashMap<String, Monitor>;
+	fn get_all(&self) -> HashMap<String, Arc<Monitor>>;
 }
 
 impl<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> MonitorRepositoryTrait<N, T>
@@ -220,8 +226,8 @@ impl<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> MonitorRepositoryTrai
 		path: Option<&Path>,
 		network_service: Option<NetworkService<N>>,
 		trigger_service: Option<TriggerService<T>>,
-	) -> Result<HashMap<String, Monitor>, RepositoryError> {
-		let monitors = Monitor::load_all(path).map_err(|e| {
+	) -> Result<HashMap<String, Arc<Monitor>>, RepositoryError> {
+		let owned_monitors = Monitor::load_all(path).map_err(|e| {
 			RepositoryError::load_error(
 				"Failed to load monitors",
 				Some(Box::new(e)),
@@ -262,8 +268,15 @@ impl<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> MonitorRepositoryTrai
 			}
 		};
 
-		Self::validate_monitor_references(&monitors, &triggers, &networks)?;
-		Ok(monitors)
+		Self::validate_monitor_references(&owned_monitors, &triggers, &networks)?;
+
+		// Convert to HashMap<String, Arc<Monitor>> *after* validation
+		let arc_monitors: HashMap<String, Arc<Monitor>> = owned_monitors
+			.into_iter()
+			.map(|(name, monitor)| (name, Arc::new(monitor)))
+			.collect();
+
+		Ok(arc_monitors)
 	}
 
 	/// Load a monitor from a specific path
@@ -274,10 +287,10 @@ impl<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> MonitorRepositoryTrai
 		path: Option<&Path>,
 		network_service: Option<NetworkService<N>>,
 		trigger_service: Option<TriggerService<T>>,
-	) -> Result<Monitor, RepositoryError> {
+	) -> Result<Arc<Monitor>, RepositoryError> {
 		match path {
 			Some(path) => {
-				let monitor = Monitor::load_from_path(path).map_err(|e| {
+				let owned_monitor = Monitor::load_from_path(path).map_err(|e| {
 					RepositoryError::load_error(
 						"Failed to load monitors",
 						Some(Box::new(e)),
@@ -297,12 +310,15 @@ impl<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> MonitorRepositoryTrai
 					Some(service) => service.get_all(),
 					None => TriggerRepository::new(None)?.triggers,
 				};
-				let monitors = HashMap::from([(monitor.name.clone(), monitor)]);
-				Self::validate_monitor_references(&monitors, &triggers, &networks)?;
-				match monitors.values().next() {
-					Some(monitor) => Ok(monitor.clone()),
-					None => Err(RepositoryError::load_error("No monitors found", None, None)),
-				}
+				let monitors_for_validation =
+					HashMap::from([(owned_monitor.name.clone(), owned_monitor.clone())]);
+				Self::validate_monitor_references(&monitors_for_validation, &triggers, &networks)?;
+				// match monitors.values().next() {
+				// 	Some(monitor) => Ok(monitor.clone()),
+				// 	None => Err(RepositoryError::load_error("No monitors found", None, None)),
+				// }
+
+				Ok(Arc::new(owned_monitor))
 			}
 			None => Err(RepositoryError::load_error(
 				"Failed to load monitors",
@@ -312,11 +328,11 @@ impl<N: NetworkRepositoryTrait, T: TriggerRepositoryTrait> MonitorRepositoryTrai
 		}
 	}
 
-	fn get(&self, monitor_id: &str) -> Option<Monitor> {
-		self.monitors.get(monitor_id).cloned()
+	fn get(&self, monitor_id: &str) -> Option<Arc<Monitor>> {
+		self.monitors.get(monitor_id).map(Arc::clone)
 	}
 
-	fn get_all(&self) -> HashMap<String, Monitor> {
+	fn get_all(&self) -> HashMap<String, Arc<Monitor>> {
 		self.monitors.clone()
 	}
 }
@@ -384,14 +400,14 @@ impl<M: MonitorRepositoryTrait<N, T>, N: NetworkRepositoryTrait, T: TriggerRepos
 	/// Get a specific monitor by ID
 	///
 	/// Returns None if the monitor doesn't exist.
-	pub fn get(&self, monitor_id: &str) -> Option<Monitor> {
+	pub fn get(&self, monitor_id: &str) -> Option<Arc<Monitor>> {
 		self.repository.get(monitor_id)
 	}
 
 	/// Get all monitors
 	///
 	/// Returns a copy of the monitor map to prevent external mutation.
-	pub fn get_all(&self) -> HashMap<String, Monitor> {
+	pub fn get_all(&self) -> HashMap<String, Arc<Monitor>> {
 		self.repository.get_all()
 	}
 
@@ -403,7 +419,7 @@ impl<M: MonitorRepositoryTrait<N, T>, N: NetworkRepositoryTrait, T: TriggerRepos
 		path: Option<&Path>,
 		network_service: Option<NetworkService<N>>,
 		trigger_service: Option<TriggerService<T>>,
-	) -> Result<Monitor, RepositoryError> {
+	) -> Result<Arc<Monitor>, RepositoryError> {
 		self.repository
 			.load_from_path(path, network_service, trigger_service)
 	}

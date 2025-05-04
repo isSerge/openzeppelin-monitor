@@ -6,6 +6,7 @@
 pub mod server;
 use lazy_static::lazy_static;
 use prometheus::{Encoder, Gauge, GaugeVec, Opts, Registry, TextEncoder};
+use std::sync::Arc;
 use sysinfo::{Disks, System};
 
 lazy_static! {
@@ -198,7 +199,7 @@ pub fn update_system_metrics() {
 
 /// Updates metrics related to monitors, triggers, networks, and contracts.
 pub fn update_monitoring_metrics(
-	monitors: &std::collections::HashMap<String, crate::models::Monitor>,
+	monitors: &std::collections::HashMap<String, Arc<crate::models::Monitor>>,
 	triggers: &std::collections::HashMap<String, crate::models::Trigger>,
 	networks: &std::collections::HashMap<String, crate::models::Network>,
 ) {
@@ -322,8 +323,8 @@ mod tests {
 		networks: Vec<String>,
 		addresses: Vec<String>,
 		paused: bool,
-	) -> Monitor {
-		Monitor {
+	) -> Arc<Monitor> {
+		Arc::new(Monitor {
 			name: name.to_string(),
 			networks,
 			addresses: addresses
@@ -352,7 +353,7 @@ mod tests {
 				timeout_ms: 5000,
 			}],
 			triggers: vec!["trigger1".to_string()],
-		}
+		})
 	}
 
 	fn create_test_trigger(name: &str) -> Trigger {

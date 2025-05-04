@@ -45,7 +45,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type ServiceResult<M, N, T> = Result<(
 	Arc<FilterService>,
 	Arc<TriggerExecutionService<T>>,
-	Vec<Monitor>,
+	Vec<Arc<Monitor>>,
 	HashMap<String, Network>,
 	Arc<Mutex<MonitorService<M, N, T>>>,
 	Arc<Mutex<NetworkService<N>>>,
@@ -139,7 +139,7 @@ where
 pub fn create_block_handler<P: ClientPoolTrait + 'static>(
 	shutdown_tx: watch::Sender<bool>,
 	filter_service: Arc<FilterService>,
-	active_monitors: Vec<Monitor>,
+	active_monitors: Vec<Arc<Monitor>>,
 	client_pools: Arc<P>,
 ) -> Arc<impl Fn(BlockType, Network) -> BoxFuture<'static, ProcessedBlock> + Send + Sync> {
 	Arc::new(
@@ -217,7 +217,7 @@ pub async fn process_block<T>(
 	client: &T,
 	network: &Network,
 	block: &BlockType,
-	applicable_monitors: &[Monitor],
+	applicable_monitors: &[Arc<Monitor>],
 	filter_service: &FilterService,
 	shutdown_rx: &mut watch::Receiver<bool>,
 ) -> Option<Vec<MonitorMatch>>
@@ -284,7 +284,7 @@ pub fn create_trigger_handler<S: TriggerExecutionServiceTrait + Send + Sync + 's
 ///
 /// # Returns
 /// Returns true if there are any active monitors for the given network
-pub fn has_active_monitors(monitors: &[Monitor], network_slug: &String) -> bool {
+pub fn has_active_monitors(monitors: &[Arc<Monitor>], network_slug: &String) -> bool {
 	monitors
 		.iter()
 		.any(|m| m.networks.contains(network_slug) && !m.paused)
@@ -297,11 +297,8 @@ pub fn has_active_monitors(monitors: &[Monitor], network_slug: &String) -> bool 
 ///
 /// # Returns
 /// Returns a vector containing only active (non-paused) monitors
-fn filter_active_monitors(monitors: HashMap<String, Monitor>) -> Vec<Monitor> {
-	monitors
-		.into_values()
-		.filter(|m| !m.paused)
-		.collect::<Vec<_>>()
+fn filter_active_monitors(monitors: HashMap<String, Arc<Monitor>>) -> Vec<Arc<Monitor>> {
+	monitors.into_values().filter(|m| !m.paused).collect()
 }
 
 /// Filters monitors that are applicable to a specific network.
@@ -312,7 +309,7 @@ fn filter_active_monitors(monitors: HashMap<String, Monitor>) -> Vec<Monitor> {
 ///
 /// # Returns
 /// Returns a vector of monitors that are configured for the specified network
-fn filter_network_monitors(monitors: &[Monitor], network_slug: &String) -> Vec<Monitor> {
+fn filter_network_monitors(monitors: &[Arc<Monitor>], network_slug: &String) -> Vec<Arc<Monitor>> {
 	monitors
 		.iter()
 		.filter(|m| m.networks.contains(network_slug))
@@ -405,6 +402,7 @@ mod tests {
 		primitives::{Address, Bytes, TxKind, B256, U256},
 	};
 	use std::io::Write;
+	use std::ops::Deref;
 	use tempfile::NamedTempFile;
 
 	// Helper function to create a temporary script file
@@ -418,8 +416,8 @@ mod tests {
 		networks: Vec<&str>,
 		paused: bool,
 		script_path: Option<&str>,
-	) -> Monitor {
-		Monitor {
+	) -> Arc<Monitor> {
+		Arc::new(Monitor {
 			name: name.to_string(),
 			networks: networks.into_iter().map(|s| s.to_string()).collect(),
 			paused,
@@ -430,7 +428,7 @@ mod tests {
 				arguments: None,
 			}],
 			..Default::default()
-		}
+		})
 	}
 
 	fn create_test_evm_transaction_receipt() -> EVMTransactionReceipt {
@@ -499,7 +497,9 @@ mod tests {
 	) -> MonitorMatch {
 		match blockchain_type {
 			BlockChainType::EVM => MonitorMatch::EVM(Box::new(EVMMonitorMatch {
-				monitor: create_test_monitor("test", vec![], false, script_path),
+				monitor: create_test_monitor("test", vec![], false, script_path)
+					.deref()
+					.clone(),
 				transaction: create_test_evm_transaction(),
 				receipt: create_test_evm_transaction_receipt(),
 				network_slug: "ethereum_mainnet".to_string(),
@@ -511,7 +511,9 @@ mod tests {
 				matched_on_args: None,
 			})),
 			BlockChainType::Stellar => MonitorMatch::Stellar(Box::new(StellarMonitorMatch {
-				monitor: create_test_monitor("test", vec![], false, script_path),
+				monitor: create_test_monitor("test", vec![], false, script_path)
+					.deref()
+					.clone(),
 				transaction: create_test_stellar_transaction(),
 				ledger: create_test_stellar_block(),
 				network_slug: "stellar_mainnet".to_string(),

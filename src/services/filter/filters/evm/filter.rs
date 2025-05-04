@@ -12,6 +12,8 @@ use anyhow::Context;
 use async_trait::async_trait;
 use ethabi::Contract;
 use serde_json::Value;
+use std::ops::Deref;
+use std::sync::Arc;
 use std::{marker::PhantomData, str::FromStr};
 use tracing::instrument;
 
@@ -535,7 +537,7 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 		client: &T,
 		network: &Network,
 		block: &BlockType,
-		monitors: &[Monitor],
+		monitors: &[Arc<Monitor>],
 	) -> Result<Vec<MonitorMatch>, FilterError> {
 		let evm_block = match block {
 			BlockType::EVM(block) => block,
@@ -596,9 +598,9 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 
 		tracing::debug!("Processing {} monitor(s)", monitors.len());
 
-		for monitor in monitors {
-			tracing::debug!("Processing monitor: {:?}", monitor.name);
-			let monitored_addresses: Vec<String> = monitor
+		for monitor_arc in monitors {
+			tracing::debug!("Processing monitor: {:?}", monitor_arc.name);
+			let monitored_addresses: Vec<String> = monitor_arc
 				.addresses
 				.iter()
 				.map(|a| a.address.clone())
@@ -643,14 +645,14 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 					self.find_matching_transaction(
 						&tx_status,
 						transaction,
-						monitor,
+						monitor_arc,
 						&mut matched_transactions,
 					);
 
 					// Check for event match conditions
 					self.find_matching_events_for_transaction(
 						receipt,
-						monitor,
+						monitor_arc,
 						&mut matched_events,
 						&mut matched_on_args,
 						&mut involved_addresses,
@@ -660,7 +662,7 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 					// Check function match conditions
 					self.find_matching_functions_for_transaction(
 						transaction,
-						monitor,
+						monitor_arc,
 						&mut matched_functions,
 						&mut matched_on_args,
 					);
@@ -679,7 +681,7 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 
 					// Only proceed if we have a matching address
 					if has_address_match {
-						let monitor_conditions = &monitor.match_conditions;
+						let monitor_conditions = &monitor_arc.match_conditions;
 						let has_event_match =
 							!monitor_conditions.events.is_empty() && !matched_events.is_empty();
 						let has_function_match = !monitor_conditions.functions.is_empty()
@@ -708,18 +710,7 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 
 						if should_match {
 							matching_results.push(MonitorMatch::EVM(Box::new(EVMMonitorMatch {
-								monitor: Monitor {
-									// Omit ABI from monitor since we do not need it here
-									addresses: monitor
-										.addresses
-										.iter()
-										.map(|addr| AddressWithABI {
-											abi: None,
-											..addr.clone()
-										})
-										.collect(),
-									..monitor.clone()
-								},
+								monitor: monitor_arc.deref().clone(),
 								transaction: transaction.clone(),
 								receipt: receipt.clone(),
 								network_slug: network.slug.clone(),
