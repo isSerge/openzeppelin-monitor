@@ -19,19 +19,42 @@ where
 	// Split by OR to get highest level conditions
 	let or_conditions: Vec<&str> = expression.split(" OR ").collect();
 
+	// Check for invalid structure at OR level (e.g., "A OR OR B", " OR B", "A OR ")
+	if or_conditions.iter().any(|s| s.trim().is_empty()) {
+		tracing::warn!("evaluate_expression_core: Invalid expression structure due to empty OR part(s). Expression: '{}'", expression);
+		return false;
+	}
+
 	// For OR logic, any condition being true makes the whole expression true
 	for or_condition in or_conditions {
-		// Split each OR condition by AND
-		let and_conditions: Vec<&str> = or_condition.trim().split(" AND ").collect();
+		let trimmed_or_condition = or_condition.trim();
 
-		// All AND conditions must be true
-		let and_result = and_conditions.iter().all(|condition| {
+		// Split each OR condition by AND
+		let and_conditions: Vec<&str> = trimmed_or_condition.trim().split(" AND ").collect();
+
+		tracing::trace!(
+			"evaluate_expression_core: RAND conditions for OR part '{}': {:?}",
+			trimmed_or_condition,
+			and_conditions
+		);
+
+		// Check for invalid structure at AND level (e.g., "A AND AND B", " AND B", "A AND ")
+		if and_conditions.iter().any(|s| s.trim().is_empty()) {
+			tracing::warn!("evaluate_expression_core: Invalid AND group structure due to empty AND part(s). Group: '{}'. Treating this OR branch as false.", trimmed_or_condition);
+			continue; // This OR branch is false, try the next one.
+		}
+
+		// Evaluate all valid AND conditions within this OR branch
+		let mut current_and_group_result = true; // Assume true unless a condition fails
+
+		for condition_str in and_conditions {
 			// Remove any surrounding parentheses and trim
-			let clean_condition = condition.trim().trim_matches(|c| c == '(' || c == ')');
+			let clean_condition = condition_str.trim().trim_matches(|c| c == '(' || c == ')');
 
 			if clean_condition.is_empty() {
-				tracing::warn!("Empty condition found after splitting: {}", condition);
-				return false;
+				tracing::warn!("Empty condition found after splitting: {}", condition_str);
+				current_and_group_result = false;
+				break;
 			}
 
 			// Split into parts
@@ -39,28 +62,42 @@ where
 				vec![left, operator, right]
 			} else {
 				tracing::warn!("Invalid expression format: {}", clean_condition);
-				return false;
+				current_and_group_result = false;
+				break;
 			};
 
 			let param_expr = parts[0];
 			let operator = parts[1];
 			let value = parts[2];
 
+			// Evaluate the condition using the provided closure
 			let condition_result = eval_single_condition(param_expr, operator, value);
 
 			tracing::trace!(
-				"Condition '{} {} {}' evaluated to: {}",
+				"Condition '{}' {} {} evaluated to: {}",
 				param_expr,
 				operator,
 				value,
 				condition_result
 			);
 
-			condition_result
-		});
+			if !condition_result {
+				current_and_group_result = false; // If any condition is false, the AND group is false
+				break;
+			}
+		}
 
-		// If any OR condition is true, return true
-		if and_result {
+		tracing::trace!(
+			"evaluate_expression_core: Result for AND group '{}': {}",
+			trimmed_or_condition,
+			current_and_group_result
+		);
+
+		if current_and_group_result {
+			tracing::debug!(
+				"evaluate_expression_core: Expression evaluated to true. OR branch succeeded: '{}'",
+				trimmed_or_condition
+			);
 			return true;
 		}
 	}
@@ -95,17 +132,15 @@ mod tests {
 
 	#[test]
 	fn test_core_single_condition() {
-		let conditions_true = HashMap::from([("a == 1", true)]);
+		let conditions = HashMap::from([("a == 1", true)]);
 		assert!(evaluate_expression_core(
 			"a == 1",
-			eval_simple_conditions(&conditions_true)
+			eval_simple_conditions(&conditions)
 		));
-
-		let conditions_false = HashMap::from([("a == 1", false)]);
 		assert!(!evaluate_expression_core(
-			"a == 1",
-			eval_simple_conditions(&conditions_false)
-		));
+			"b == 2",
+			eval_simple_conditions(&conditions)
+		)); // Condition not in map -> false
 	}
 
 	#[test]
@@ -220,42 +255,84 @@ mod tests {
 	}
 
 	#[test]
-	fn test_core_invalid_expressions() {
-		// Conditions are irrelevant for invalid expressions, because they should fail anyway
+	fn test_core_invalid_syntax_structural() {
+		// Conditions are irrelevant here, the structure itself should cause failure
 		let conditions = HashMap::new();
 
-		// Missing expression parts
-		assert!(!evaluate_expression_core(
-			"amount > ",
-			eval_simple_conditions(&conditions)
-		));
+		// Incomplete operators
+		assert!(
+			!evaluate_expression_core("a == 1 AND ", eval_simple_conditions(&conditions)),
+			"Trailing AND"
+		);
+		assert!(
+			!evaluate_expression_core(" AND a == 1", eval_simple_conditions(&conditions)),
+			"Leading AND"
+		);
+		assert!(
+			!evaluate_expression_core("a == 1 OR ", eval_simple_conditions(&conditions)),
+			"Trailing OR"
+		);
+		assert!(
+			!evaluate_expression_core("OR a == 1", eval_simple_conditions(&conditions)),
+			"Leading OR"
+		);
 
-		assert!(!evaluate_expression_core(
-			"amount",
-			eval_simple_conditions(&conditions)
-		));
-		
-		assert!(!evaluate_expression_core(
-			"> 1000",
-			eval_simple_conditions(&conditions)
-		));
+		// Double operators
+		assert!(
+			!evaluate_expression_core("a == 1 AND AND b == 2", eval_simple_conditions(&conditions)),
+			"Double AND"
+		);
+		assert!(
+			!evaluate_expression_core("a == 1 OR OR b == 2", eval_simple_conditions(&conditions)),
+			"Double OR"
+		);
 
-		assert!(!evaluate_expression_core(
-			"value 100",
-			eval_simple_conditions(&conditions)
-		));
+		// Only operators
+		assert!(
+			!evaluate_expression_core(" AND ", eval_simple_conditions(&conditions)),
+			"Only AND"
+		);
+		assert!(
+			!evaluate_expression_core(" OR ", eval_simple_conditions(&conditions)),
+			"Only OR"
+		);
 
-		// Invalid condition format
-		assert!(!evaluate_expression_core(
-			"value == 100 invalid",
-			eval_simple_conditions(&conditions)
-		));
+		// Empty condition from parentheses
+		assert!(
+			!evaluate_expression_core("( )", eval_simple_conditions(&conditions)),
+			"Empty parentheses"
+		);
+		assert!(
+			!evaluate_expression_core("a == 1 AND ( )", eval_simple_conditions(&conditions)),
+			"AND empty parentheses"
+		);
+	}
 
-		// Invalid operator
-		assert!(!evaluate_expression_core(
-			"value invalid 100",
-			eval_simple_conditions(&conditions)
-		));
+	#[test]
+	fn test_core_invalid_condition_format() {
+		// Test conditions where split_expression should fail
+		let conditions = HashMap::new(); // Conditions irrelevant
+
+		assert!(
+			!evaluate_expression_core("a >", eval_simple_conditions(&conditions)),
+			"Missing RHS"
+		);
+		assert!(
+			!evaluate_expression_core("a > 1 AND b <", eval_simple_conditions(&conditions)),
+			"AND with missing RHS"
+		);
+		assert!(
+			!evaluate_expression_core("a > 1 OR > b", eval_simple_conditions(&conditions)),
+			"OR with missing LHS"
+		);
+		assert!(
+			!evaluate_expression_core("invalid condition", eval_simple_conditions(&conditions)),
+			"No operator"
+		);
+		assert!(
+			!evaluate_expression_core("a = = 1", eval_simple_conditions(&conditions)),
+			"Double operator internal"
+		); // Assumes split_expression handles this
 	}
 
 	// TODO: Uncomment and fix the following tests once the parser is updated to handle parentheses correctly.
