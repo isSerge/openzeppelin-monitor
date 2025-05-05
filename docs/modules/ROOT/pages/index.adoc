@@ -343,6 +343,12 @@ The monitor implements protocol security validations across different components
 ** `X-API-Key` header
 ** `Authorization` header
 * *Optional Secret*: Can include a secret for HMAC authentication
+** When a secret is provided, the monitor will:
+*** Generate a timestamp in milliseconds
+*** Create an HMAC-SHA256 signature of the payload and timestamp
+*** Add the signature in the `X-Signature` header
+*** Add the timestamp in the `X-Timestamp` header
+** The signature is computed as: `HMAC-SHA256(secret, payload + timestamp)`
 * *Warning*: Non-HTTPS URLs or missing authentication headers will trigger security warnings
 
 ===== Script Security
@@ -357,6 +363,83 @@ The monitor implements protocol security validations across different components
 ----
 chmod 644 ./config/filters/my_script.sh
 ----
+
+==== Secret Management
+
+The monitor implements a secure secret management system with support for multiple secret sources and automatic memory zeroization.
+
+===== Secret Sources
+
+The monitor supports three types of secret sources:
+
+* *Plain Text*: Direct secret values (wrapped in `SecretString` for secure memory handling)
+* *Environment Variables*: Secrets stored in environment variables
+* *Hashicorp Cloud Vault*: Secrets stored in Hashicorp Cloud Vault
+
+===== Security Features
+
+* *Automatic Zeroization*: Secrets are automatically zeroized from memory when no longer needed
+* *Type-Safe Resolution*: Secure handling of secret resolution with proper error handling
+* *Configuration Support*: Serde support for configuration files
+
+===== Configuration
+
+Secrets can be configured in the JSON files using the following format:
+
+[source,json]
+----
+{
+  "type": "Plain",
+  "value": "my-secret-value"
+}
+----
+
+[source,json]
+----
+{
+  "type": "Environment",
+  "value": "MY_SECRET_ENV_VAR"
+}
+----
+
+[source,json]
+----
+{
+  "type": "HashicorpCloudVault",
+  "value": "my-secret-name"
+}
+----
+
+===== Hashicorp Cloud Vault Integration
+
+To use Hashicorp Cloud Vault, configure the following environment variables:
+
+[cols="1,2", options="header"]
+|===
+| Environment Variable | Description
+
+| `HCP_CLIENT_ID`
+| Hashicorp Cloud Vault client ID
+
+| `HCP_CLIENT_SECRET`
+| Hashicorp Cloud Vault client secret
+
+| `HCP_ORG_ID`
+| Hashicorp Cloud Vault organization ID
+
+| `HCP_PROJECT_ID`
+| Hashicorp Cloud Vault project ID
+
+| `HCP_APP_NAME`
+| Hashicorp Cloud Vault application name
+|===
+
+===== Best Practices
+
+* Use environment variables or vault for production secrets
+* Avoid storing plain text secrets in configuration files
+* Use appropriate access controls for vault secrets
+* Monitor vault access patterns for suspicious activity
 
 ==== Basic Configuration
 
@@ -409,6 +492,31 @@ This table lists the environment variables and their default values.
 | `8081`
 | `<any tcp port (preferably choose non-privileged ports i.e. (1024-65535))>`
 | Port to use for metrics server.
+
+| `HCP_CLIENT_ID`
+| -
+| `<string>`
+| Hashicorp Cloud Vault client ID for secret management.
+
+| `HCP_CLIENT_SECRET`
+| -
+| `<string>`
+| Hashicorp Cloud Vault client secret for secret management.
+
+| `HCP_ORG_ID`
+| -
+| `<string>`
+| Hashicorp Cloud Vault organization ID for secret management.
+
+| `HCP_PROJECT_ID`
+| -
+| `<string>`
+| Hashicorp Cloud Vault project ID for secret management.
+
+| `HCP_APP_NAME`
+| -
+| `<string>`
+| Hashicorp Cloud Vault application name for secret management.
 |===
 
 * Copy and configure some example files:
@@ -484,7 +592,10 @@ A Network configuration defines connection details and operational parameters fo
   "rpc_urls": [
     {
       "type_": "rpc",
-      "url": "https://soroban.stellar.org",
+      "url": {
+        "type": "plain",
+        "value": "https://soroban.stellar.org"
+      },
       "weight": 100
     }
   ],
@@ -564,10 +675,13 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
     "name": "Large Transfer Slack Notification",
     "trigger_type": "slack",
     "config": {
-      "slack_url": "https://hooks.slack.com/services/A/B/C",
+      "slack_url": {
+        "type": "plain",
+        "value": "https://hooks.slack.com/services/A/B/C"
+      },
       "message": {
         "title": "large_transfer_slack triggered",
-        "body": "Large transfer of ${event_0_value} USDC from ${event_0_from} to ${event_0_to} | https://etherscan.io/tx/${transaction_hash}#eventlog"
+        "body": "Large transfer of ${events.0.args.value} USDC from ${events.0.args.from} to ${events.0.args.to} | https://etherscan.io/tx/${transaction.hash}#eventlog"
       }
     }
   },
@@ -575,10 +689,13 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
     "name": "Large Transfer Slack Notification",
     "trigger_type": "slack",
     "config": {
-      "slack_url": "https://hooks.slack.com/services/A/B/C",
+      "slack_url": {
+        "type": "environment",
+        "value": "SLACK_WEBHOOK_URL"
+      },
       "message": {
         "title": "large_transfer_usdc_slack triggered",
-        "body": "${monitor_name} triggered because of a large transfer of ${function_0_2} USDC to ${function_0_1} | https://stellar.expert/explorer/testnet/tx/${transaction_hash}"
+        "body": "${monitor.name} triggered because of a large transfer of ${functions.0.args.2} USDC to ${functions.0.args.1} | https://stellar.expert/explorer/testnet/tx/${transaction.hash}"
       }
     }
   }
@@ -591,10 +708,13 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 [source,json]
 ----
 {
-  "slack_url": "https://hooks.slack.com/...",
+  "slack_url": {
+    "type": "HashicorpCloudVault",
+    "value": "slack-webhook-url"
+  },
   "message": {
     "title": "Alert Title",
-    "body": "Alert message for ${transaction_hash}"
+    "body": "Alert message for ${transaction.hash}"
   }
 }
 ----
@@ -612,9 +732,13 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 |String
 |Must be "slack" for Slack notifications
 
-|config.slack_url
+|config.slack_url.type
 |String
-|Slack webhook URL for sending notifications
+|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+
+|config.slack_url.value
+|String
+|Secret value (URL, environment variable name, or vault secret name)
 
 |config.message.title
 |String
@@ -631,11 +755,17 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 {
   "host": "smtp.gmail.com",
   "port": 465,
-  "username": "sender@example.com",
-  "password": "smtp_password",
+  "username": {
+    "type": "plain",
+    "value": "sender@example.com"
+  },
+  "password": {
+    "type": "environment",
+    "value": "SMTP_PASSWORD"
+  },
   "message": {
     "title": "Alert Subject",
-    "body": "Alert message for ${transaction_hash}",
+    "body": "Alert message for ${transaction.hash}",
   },
   "sender": "sender@example.com",
   "recipients": ["recipient@example.com"]
@@ -663,13 +793,21 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 |Number
 |SMTP port (defaults to 465)
 
-|config.username
+|config.username.type
 |String
-|SMTP authentication username
+|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
 
-|config.password
+|config.username.value
 |String
-|SMTP authentication password
+|Secret value (username, environment variable name, or vault secret name)
+
+|config.password.type
+|String
+|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+
+|config.password.value
+|String
+|Secret value (password, environment variable name, or vault secret name)
 
 |config.message.title
 |String
@@ -692,15 +830,21 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 [source,json]
 ----
 {
-  "url": "https://webhook.site/123-456-789",
+  "url": {
+    "type": "HashicorpCloudVault",
+    "value": "webhook-url"
+  },
   "method": "POST",
-  "secret": "some-secret",
+  "secret": {
+    "type": "environment",
+    "value": "WEBHOOK_SECRET"
+  },
   "headers": {
     "Content-Type": "application/json"
   },
   "message": {
     "title": "Alert Title",
-    "body": "Alert message for ${transaction_hash}"
+    "body": "Alert message for ${transaction.hash}"
   }
 }
 ----
@@ -718,17 +862,25 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 |String
 |Must be "webhook" for webhook notifications
 
-|config.url
+|config.url.type
 |String
-|Webhook URL
+|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+
+|config.url.value
+|String
+|Secret value (URL, environment variable name, or vault secret name)
 
 |config.method
 |String
 |HTTP method (POST, GET, etc.) defaults to POST
 
-|config.secret
+|config.secret.type
 |String
-|Optional secret for HMAC authentication
+|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+
+|config.secret.value
+|String
+|Secret value (HMAC secret, environment variable name, or vault secret name)
 
 |config.headers
 |Object
@@ -747,10 +899,13 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 [source,json]
 ----
 {
-  "discord_url": "https://discord.com/api/webhooks/123-456-789",
+  "discord_url": {
+    "type": "plain",
+    "value": "https://discord.com/api/webhooks/123-456-789"
+  },
   "message": {
     "title": "Alert Title",
-    "body": "Alert message for ${transaction_hash}"
+    "body": "Alert message for ${transaction.hash}"
   }
 }
 ----
@@ -768,9 +923,13 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 |String
 |Must be "discord" for Discord notifications
 
-|config.discord_url
+|config.discord_url.type
 |String
-|Discord webhook URL must start with https://discord.com/api/webhooks/
+|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+
+|config.discord_url.value
+|String
+|Secret value (URL, environment variable name, or vault secret name)
 
 |config.message.title
 |String
@@ -785,11 +944,14 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 [source,json]
 ----
 {
-  "token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  "token": {
+    "type": "HashicorpCloudVault",
+    "value": "telegram-bot-token"
+  },
   "chat_id": "9876543210",
   "message": {
     "title": "Alert Title",
-    "body": "Alert message for ${transaction_hash}"
+    "body": "Alert message for ${transaction.hash}"
   }
 }
 ----
@@ -807,9 +969,13 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 |String
 |Must be "telegram" for Telegram notifications
 
-|config.token
+|config.token.type
 |String
-|Telegram bot token
+|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+
+|config.token.value
+|String
+|Secret value (bot token, environment variable name, or vault secret name)
 
 |config.chat_id
 |String
@@ -880,21 +1046,23 @@ For more information about custom scripts, see xref:scripts.adoc[Custom Scripts 
 
 ==== Available Template Variables
 
+The monitor uses a structured JSON format with nested objects for template variables. The data is flattened into dot notation for template use.
+
 ===== Common Variables
 [cols="1,2"]
 |===
 |Variable |Description
 
-|monitor_name
+|monitor.name
 |Name of the triggered monitor
 
-|transaction_hash
+|transaction.hash
 |Hash of the transaction
 
-|function_[index]_signature
+|functions.[index].signature
 |Function signature
 
-|event_[index]_signature
+|events.[index].signature
 |Event signature
 |===
 
@@ -905,19 +1073,19 @@ For more information about custom scripts, see xref:scripts.adoc[Custom Scripts 
 |===
 |Variable |Description
 
-|transaction_from
+|transaction.from
 |Sender address
 
-|transaction_to
+|transaction.to
 |Recipient address
 
-|transaction_value
+|transaction.value
 |Transaction value
 
-|event_[index]_[param]
+|events.[index].args.[param]
 |Event parameters by name
 
-|function_[index]_[param]
+|functions.[index].args.[param]
 |Function parameters by name
 |===
 
@@ -926,17 +1094,99 @@ For more information about custom scripts, see xref:scripts.adoc[Custom Scripts 
 |===
 |Variable |Description
 
-|event_[index]_[position]
+|events.[index].args.[position]
 |Event parameters by position
 
-|function_[index]_[position]
+|functions.[index].args.[position]
 |Function parameters by position
 |===
 
 [NOTE]
 ====
-Transaction-related variables (`transaction_from`, `transaction_to`, `transaction_value`) are not available for Stellar networks.
+Transaction-related variables (`transaction.from`, `transaction.to`, `transaction.value`) are not available for Stellar networks.
 ====
+
+==== Message Formatting
+
+Slack, Discord, Telegram, Email and Webhook support Markdown formatting in their message bodies. You can use Markdown syntax to enhance your notifications.
+
+===== Example Email Notification with Markdown
+[source,json]
+----
+{
+  "email_notification": {
+    "name": "Formatted Alert",
+    "trigger_type": "email",
+    "config": {
+      "host": "smtp.example.com",
+      "port": 465,
+      "username": {"type": "plain", "value": "alerts@example.com"},
+      "password": {"type": "plain", "value": "password"},
+      "message": {
+        "title": "**High Value Transfer Alert**",
+        "body": "### Transaction Details\n\n* **Amount:** ${events.0.args.value} USDC\n* **From:** `${events.0.args.from}`\n* **To:** `${events.0.args.to}`\n\n> Transaction Hash: ${transaction.hash}\n\n[View on Explorer](https://etherscan.io/tx/${transaction.hash})"
+      },
+      "sender": "alerts@example.com",
+      "recipients": ["recipient@example.com"]
+    }
+  }
+}
+----
+
+===== Example Slack Notification with Markdown
+[source,json]
+----
+{
+  "slack_notification": {
+    "name": "Formatted Alert",
+    "trigger_type": "slack",
+    "config": {
+      "slack_url": {"type": "plain", "value": "https://hooks.slack.com/services/XXX/YYY/ZZZ"},
+      "message": {
+        "title": "*🚨 High Value Transfer Alert*",
+        "body": "*Transaction Details*\n\n• *Amount:* `${events.0.args.value}` USDC\n• *From:* `${events.0.args.from}`\n• *To:* `${events.0.args.to}`\n\n>Transaction Hash: `${transaction.hash}`\n\n<https://etherscan.io/tx/${transaction.hash}|View on Explorer>"
+      }
+    }
+  }
+}
+----
+
+===== Example Discord Notification with Markdown
+[source,json]
+----
+{
+  "discord_notification": {
+    "name": "Formatted Alert",
+    "trigger_type": "discord",
+    "config": {
+      "discord_url": {"type": "plain", "value": "https://discord.com/api/webhooks/XXX/YYY"},
+      "message": {
+        "title": "**🚨 High Value Transfer Alert**",
+        "body": "# Transaction Details\n\n* **Amount:** `${events.0.args.value}` USDC\n* **From:** `${events.0.args.from}`\n* **To:** `${events.0.args.to}`\n\n>>> Transaction Hash: `${transaction.hash}`\n\n**[View on Explorer](https://etherscan.io/tx/${transaction.hash})"
+      }
+    }
+  }
+}
+----
+
+===== Example Telegram Notification with Markdown
+[source,json]
+----
+{
+  "telegram_notification": {
+    "name": "Formatted Alert",
+    "trigger_type": "telegram",
+    "config": {
+      "token": {"type": "plain", "value": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+      "chat_id": "9876543210",
+      "message": {
+        "title": "*🚨 High Value Transfer Alert*",
+        "body": "*Transaction Details*\n\n• *Amount:* `${events.0.args.value}` USDC\n• *From:* `${events.0.args.from}`\n• *To:* `${events.0.args.to}`\n\n`Transaction Hash: ${transaction.hash}`\n\n[View on Explorer](https://etherscan.io/tx/${transaction.hash})"
+      }
+    }
+  }
+}
+----
 
 ==== Important Considerations:
 
@@ -1237,6 +1487,7 @@ What this does:
 * Runs the "Large Transfer of USDC Token" monitor
 * Targets all networks specified in the configuration
 * Processes only the latest block for each network
+* Sends a notification to all associated channels for every match that is found
 
 ==== 2. Specific Block Mode
 
@@ -1255,6 +1506,7 @@ What this does:
 * Runs the "Large Transfer of USDC Token" monitor
 * Targets only the specified network (`ethereum_mainnet`)
 * Processes only the specified block (`12345678`)
+* Sends a notification to all associated channels for every match that is found
 
 [IMPORTANT]
 ====

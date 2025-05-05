@@ -3,10 +3,11 @@
 //! This module implements the ConfigLoader trait for Network configurations,
 //! allowing network definitions to be loaded from JSON files.
 
+use async_trait::async_trait;
 use std::{collections::HashMap, path::Path, str::FromStr};
 
 use crate::{
-	models::{config::error::ConfigError, BlockChainType, ConfigLoader, Network},
+	models::{config::error::ConfigError, BlockChainType, ConfigLoader, Network, SecretValue},
 	utils::get_cron_interval_ms,
 };
 
@@ -33,12 +34,30 @@ impl Network {
 	}
 }
 
+#[async_trait]
 impl ConfigLoader for Network {
+	/// Resolve all secrets in the network configuration
+	async fn resolve_secrets(&self) -> Result<Self, ConfigError> {
+		let mut network = self.clone();
+
+		for rpc_url in &mut network.rpc_urls {
+			let resolved_url = rpc_url.url.resolve().await.map_err(|e| {
+				ConfigError::parse_error(
+					format!("failed to resolve RPC URL: {}", e),
+					Some(Box::new(e)),
+					None,
+				)
+			})?;
+			rpc_url.url = SecretValue::Plain(resolved_url);
+		}
+		Ok(network)
+	}
+
 	/// Load all network configurations from a directory
 	///
 	/// Reads and parses all JSON files in the specified directory (or default
 	/// config directory) as network configurations.
-	fn load_all<T>(path: Option<&Path>) -> Result<T, ConfigError>
+	async fn load_all<T>(path: Option<&Path>) -> Result<T, ConfigError>
 	where
 		T: FromIterator<(String, Self)>,
 	{
@@ -88,7 +107,7 @@ impl ConfigLoader for Network {
 				.unwrap_or("unknown")
 				.to_string();
 
-			let network = Self::load_from_path(&path)?;
+			let network = Self::load_from_path(&path).await?;
 			pairs.push((name, network));
 		}
 
@@ -98,7 +117,7 @@ impl ConfigLoader for Network {
 	/// Load a network configuration from a specific file
 	///
 	/// Reads and parses a single JSON file as a network configuration.
-	fn load_from_path(path: &std::path::Path) -> Result<Self, ConfigError> {
+	async fn load_from_path(path: &std::path::Path) -> Result<Self, ConfigError> {
 		let file = std::fs::File::open(path).map_err(|e| {
 			ConfigError::file_error(
 				format!("failed to open network config file: {}", e),
@@ -109,7 +128,7 @@ impl ConfigLoader for Network {
 				)])),
 			)
 		})?;
-		let config: Network = serde_json::from_reader(file).map_err(|e| {
+		let mut config: Network = serde_json::from_reader(file).map_err(|e| {
 			ConfigError::parse_error(
 				format!("failed to parse network config: {}", e),
 				Some(Box::new(e)),
@@ -119,6 +138,9 @@ impl ConfigLoader for Network {
 				)])),
 			)
 		})?;
+
+		// Resolve secrets before validating
+		config = config.resolve_secrets().await?;
 
 		// Validate the config after loading
 		config.validate()?;
@@ -275,7 +297,7 @@ impl ConfigLoader for Network {
 				tracing::warn!(
 					"Network '{}' uses an insecure RPC URL: {}",
 					self.slug,
-					rpc_url.url
+					rpc_url.url.as_str()
 				);
 			}
 			// Additional check for websocket connections
@@ -283,7 +305,7 @@ impl ConfigLoader for Network {
 				tracing::warn!(
 					"Network '{}' uses an insecure WebSocket URL: {}",
 					self.slug,
-					rpc_url.url
+					rpc_url.url.as_str()
 				);
 			}
 		}
@@ -293,7 +315,6 @@ impl ConfigLoader for Network {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::models::RpcUrl;
 	use crate::utils::tests::builders::network::NetworkBuilder;
 	use tracing_test::traced_test;
 
@@ -429,17 +450,17 @@ mod tests {
 		));
 	}
 
-	#[test]
-	fn test_invalid_load_from_path() {
+	#[tokio::test]
+	async fn test_invalid_load_from_path() {
 		let path = Path::new("config/networks/invalid.json");
 		assert!(matches!(
-			Network::load_from_path(path),
+			Network::load_from_path(path).await,
 			Err(ConfigError::FileError(_))
 		));
 	}
 
-	#[test]
-	fn test_invalid_config_from_load_from_path() {
+	#[tokio::test]
+	async fn test_invalid_config_from_load_from_path() {
 		use std::io::Write;
 		use tempfile::NamedTempFile;
 
@@ -449,17 +470,17 @@ mod tests {
 		let path = temp_file.path();
 
 		assert!(matches!(
-			Network::load_from_path(path),
+			Network::load_from_path(path).await,
 			Err(ConfigError::ParseError(_))
 		));
 	}
 
-	#[test]
-	fn test_load_all_directory_not_found() {
+	#[tokio::test]
+	async fn test_load_all_directory_not_found() {
 		let non_existent_path = Path::new("non_existent_directory");
 
 		let result: Result<HashMap<String, Network>, ConfigError> =
-			Network::load_all(Some(non_existent_path));
+			Network::load_all(Some(non_existent_path)).await;
 		assert!(matches!(result, Err(ConfigError::FileError(_))));
 
 		if let Err(ConfigError::FileError(err)) = result {
@@ -470,30 +491,15 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_validate_protocol_insecure_rpc() {
-		let network = Network {
-			name: "Test Network".to_string(),
-			slug: "test_network".to_string(),
-			network_type: BlockChainType::EVM,
-			chain_id: Some(1),
-			network_passphrase: None,
-			store_blocks: Some(true),
-			rpc_urls: vec![
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "http://test.network".to_string(),
-					weight: 100,
-				},
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "ws://test.network".to_string(),
-					weight: 50,
-				},
-			],
-			block_time_ms: 1000,
-			confirmation_blocks: 1,
-			cron_schedule: "0 */5 * * * *".to_string(),
-			max_past_blocks: Some(10),
-		};
+		let network = NetworkBuilder::new()
+			.name("Test Network")
+			.slug("test_network")
+			.network_type(BlockChainType::EVM)
+			.chain_id(1)
+			.store_blocks(true)
+			.add_rpc_url("http://test.network", "rpc", 100)
+			.add_rpc_url("ws://test.network", "rpc", 100)
+			.build();
 
 		network.validate_protocol();
 		assert!(logs_contain(
@@ -507,30 +513,15 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_validate_protocol_secure_rpc() {
-		let network = Network {
-			name: "Test Network".to_string(),
-			slug: "test_network".to_string(),
-			network_type: BlockChainType::EVM,
-			chain_id: Some(1),
-			network_passphrase: None,
-			store_blocks: Some(true),
-			rpc_urls: vec![
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "https://test.network".to_string(),
-					weight: 100,
-				},
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "wss://test.network".to_string(),
-					weight: 50,
-				},
-			],
-			block_time_ms: 1000,
-			confirmation_blocks: 1,
-			cron_schedule: "0 */5 * * * *".to_string(),
-			max_past_blocks: Some(10),
-		};
+		let network = NetworkBuilder::new()
+			.name("Test Network")
+			.slug("test_network")
+			.network_type(BlockChainType::EVM)
+			.chain_id(1)
+			.store_blocks(true)
+			.add_rpc_url("https://test.network", "rpc", 100)
+			.add_rpc_url("wss://test.network", "rpc", 100)
+			.build();
 
 		network.validate_protocol();
 		assert!(!logs_contain("uses an insecure RPC URL"));
@@ -540,40 +531,17 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_validate_protocol_mixed_security() {
-		let network = Network {
-			name: "Test Network".to_string(),
-			slug: "test_network".to_string(),
-			network_type: BlockChainType::EVM,
-			chain_id: Some(1),
-			network_passphrase: None,
-			store_blocks: Some(true),
-			rpc_urls: vec![
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "https://secure.network".to_string(),
-					weight: 100,
-				},
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "http://insecure.network".to_string(),
-					weight: 50,
-				},
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "wss://secure.ws.network".to_string(),
-					weight: 25,
-				},
-				RpcUrl {
-					type_: "rpc".to_string(),
-					url: "ws://insecure.ws.network".to_string(),
-					weight: 25,
-				},
-			],
-			block_time_ms: 1000,
-			confirmation_blocks: 1,
-			cron_schedule: "0 */5 * * * *".to_string(),
-			max_past_blocks: Some(10),
-		};
+		let network = NetworkBuilder::new()
+			.name("Test Network")
+			.slug("test_network")
+			.network_type(BlockChainType::EVM)
+			.chain_id(1)
+			.store_blocks(true)
+			.add_rpc_url("https://secure.network", "rpc", 100)
+			.add_rpc_url("http://insecure.network", "rpc", 50)
+			.add_rpc_url("wss://secure.ws.network", "rpc", 25)
+			.add_rpc_url("ws://insecure.ws.network", "rpc", 25)
+			.build();
 
 		network.validate_protocol();
 		assert!(logs_contain(

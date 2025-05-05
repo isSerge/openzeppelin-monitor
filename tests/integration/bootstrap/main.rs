@@ -13,8 +13,8 @@ use openzeppelin_monitor::{
 	bootstrap::{create_block_handler, create_trigger_handler, initialize_services, process_block},
 	models::{
 		BlockChainType, EVMMonitorMatch, EVMTransactionReceipt, MatchConditions, Monitor,
-		MonitorMatch, ProcessedBlock, ScriptLanguage, StellarBlock, StellarMonitorMatch,
-		TransactionType, Trigger, TriggerConditions,
+		MonitorMatch, ProcessedBlock, ScriptLanguage, SecretString, SecretValue, StellarBlock,
+		StellarMonitorMatch, TransactionType, Trigger, TriggerConditions,
 	},
 	services::{
 		filter::FilterService,
@@ -125,6 +125,7 @@ async fn test_initialize_services() {
 		Some(mock_network_service),
 		Some(mock_trigger_service),
 	)
+	.await
 	.expect("Failed to initialize services");
 
 	assert!(
@@ -193,7 +194,8 @@ async fn test_create_trigger_handler() {
 
 	// Setup test triggers in JSON with known configurations
 	let trigger_execution_service =
-		setup_trigger_execution_service("tests/integration/fixtures/evm/triggers/trigger.json");
+		setup_trigger_execution_service("tests/integration/fixtures/evm/triggers/trigger.json")
+			.await;
 
 	let (shutdown_tx, _) = watch::channel(false);
 	let trigger_handler = create_trigger_handler(
@@ -220,7 +222,8 @@ async fn test_create_trigger_handler() {
 async fn test_create_trigger_handler_empty_matches() {
 	// Setup test triggers in JSON with known configurations
 	let trigger_execution_service =
-		setup_trigger_execution_service("tests/integration/fixtures/evm/triggers/trigger.json");
+		setup_trigger_execution_service("tests/integration/fixtures/evm/triggers/trigger.json")
+			.await;
 
 	let (shutdown_tx, _) = watch::channel(false);
 	let trigger_handler = create_trigger_handler(
@@ -389,7 +392,8 @@ async fn test_create_trigger_handler_with_conditions() {
 
 	// Setup test triggers in JSON with known configurations
 	let trigger_execution_service =
-		setup_trigger_execution_service("tests/integration/fixtures/evm/triggers/trigger.json");
+		setup_trigger_execution_service("tests/integration/fixtures/evm/triggers/trigger.json")
+			.await;
 
 	// Create a HashMap with trigger conditions
 	let mut trigger_scripts = HashMap::new();
@@ -793,7 +797,15 @@ async fn test_trigger_execution_service_execute_multiple_triggers_failed() {
 	let mock = server
 		.mock("POST", "/")
 		.match_body(mockito::Matcher::Json(json!({
-			"text": "*Test Alert*\n\nTest message with value 42"
+			"blocks": [
+				{
+					"type": "section",
+					"text": {
+						"type": "mrkdwn",
+						"text": "*Test Alert*\n\nTest message with value 42"
+					}
+				}
+			]
 		})))
 		.with_status(500)
 		.create_async()
@@ -815,7 +827,7 @@ async fn test_trigger_execution_service_execute_multiple_triggers_failed() {
 			.webhook(
 				"https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX", //noboost
 			)
-			.webhook_secret("secret")
+			.webhook_secret(SecretValue::Plain(SecretString::new("secret".to_string())))
 			.webhook_method("POST")
 			.message("Test Title", "Test Body")
 			.build(),
@@ -868,7 +880,15 @@ async fn test_trigger_execution_service_execute_multiple_triggers_success() {
 	let slack_mock = slack_server
 		.mock("POST", "/")
 		.match_body(mockito::Matcher::Json(json!({
-			"text": "*Test Alert*\n\nTest message with value 42"
+			"blocks": [
+				{
+					"type": "section",
+					"text": {
+						"type": "mrkdwn",
+						"text": "*Test Alert*\n\nTest message with value 42"
+					}
+				}
+			]
 		})))
 		.with_status(200)
 		.create_async()
@@ -901,7 +921,7 @@ async fn test_trigger_execution_service_execute_multiple_triggers_success() {
 			.name("example_trigger_webhook")
 			.webhook(&webhook_server.url())
 			.webhook_headers(HashMap::new())
-			.webhook_secret("secret")
+			.webhook_secret(SecretValue::Plain(SecretString::new("secret".to_string())))
 			.webhook_method("POST")
 			.message("Test Title", "Test Body")
 			.build(),
@@ -941,7 +961,15 @@ async fn test_trigger_execution_service_execute_multiple_triggers_partial_succes
 	let slack_mock = slack_server
 		.mock("POST", "/")
 		.match_body(mockito::Matcher::Json(json!({
-			"text": "*Test Alert*\n\nTest message with value 42"
+			"blocks": [
+				{
+					"type": "section",
+					"text": {
+						"type": "mrkdwn",
+						"text": "*Test Alert*\n\nTest message with value 42"
+					}
+				}
+			]
 		})))
 		.with_status(500)
 		.create_async()
@@ -974,7 +1002,7 @@ async fn test_trigger_execution_service_execute_multiple_triggers_partial_succes
 			.name("example_trigger_webhook")
 			.webhook(&webhook_server.url())
 			.webhook_headers(HashMap::new())
-			.webhook_secret("secret")
+			.webhook_secret(SecretValue::Plain(SecretString::new("secret".to_string())))
 			.webhook_method("POST")
 			.message("Test Title", "Test Body")
 			.build(),

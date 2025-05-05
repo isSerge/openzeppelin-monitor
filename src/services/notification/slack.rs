@@ -28,10 +28,6 @@ impl SlackNotifier {
 		title: String,
 		body_template: String,
 	) -> Result<Self, Box<NotificationError>> {
-		// Set default Slack payload fields
-		let mut payload_fields = HashMap::new();
-		payload_fields.insert("text".to_string(), serde_json::json!(null));
-
 		Ok(Self {
 			inner: WebhookNotifier::new(WebhookConfig {
 				url,
@@ -41,7 +37,7 @@ impl SlackNotifier {
 				method: Some("POST".to_string()),
 				secret: None,
 				headers: None,
-				payload_fields: Some(payload_fields),
+				payload_fields: None,
 			})?,
 		})
 	}
@@ -71,18 +67,15 @@ impl SlackNotifier {
 				let mut headers = HashMap::new();
 				headers.insert("Content-Type".to_string(), "application/json".to_string());
 
-				let mut payload_fields = HashMap::new();
-				payload_fields.insert("text".to_string(), serde_json::json!(null));
-
 				WebhookNotifier::new(WebhookConfig {
-					url: slack_url.clone(),
+					url: slack_url.as_ref().to_string(),
 					url_params: None,
 					title: message.title.clone(),
 					body_template: message.body.clone(),
 					method: Some("POST".to_string()),
 					secret: None,
 					headers: Some(headers),
-					payload_fields: Some(payload_fields),
+					payload_fields: None,
 				})
 				.ok()
 				.map(|inner| Self { inner })
@@ -103,7 +96,16 @@ impl Notifier for SlackNotifier {
 	/// * `Result<(), anyhow::Error>` - Success or error
 	async fn notify(&self, message: &str) -> Result<(), anyhow::Error> {
 		let mut payload_fields = HashMap::new();
-		payload_fields.insert("text".to_string(), serde_json::json!(message));
+		let blocks = serde_json::json!([
+			{
+				"type": "section",
+				"text": {
+					"type": "mrkdwn",
+					"text": message
+				}
+			}
+		]);
+		payload_fields.insert("blocks".to_string(), blocks);
 
 		self.inner
 			.notify_with_payload(message, payload_fields)
@@ -113,7 +115,7 @@ impl Notifier for SlackNotifier {
 
 #[cfg(test)]
 mod tests {
-	use crate::models::NotificationMessage;
+	use crate::models::{NotificationMessage, SecretString, SecretValue};
 
 	use super::*;
 
@@ -128,7 +130,9 @@ mod tests {
 
 	fn create_test_slack_config() -> TriggerTypeConfig {
 		TriggerTypeConfig::Slack {
-			slack_url: "https://slack.example.com".to_string(),
+			slack_url: SecretValue::Plain(SecretString::new(
+				"https://slack.example.com".to_string(),
+			)),
 			message: NotificationMessage {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
