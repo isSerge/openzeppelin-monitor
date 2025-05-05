@@ -1119,9 +1119,7 @@ mod tests {
 		// Test non-matching 'to' address
 		let address_non_matching =
 			Address::from_str("0x0000000000000000000000000000000000004321").unwrap();
-		let tx_non_matching = TransactionBuilder::new()
-			.to(address_non_matching)
-			.build();
+		let tx_non_matching = TransactionBuilder::new().to(address_non_matching).build();
 		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.to(address_non_matching)
 			.transaction_hash(tx_non_matching.hash)
@@ -1175,9 +1173,7 @@ mod tests {
 		// Test non-matching 'from' address
 		let address_non_matching =
 			Address::from_str("0x0000000000000000000000000000000000004321").unwrap();
-		let tx_non_matching = TransactionBuilder::new()
-			.from(address_non_matching)
-			.build();
+		let tx_non_matching = TransactionBuilder::new().from(address_non_matching).build();
 		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.from(address_non_matching)
 			.transaction_hash(tx_non_matching.hash)
@@ -1427,9 +1423,7 @@ mod tests {
 
 		// Test transaction with gas_limit < 20k
 		let nonce_not_matching = U256::from(55);
-		let tx_non_matching = TransactionBuilder::new()
-			.nonce(nonce_not_matching)
-			.build();
+		let tx_non_matching = TransactionBuilder::new().nonce(nonce_not_matching).build();
 		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
@@ -1475,9 +1469,7 @@ mod tests {
 
 		// Test transaction with non-matching input
 		let input_not_matching = Bytes(hex::decode("5678").unwrap().into());
-		let tx_non_matching = TransactionBuilder::new()
-			.input(input_not_matching)
-			.build();
+		let tx_non_matching = TransactionBuilder::new().input(input_not_matching).build();
 		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
