@@ -544,7 +544,7 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 					"Expected EVM block",
 					None,
 					None,
-				))
+				));
 			}
 		};
 
@@ -768,6 +768,7 @@ mod tests {
 	use crate::models::EVMBaseTransaction;
 
 	use super::*;
+	use crate::models::EVMMatchParamEntry;
 	use alloy::{
 		consensus::{Eip658Value, Receipt, ReceiptEnvelope, ReceiptWithBloom},
 		primitives::{Address, Bytes, LogData, B256, U256},
@@ -958,6 +959,16 @@ mod tests {
 			to: Some(to_address),
 			contract_address: Some(contract_address),
 		})
+	}
+
+	// Helper function to create a test EVMMatchParamEntry
+	fn create_evm_param(name: &str, value: &str, kind: &str) -> EVMMatchParamEntry {
+		EVMMatchParamEntry {
+			name: name.to_string(),
+			value: value.to_string(),
+			kind: kind.to_string(),
+			indexed: false,
+		}
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
@@ -1774,6 +1785,119 @@ mod tests {
 		assert!(!filter.evaluate_expression("amount > ", &args));
 		assert!(!filter.evaluate_expression("amount", &args));
 		assert!(!filter.evaluate_expression("> 1000", &args));
+	}
+
+	// --- Tests for Parentheses Grouping ---
+	#[test]
+	fn test_evaluate_expression_fail_parentheses_grouping_1() {
+		// Expression: val1 > 50 AND (val2 == true OR val3 < 10)
+		// Failure Reason: Current parser splits by 'OR' first, breaking inside parentheses.
+		let filter = create_test_filter();
+		let args = Some(vec![
+			create_evm_param("val1", "100", "uint256"), // T
+			create_evm_param("val2", "true", "bool"),   // T
+			create_evm_param("val3", "50", "uint256"),  // F
+		]);
+		// Expected Correct Logic: T AND (T OR F) => T AND T => TRUE
+		let expression = "val1 > 50 AND (val2 == true OR val3 < 10)";
+		assert!(
+			filter.evaluate_expression(expression, &args),
+			"Grouping 'A AND (B OR C)' failed. Expression: '{}'",
+			expression
+		);
+	}
+
+	#[test]
+	fn test_evaluate_expression_fail_parentheses_grouping_2() {
+		// Expression: (val1 > 150 OR val2 == false) AND val3 == 5
+		// Failure Reason: Current parser splits by 'OR' first, breaking inside parentheses.
+		let filter = create_test_filter();
+		let args = Some(vec![
+			create_evm_param("val1", "100", "uint256"), // F
+			create_evm_param("val2", "false", "bool"),  // T
+			create_evm_param("val3", "5", "uint256"),   // T
+		]);
+		// Expected Correct Logic: (F OR T) AND T => T AND T => TRUE
+		let expression = "(val1 > 150 OR val2 == false) AND val3 == 5";
+		assert!(
+			filter.evaluate_expression(expression, &args),
+			"Grouping '(A OR B) AND C' failed. Expression: '{}'",
+			expression
+		);
+	}
+
+	#[test]
+	fn test_evaluate_expression_fail_nested_parentheses() {
+		// Expression: val1 > 50 AND (val2 == true OR (val3 < 10 AND val4 == 'a'))
+		// Failure Reason: Current parser cannot handle nested parentheses structure.
+		let filter = create_test_filter();
+		let args = Some(vec![
+			create_evm_param("val1", "100", "uint256"), // T
+			create_evm_param("val2", "false", "bool"),  // F
+			create_evm_param("val3", "5", "uint256"),   // T
+			create_evm_param("val4", "a", "string"),    // T
+		]);
+		// Expected Correct Logic: T AND (F OR (T AND T)) => T AND (F OR T) => T AND T => TRUE
+		// Current Parser likely yields: false
+		let expression = "val1 > 50 AND (val2 == false OR (val3 < 10 AND val4 == 'a'))";
+		assert!(
+			filter.evaluate_expression(expression, &args),
+			"FAILURE EXPECTED: Nested Parentheses failed. Expression: '{}'",
+			expression
+		);
+	}
+
+	// --- Tests for Syntax Variations ---
+	#[test]
+	fn test_evaluate_expression_fail_whitespace_sensitivity() {
+		// Failure Reason: split(" OR ") and split(" AND ") require exactly one space.
+		let filter = create_test_filter();
+		let args = Some(vec![
+			create_evm_param("val1", "100", "uint256"), // T
+			create_evm_param("val2", "true", "bool"),   // T
+		]);
+
+		// Test OR with extra spaces
+		let expr_or = "val1 > 50  OR  val2 == false"; // Expected T OR F => TRUE
+		assert!(
+			filter.evaluate_expression(expr_or, &args),
+			"Whitespace sensitivity on 'OR'. Expression: '{}'",
+			expr_or
+		);
+
+		// Test AND with extra spaces
+		let expr_and = "val1 > 50 AND  val2 == true"; // Expected T AND T => TRUE
+		assert!(
+			filter.evaluate_expression(expr_and, &args),
+			"Whitespace sensitivity on 'AND'. Expression: '{}'",
+			expr_and
+		);
+	}
+
+	#[test]
+	fn test_evaluate_expression_fail_case_sensitivity() {
+		// Failure Reason: split(" OR ") and split(" AND ") require uppercase operators.
+		let filter = create_test_filter();
+		let args = Some(vec![
+			create_evm_param("val1", "100", "uint256"), // T
+			create_evm_param("val2", "true", "bool"),   // T
+		]);
+
+		// Test lowercase 'or'
+		let expr_or = "val1 > 50 or val2 == false"; // Expected T or F => TRUE
+		assert!(
+			filter.evaluate_expression(expr_or, &args),
+			"Case sensitivity on 'or'. Expression: '{}'",
+			expr_or
+		);
+
+		// Test lowercase 'and'
+		let expr_and = "val1 > 50 and val2 == true"; // Expected T and T => TRUE
+		assert!(
+			filter.evaluate_expression(expr_and, &args),
+			"Case sensitivity on 'and'. Expression: '{}'",
+			expr_and
+		);
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
