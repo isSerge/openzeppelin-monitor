@@ -24,6 +24,7 @@ use crate::{
 	services::{
 		blockchain::{BlockChainClient, StellarClientTrait},
 		filter::{
+			filters::expression::evaluate_expression_core,
 			stellar_helpers::{
 				are_same_signature, compare_json_values, compare_json_values_vs_string,
 				compare_strings, get_kind_from_value, get_nested_value, normalize_address,
@@ -32,7 +33,6 @@ use crate::{
 			BlockFilter, FilterError,
 		},
 	},
-	utils::split_expression,
 };
 
 /// Represents a mapping between a Stellar event and its transaction hash
@@ -830,120 +830,85 @@ impl<T> StellarBlockFilter<T> {
 			return false;
 		};
 
-		// Split by OR to get highest level conditions
-		let or_conditions: Vec<&str> = expression.split(" OR ").collect();
+		evaluate_expression_core(expression, |param_expr, operator, value| {
+			// Find the parameter and its type
+			if param_expr.contains('[') {
+				// Array indexing: arguments[0][0]
+				let indices: Vec<usize> = param_expr
+					.split('[')
+					.skip(1)
+					.filter_map(|s| s.trim_end_matches(']').parse::<usize>().ok())
+					.collect();
 
-		// For OR logic, any condition being true makes the whole expression true
-		for or_condition in or_conditions {
-			// Split each OR condition by AND
-			let and_conditions: Vec<&str> = or_condition.trim().split(" AND ").collect();
+				if indices.len() != 2 || indices[0] >= args.len() {
+					tracing::debug!("Invalid array indices: {:?}", indices);
+					return false;
+				}
 
-			// All AND conditions must be true
-			let and_result = and_conditions.iter().all(|condition| {
-				// Remove surrounding parentheses and trim
-				let clean_condition = condition.trim().trim_matches(|c| c == '(' || c == ')');
+				let param = &args[indices[0]];
+				let array_values: Vec<&str> = param.value.split(',').collect();
+				if indices[1] >= array_values.len() {
+					tracing::debug!("Array index out of bounds: {}", indices[1]);
+					return false;
+				}
 
-				// Split into parts while preserving quoted strings
-				let parts = if let Some((left, operator, right)) = split_expression(clean_condition)
-				{
-					vec![left, operator, right]
-				} else {
-					tracing::warn!("Invalid expression format: {}", clean_condition);
+				self.compare_values(
+					&param.kind,
+					array_values[indices[1]].trim(),
+					operator,
+					value,
+				)
+			} else if param_expr.contains('.') {
+				// Map access: map.key
+				let parts: Vec<&str> = param_expr.split('.').collect();
+				if parts.len() != 2 {
+					tracing::debug!("Invalid map access format: {}", param_expr);
+					return false;
+				}
+
+				let [map_name, key] = [parts[0], parts[1]];
+
+				let Some(param) = args.iter().find(|p| p.name == map_name) else {
+					tracing::debug!("Map {} not found", map_name);
 					return false;
 				};
 
-				if parts.len() != 3 {
-					tracing::warn!("Invalid expression format: {}", clean_condition);
+				let Ok(mut map_value) = serde_json::from_str::<serde_json::Value>(&param.value)
+				else {
+					tracing::debug!("Failed to parse map: {}", param.value);
 					return false;
-				}
+				};
 
-				let [param_expr, operator, value] = [parts[0], parts[1], parts[2]];
-
-				// Find the parameter and its type
-				if param_expr.contains('[') {
-					// Array indexing: arguments[0][0]
-					let indices: Vec<usize> = param_expr
-						.split('[')
-						.skip(1)
-						.filter_map(|s| s.trim_end_matches(']').parse::<usize>().ok())
+				// Unescape the keys in the map_value
+				if let serde_json::Value::Object(ref mut map) = map_value {
+					let unescaped_map: serde_json::Map<String, serde_json::Value> = map
+						.iter()
+						.map(|(k, v)| (k.trim_matches('"').to_string(), v.clone()))
 						.collect();
-
-					if indices.len() != 2 || indices[0] >= args.len() {
-						tracing::debug!("Invalid array indices: {:?}", indices);
-						return false;
-					}
-
-					let param = &args[indices[0]];
-					let array_values: Vec<&str> = param.value.split(',').collect();
-					if indices[1] >= array_values.len() {
-						tracing::debug!("Array index out of bounds: {}", indices[1]);
-						return false;
-					}
-
-					self.compare_values(
-						&param.kind,
-						array_values[indices[1]].trim(),
-						operator,
-						value,
-					)
-				} else if param_expr.contains('.') {
-					// Map access: map.key
-					let parts: Vec<&str> = param_expr.split('.').collect();
-					if parts.len() != 2 {
-						tracing::debug!("Invalid map access format: {}", param_expr);
-						return false;
-					}
-
-					let [map_name, key] = [parts[0], parts[1]];
-
-					let Some(param) = args.iter().find(|p| p.name == map_name) else {
-						tracing::debug!("Map {} not found", map_name);
-						return false;
-					};
-
-					let Ok(mut map_value) = serde_json::from_str::<serde_json::Value>(&param.value)
-					else {
-						tracing::debug!("Failed to parse map: {}", param.value);
-						return false;
-					};
-
-					// Unescape the keys in the map_value
-					if let serde_json::Value::Object(ref mut map) = map_value {
-						let unescaped_map: serde_json::Map<String, serde_json::Value> = map
-							.iter()
-							.map(|(k, v)| (k.trim_matches('"').to_string(), v.clone()))
-							.collect();
-						*map = unescaped_map;
-					}
-
-					let Some(key_value) = map_value.get(key) else {
-						tracing::debug!("Key {} not found in map", key);
-						return false;
-					};
-
-					self.compare_values(
-						&get_kind_from_value(key_value),
-						&key_value.to_string(),
-						operator,
-						value,
-					)
-				} else {
-					// Regular parameter
-					let Some(param) = args.iter().find(|p| p.name == param_expr) else {
-						tracing::warn!("Parameter {} not found", param_expr);
-						return false;
-					};
-
-					self.compare_values(&param.kind, &param.value, operator, value)
+					*map = unescaped_map;
 				}
-			});
 
-			if and_result {
-				return true;
+				let Some(key_value) = map_value.get(key) else {
+					tracing::debug!("Key {} not found in map", key);
+					return false;
+				};
+
+				self.compare_values(
+					&get_kind_from_value(key_value),
+					&key_value.to_string(),
+					operator,
+					value,
+				)
+			} else {
+				// Regular parameter
+				let Some(param) = args.iter().find(|p| p.name == param_expr) else {
+					tracing::warn!("Parameter {} not found", param_expr);
+					return false;
+				};
+
+				self.compare_values(&param.kind, &param.value, operator, value)
 			}
-		}
-
-		false
+		})
 	}
 
 	/// Converts Stellar function arguments into match parameter entries
