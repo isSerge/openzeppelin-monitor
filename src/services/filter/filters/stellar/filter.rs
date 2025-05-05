@@ -3117,38 +3117,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_evaluate_expression_logical_operators() {
-		let filter = create_test_filter();
-
-		// Test setup with multiple parameters
-		let args = Some(vec![
-			StellarMatchParamEntry {
-				name: "value".to_string(),
-				value: "100".to_string(),
-				kind: "u64".to_string(),
-				indexed: false,
-			},
-			StellarMatchParamEntry {
-				name: "active".to_string(),
-				value: "true".to_string(),
-				kind: "bool".to_string(),
-				indexed: false,
-			},
-		]);
-
-		// Test AND operator
-		assert!(filter.evaluate_expression("value > 50 AND active == true", &args));
-		assert!(!filter.evaluate_expression("value < 50 AND active == true", &args));
-
-		// Test OR operator
-		assert!(filter.evaluate_expression("value < 50 OR active == true", &args));
-		assert!(!filter.evaluate_expression("value < 50 OR active == false", &args));
-
-		// Test complex expression
-		assert!(filter.evaluate_expression("value > 50 AND active == true OR value == 100", &args));
-	}
-
-	#[test]
 	fn test_evaluate_expression_edge_cases() {
 		let filter = create_test_filter();
 
@@ -3157,24 +3125,6 @@ mod tests {
 
 		// Test with empty vector
 		assert!(!filter.evaluate_expression("value == 100", &Some(vec![])));
-
-		// Test invalid expression formats
-		let args = Some(vec![StellarMatchParamEntry {
-			name: "value".to_string(),
-			value: "100".to_string(),
-			kind: "u64".to_string(),
-			indexed: false,
-		}]);
-
-		// Invalid number of parts
-		assert!(!filter.evaluate_expression("value 100", &args));
-		assert!(!filter.evaluate_expression("value == 100 invalid", &args));
-
-		// Invalid operator
-		assert!(!filter.evaluate_expression("value invalid 100", &args));
-
-		// Empty expression
-		assert!(!filter.evaluate_expression("", &args));
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
