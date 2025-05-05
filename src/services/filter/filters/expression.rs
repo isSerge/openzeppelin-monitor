@@ -2,6 +2,15 @@
 
 // TODO: move here, not used anywhere else
 use crate::utils::split_expression;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+	// Matches "OR" with case-insensitivity and flexible whitespace
+	static ref RE_OR: Regex = Regex::new(r"(?i)\s+OR\s+").unwrap();
+	// Matches "AND" with case-insensitivity and flexible whitespace
+	static ref RE_AND: Regex = Regex::new(r"(?i)\s+AND\s+").unwrap();
+}
 
 // TODO: add documentation
 // TODO: consider returning a Result instead of a bool
@@ -17,11 +26,25 @@ where
 	}
 
 	// Split by OR to get highest level conditions
-	let or_conditions: Vec<&str> = expression.split(" OR ").collect();
+	let or_conditions: Vec<&str> = RE_OR.split(expression).collect();
 
 	// Check for invalid structure at OR level (e.g., "A OR OR B", " OR B", "A OR ")
-	if or_conditions.iter().any(|s| s.trim().is_empty()) {
-		tracing::warn!("evaluate_expression_core: Invalid expression structure due to empty OR part(s). Expression: '{}'", expression);
+	if or_conditions.len() > 1 && // Only check if OR was actually found
+		(or_conditions.first().map_or(false, |s| s.trim().is_empty()) ||
+		 or_conditions.last().map_or(false, |s| s.trim().is_empty()))
+	{
+		tracing::warn!("evaluate_expression_core: Invalid expression structure due to leading/trailing OR. Expression: '{}'", expression);
+		return false;
+	}
+	// Check for completely empty intermediate parts (e.g. "A OR OR B")
+	if or_conditions
+		.iter()
+		.skip(1)
+		.rev()
+		.skip(1)
+		.any(|s| s.trim().is_empty())
+	{
+		tracing::warn!("evaluate_expression_core: Invalid expression structure due to double OR or empty OR part. Expression: '{}'", expression);
 		return false;
 	}
 
@@ -30,7 +53,7 @@ where
 		let trimmed_or_condition = or_condition.trim();
 
 		// Split each OR condition by AND
-		let and_conditions: Vec<&str> = trimmed_or_condition.trim().split(" AND ").collect();
+		let and_conditions: Vec<&str> = RE_AND.split(trimmed_or_condition).collect();
 
 		tracing::trace!(
 			"evaluate_expression_core: RAND conditions for OR part '{}': {:?}",
@@ -39,9 +62,23 @@ where
 		);
 
 		// Check for invalid structure at AND level (e.g., "A AND AND B", " AND B", "A AND ")
-		if and_conditions.iter().any(|s| s.trim().is_empty()) {
-			tracing::warn!("evaluate_expression_core: Invalid AND group structure due to empty AND part(s). Group: '{}'. Treating this OR branch as false.", trimmed_or_condition);
-			continue; // This OR branch is false, try the next one.
+		if and_conditions.len() > 1 && // Only check if AND was found
+            (and_conditions.first().map_or(false, |s| s.trim().is_empty()) ||
+             and_conditions.last().map_or(false, |s| s.trim().is_empty()))
+		{
+			tracing::warn!("evaluate_expression_core: Invalid AND group structure due to leading/trailing AND. Group: '{}'. Treating this OR branch as false.", trimmed_or_condition);
+			continue; // This OR branch is invalid, try the next one.
+		}
+		// Check for completely empty intermediate parts (e.g. "A AND AND B")
+		if and_conditions
+			.iter()
+			.skip(1)
+			.rev()
+			.skip(1)
+			.any(|s| s.trim().is_empty())
+		{
+			tracing::warn!("evaluate_expression_core: Invalid expression structure due to double AND or empty AND part. Group: '{}'. Treating this OR branch as false.", trimmed_or_condition);
+			continue; // This OR branch is invalid
 		}
 
 		// Evaluate all valid AND conditions within this OR branch
@@ -269,7 +306,7 @@ mod tests {
 			"Leading AND"
 		);
 		assert!(
-			!evaluate_expression_core("a == 1 OR ", eval_simple_conditions(&conditions)),
+			!evaluate_expression_core(" a == 1 OR ", eval_simple_conditions(&conditions)),
 			"Trailing OR"
 		);
 		assert!(
@@ -335,6 +372,73 @@ mod tests {
 		); // Assumes split_expression handles this
 	}
 
+	#[test]
+	fn test_core_whitespace_handling() {
+		let conditions = HashMap::from([("a == 1", true), ("b > 2", true)]);
+
+		// Test leading/trailing whitespace on expression
+		assert!(evaluate_expression_core(
+			"  a == 1  ",
+			eval_simple_conditions(&conditions)
+		));
+
+		// Test whitespace around operators (should now pass)
+		assert!(
+			evaluate_expression_core("a == 1 AND b > 2", eval_simple_conditions(&conditions)),
+			"Single space AND"
+		);
+		assert!(
+			evaluate_expression_core("a == 1  AND b > 2", eval_simple_conditions(&conditions)),
+			"Double space AND"
+		);
+		assert!(
+			evaluate_expression_core("a == 1 AND  b > 2", eval_simple_conditions(&conditions)),
+			"AND double space"
+		);
+		assert!(
+			evaluate_expression_core("a == 1\tAND\tb > 2", eval_simple_conditions(&conditions)),
+			"Tab AND"
+		); // Tabs are whitespace
+		assert!(
+			evaluate_expression_core("a == 1 OR b > 2", eval_simple_conditions(&conditions)),
+			"Single space OR"
+		);
+		assert!(
+			evaluate_expression_core("a == 1   OR   b > 2", eval_simple_conditions(&conditions)),
+			"Multi space OR"
+		);
+		assert!(
+			evaluate_expression_core("a == 1\nOR\nb > 2", eval_simple_conditions(&conditions)),
+			"Newline OR"
+		); // Newlines are whitespace
+	}
+
+	#[test]
+	fn test_core_case_insensitivity() {
+		let conditions = HashMap::from([("a == 1", true), ("b > 2", true)]);
+
+		assert!(
+			evaluate_expression_core("a == 1 and b > 2", eval_simple_conditions(&conditions)),
+			"Lowercase and"
+		);
+		assert!(
+			evaluate_expression_core("a == 1 And b > 2", eval_simple_conditions(&conditions)),
+			"Mixed case And"
+		);
+		assert!(
+			evaluate_expression_core("a == 1 OR b > 2", eval_simple_conditions(&conditions)),
+			"Uppercase OR"
+		);
+		assert!(
+			evaluate_expression_core("a == 1 or b > 2", eval_simple_conditions(&conditions)),
+			"Lowercase or"
+		);
+		assert!(
+			evaluate_expression_core("a == 1 oR b > 2", eval_simple_conditions(&conditions)),
+			"Mixed case oR"
+		);
+	}
+
 	// TODO: Uncomment and fix the following tests once the parser is updated to handle parentheses correctly.
 	// --- Tests for Parentheses Grouping ---
 	// #[test]
@@ -393,59 +497,6 @@ mod tests {
 	// 		filter.evaluate_expression(expression, &args),
 	// 		"FAILURE EXPECTED: Nested Parentheses failed. Expression: '{}'",
 	// 		expression
-	// 	);
-	// }
-
-	// // --- Tests for Syntax Variations ---
-	// #[test]
-	// fn test_evaluate_expression_fail_whitespace_sensitivity() {
-	// 	// Failure Reason: split(" OR ") and split(" AND ") require exactly one space.
-	// 	let filter = create_test_filter();
-	// 	let args = Some(vec![
-	// 		create_evm_param("val1", "100", "uint256"), // T
-	// 		create_evm_param("val2", "true", "bool"),   // T
-	// 	]);
-
-	// 	// Test OR with extra spaces
-	// 	let expr_or = "val1 > 50  OR  val2 == false"; // Expected T OR F => TRUE
-	// 	assert!(
-	// 		filter.evaluate_expression(expr_or, &args),
-	// 		"Whitespace sensitivity on 'OR'. Expression: '{}'",
-	// 		expr_or
-	// 	);
-
-	// 	// Test AND with extra spaces
-	// 	let expr_and = "val1 > 50 AND  val2 == true"; // Expected T AND T => TRUE
-	// 	assert!(
-	// 		filter.evaluate_expression(expr_and, &args),
-	// 		"Whitespace sensitivity on 'AND'. Expression: '{}'",
-	// 		expr_and
-	// 	);
-	// }
-
-	// #[test]
-	// fn test_evaluate_expression_fail_case_sensitivity() {
-	// 	// Failure Reason: split(" OR ") and split(" AND ") require uppercase operators.
-	// 	let filter = create_test_filter();
-	// 	let args = Some(vec![
-	// 		create_evm_param("val1", "100", "uint256"), // T
-	// 		create_evm_param("val2", "true", "bool"),   // T
-	// 	]);
-
-	// 	// Test lowercase 'or'
-	// 	let expr_or = "val1 > 50 or val2 == false"; // Expected T or F => TRUE
-	// 	assert!(
-	// 		filter.evaluate_expression(expr_or, &args),
-	// 		"Case sensitivity on 'or'. Expression: '{}'",
-	// 		expr_or
-	// 	);
-
-	// 	// Test lowercase 'and'
-	// 	let expr_and = "val1 > 50 and val2 == true"; // Expected T and T => TRUE
-	// 	assert!(
-	// 		filter.evaluate_expression(expr_and, &args),
-	// 		"Case sensitivity on 'and'. Expression: '{}'",
-	// 		expr_and
 	// 	);
 	// }
 }
