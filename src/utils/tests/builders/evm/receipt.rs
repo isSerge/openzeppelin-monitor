@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 /// A builder for creating test EVM transaction receipts with default values.
 #[derive(Debug, Default)]
-pub struct TestReceiptBuilder {
+pub struct ReceiptBuilder {
 	transaction_hash: Option<B256>,
 	status: Option<bool>,
 	gas_used: Option<U256>,
@@ -18,8 +18,8 @@ pub struct TestReceiptBuilder {
 	transaction_index: Option<Index>,
 }
 
-impl TestReceiptBuilder {
-	/// Creates a new TestReceiptBuilder instance.
+impl ReceiptBuilder {
+	/// Creates a new ReceiptBuilder instance.
 	pub fn new() -> Self {
 		Self::default()
 	}

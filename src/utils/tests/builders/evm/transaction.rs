@@ -3,7 +3,7 @@ use alloy::primitives::{Address, Bytes, B256, U256};
 
 /// A builder for creating test EVM transactions with default values.
 #[derive(Debug, Default)]
-pub struct TestTransactionBuilder {
+pub struct TransactionBuilder {
 	hash: Option<B256>,
 	from: Option<Address>,
 	to: Option<Address>,
@@ -16,8 +16,8 @@ pub struct TestTransactionBuilder {
 	nonce: Option<U256>,
 }
 
-impl TestTransactionBuilder {
-	/// Creates a new TestTransactionBuilder instance.
+impl TransactionBuilder {
+	/// Creates a new TransactionBuilder instance.
 	pub fn new() -> Self {
 		Self::default()
 	}

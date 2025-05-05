@@ -841,7 +841,7 @@ impl<T: BlockChainClient + EvmClientTrait> BlockFilter for EVMBlockFilter<T> {
 #[cfg(test)]
 mod tests {
 	use crate::utils::tests::evm::{
-		monitor::MonitorBuilder, receipt::TestReceiptBuilder, transaction::TestTransactionBuilder,
+		monitor::MonitorBuilder, receipt::ReceiptBuilder, transaction::TransactionBuilder,
 	};
 
 	use super::*;
@@ -973,11 +973,11 @@ mod tests {
 		let filter = create_test_filter();
 		let mut matched = Vec::new();
 		let monitor = create_test_monitor(vec![], vec![], vec![], vec![]);
-		let receipt = TestReceiptBuilder::new().build();
+		let receipt = ReceiptBuilder::new().build();
 
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new().build(),
+			&TransactionBuilder::new().build(),
 			&receipt,
 			&monitor,
 			&mut matched,
@@ -1003,12 +1003,12 @@ mod tests {
 			vec![], // addresses
 		);
 
-		let receipt_success = TestReceiptBuilder::new().build();
+		let receipt_success = ReceiptBuilder::new().build();
 
 		// Test successful transaction
 		filter.find_matching_transaction(
 			&TransactionStatus::Success,
-			&TestTransactionBuilder::new().build(),
+			&TransactionBuilder::new().build(),
 			&receipt_success,
 			&monitor,
 			&mut matched,
@@ -1018,12 +1018,12 @@ mod tests {
 		assert_eq!(matched[0].status, TransactionStatus::Success);
 
 		// Test failed transaction
-		let receipt_failure = TestReceiptBuilder::new().status(false).build();
+		let receipt_failure = ReceiptBuilder::new().status(false).build();
 
 		matched.clear();
 		filter.find_matching_transaction(
 			&TransactionStatus::Failure,
-			&TestTransactionBuilder::new().build(),
+			&TransactionBuilder::new().build(),
 			&receipt_failure,
 			&monitor,
 			&mut matched,
@@ -1046,8 +1046,8 @@ mod tests {
 			vec![], // addresses
 		);
 
-		let tx_1 = TestTransactionBuilder::new().value(U256::from(150)).build();
-		let tx_receipt_1 = TestReceiptBuilder::new()
+		let tx_1 = TransactionBuilder::new().value(U256::from(150)).build();
+		let tx_receipt_1 = ReceiptBuilder::new()
 			.status(true)
 			.transaction_hash(tx_1.hash)
 			.build();
@@ -1065,8 +1065,8 @@ mod tests {
 		assert_eq!(matched[0].expression, Some("value > 100".to_string()));
 
 		// Test transaction with value < 100
-		let tx_2 = TestTransactionBuilder::new().value(U256::from(50)).build();
-		let tx_receipt_2 = TestReceiptBuilder::new()
+		let tx_2 = TransactionBuilder::new().value(U256::from(50)).build();
+		let tx_receipt_2 = ReceiptBuilder::new()
 			.status(true)
 			.transaction_hash(tx_2.hash)
 			.build();
@@ -1100,8 +1100,8 @@ mod tests {
 		);
 
 		// Test matching 'to' address
-		let tx_matching = TestTransactionBuilder::new().to(test_address).build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_matching = TransactionBuilder::new().to(test_address).build();
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.to(test_address)
 			.transaction_hash(tx_matching.hash)
 			.build();
@@ -1119,10 +1119,10 @@ mod tests {
 		// Test non-matching 'to' address
 		let address_non_matching =
 			Address::from_str("0x0000000000000000000000000000000000004321").unwrap();
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.to(address_non_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.to(address_non_matching)
 			.transaction_hash(tx_non_matching.hash)
 			.build();
@@ -1156,8 +1156,8 @@ mod tests {
 		);
 
 		// Test matching 'from' address
-		let tx_matching = TestTransactionBuilder::new().from(test_address).build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_matching = TransactionBuilder::new().from(test_address).build();
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.from(test_address)
 			.transaction_hash(tx_matching.hash)
 			.build();
@@ -1175,10 +1175,10 @@ mod tests {
 		// Test non-matching 'from' address
 		let address_non_matching =
 			Address::from_str("0x0000000000000000000000000000000000004321").unwrap();
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.from(address_non_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.from(address_non_matching)
 			.transaction_hash(tx_non_matching.hash)
 			.build();
@@ -1208,10 +1208,10 @@ mod tests {
 
 		// Test transaction with gas price > 1 Gwei
 		let gas_price_matching = U256::from(1500000000); // 1.5 Gwei
-		let tx_matching = TestTransactionBuilder::new()
+		let tx_matching = TransactionBuilder::new()
 			.gas_price(gas_price_matching)
 			.build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.build();
 
@@ -1228,10 +1228,10 @@ mod tests {
 
 		// Test transaction with gas price < 1 Gwei
 		let gas_price_non_matching = U256::from(500000000); // 0.5 Gwei
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.gas_price(gas_price_non_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
 
@@ -1260,10 +1260,10 @@ mod tests {
 
 		// Test transaction with max_fee_per_gas > 1 Gwei
 		let max_fee_per_gas_matching = U256::from(1500000000); // 1.5 Gwei
-		let tx_matching = TestTransactionBuilder::new()
+		let tx_matching = TransactionBuilder::new()
 			.max_fee_per_gas(max_fee_per_gas_matching)
 			.build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.build();
 
@@ -1279,10 +1279,10 @@ mod tests {
 
 		// Test transaction with max_fee_per_gas < 1 Gwei
 		let max_fee_per_gas_non_matching = U256::from(500000000); // 0.5 Gwei
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.max_fee_per_gas(max_fee_per_gas_non_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
 
@@ -1310,10 +1310,10 @@ mod tests {
 
 		// Test transaction with max_priority_fee_per_gas > 1 Gwei
 		let max_priority_fee_per_gas_matching = U256::from(1500000000); // 1.5 Gwei
-		let tx_matching = TestTransactionBuilder::new()
+		let tx_matching = TransactionBuilder::new()
 			.max_priority_fee_per_gas(max_priority_fee_per_gas_matching)
 			.build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.build();
 
@@ -1329,10 +1329,10 @@ mod tests {
 
 		// Test transaction with max_priority_fee_per_gas < 1 Gwei
 		let max_priority_fee_per_gas_non_matching = U256::from(500000000); // 0.5 Gwei
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.max_priority_fee_per_gas(max_priority_fee_per_gas_non_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
 
@@ -1360,10 +1360,10 @@ mod tests {
 
 		// Test transaction with gas_limit > 20k
 		let gas_limit_matching = U256::from(30000); // 30k
-		let tx_matching = TestTransactionBuilder::new()
+		let tx_matching = TransactionBuilder::new()
 			.gas_limit(gas_limit_matching)
 			.build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.build();
 
@@ -1379,10 +1379,10 @@ mod tests {
 
 		// Test transaction with gas_limit < 20k
 		let gas_limit_non_matching = U256::from(10000); // 10k
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.gas_limit(gas_limit_non_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
 
@@ -1410,8 +1410,8 @@ mod tests {
 
 		// Test transaction with gas_limit > 20k
 		let nonce_matching = U256::from(5);
-		let tx_matching = TestTransactionBuilder::new().nonce(nonce_matching).build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_matching = TransactionBuilder::new().nonce(nonce_matching).build();
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.build();
 
@@ -1427,10 +1427,10 @@ mod tests {
 
 		// Test transaction with gas_limit < 20k
 		let nonce_not_matching = U256::from(55);
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.nonce(nonce_not_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
 
@@ -1458,8 +1458,8 @@ mod tests {
 
 		// Test transaction with matching input
 		let input_matching = Bytes(hex::decode("1234").unwrap().into());
-		let tx_matching = TestTransactionBuilder::new().input(input_matching).build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_matching = TransactionBuilder::new().input(input_matching).build();
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.build();
 
@@ -1475,10 +1475,10 @@ mod tests {
 
 		// Test transaction with non-matching input
 		let input_not_matching = Bytes(hex::decode("5678").unwrap().into());
-		let tx_non_matching = TestTransactionBuilder::new()
+		let tx_non_matching = TransactionBuilder::new()
 			.input(input_not_matching)
 			.build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.build();
 
@@ -1506,8 +1506,8 @@ mod tests {
 
 		// Test transaction with gas_used > 20k
 		let gas_used_matching = U256::from(30000); // 30k
-		let tx_matching = TestTransactionBuilder::new().build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_matching = TransactionBuilder::new().build();
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.gas_used(gas_used_matching)
 			.build();
@@ -1524,8 +1524,8 @@ mod tests {
 
 		// Test transaction with gas_used < 20k
 		let gas_used_non_matching = U256::from(10000); // 10k
-		let tx_non_matching = TestTransactionBuilder::new().build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_non_matching = TransactionBuilder::new().build();
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.gas_used(gas_used_non_matching)
 			.build();
@@ -1553,8 +1553,8 @@ mod tests {
 		let monitor = create_test_monitor(vec![], vec![], vec![condition], vec![]);
 
 		// Test transaction with matching transaction index
-		let tx_matching = TestTransactionBuilder::new().build();
-		let tx_receipt_matching = TestReceiptBuilder::new()
+		let tx_matching = TransactionBuilder::new().build();
+		let tx_receipt_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_matching.hash)
 			.transaction_index(15)
 			.build();
@@ -1570,8 +1570,8 @@ mod tests {
 		assert_eq!(matched[0].expression, Some(expression));
 
 		// Test transaction with non-matching transaction index
-		let tx_non_matching = TestTransactionBuilder::new().build();
-		let tx_receipt_non_matching = TestReceiptBuilder::new()
+		let tx_non_matching = TransactionBuilder::new().build();
+		let tx_receipt_non_matching = ReceiptBuilder::new()
 			.transaction_hash(tx_non_matching.hash)
 			.transaction_index(1)
 			.build();
@@ -1646,7 +1646,7 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = TestTransactionBuilder::new()
+		let transaction = TransactionBuilder::new()
 			.from(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
 			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
 			.input(Bytes(encoded.into()))
@@ -1725,7 +1725,7 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = TestTransactionBuilder::new()
+		let transaction = TransactionBuilder::new()
 			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
 			.input(Bytes(encoded.into()))
 			.build();
@@ -1757,7 +1757,7 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = TestTransactionBuilder::new()
+		let transaction = TransactionBuilder::new()
 			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
 			.input(Bytes(encoded.into()))
 			.build();
@@ -1827,7 +1827,7 @@ mod tests {
 		];
 
 		let encoded = function.encode_input(&params).unwrap();
-		let transaction = TestTransactionBuilder::new()
+		let transaction = TransactionBuilder::new()
 			.to(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
 			.input(Bytes(encoded.into()))
 			.build();
@@ -1870,7 +1870,7 @@ mod tests {
 			.build();
 
 		// Test with invalid input data (less than 4 bytes)
-		let transaction = TestTransactionBuilder::new()
+		let transaction = TransactionBuilder::new()
 			.to(Address::from_str("0x0000000000000000000000000000000000004321").unwrap())
 			.input(Bytes(vec![0x12, 0x34].into()))
 			.build();
@@ -1916,7 +1916,7 @@ mod tests {
 		// Create a transaction receipt with a Transfer event
 		let contract_address =
 			Address::from_str("0x0000000000000000000000000000000000004321").unwrap();
-		let receipt = TestReceiptBuilder::new()
+		let receipt = ReceiptBuilder::new()
 			.contract_address(contract_address)
 			.from(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
 			.to(Address::from_str("0x0000000000000000000000000000000000005678").unwrap())
@@ -1973,7 +1973,7 @@ mod tests {
 		// Create a receipt with value > 500 (should match)
 		let contract_address =
 			Address::from_str("0x0000000000000000000000000000000000004321").unwrap();
-		let receipt = TestReceiptBuilder::new()
+		let receipt = ReceiptBuilder::new()
 			.contract_address(contract_address)
 			.from(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
 			.to(Address::from_str("0x0000000000000000000000000000000000005678").unwrap())
@@ -2003,7 +2003,7 @@ mod tests {
 		}
 		involved_addresses.clear();
 
-		let receipt_no_match = TestReceiptBuilder::new()
+		let receipt_no_match = ReceiptBuilder::new()
 			.contract_address(contract_address)
 			.from(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
 			.to(Address::from_str("0x0000000000000000000000000000000000005678").unwrap())
@@ -2049,7 +2049,7 @@ mod tests {
 		// Create a receipt with non-matching contract address
 		let different_address =
 			Address::from_str("0x0000000000000000000000000000000000001234").unwrap();
-		let receipt = TestReceiptBuilder::new()
+		let receipt = ReceiptBuilder::new()
 			.contract_address(different_address)
 			.from(Address::from_str("0x0000000000000000000000000000000000001234").unwrap())
 			.to(Address::from_str("0x0000000000000000000000000000000000005678").unwrap())
