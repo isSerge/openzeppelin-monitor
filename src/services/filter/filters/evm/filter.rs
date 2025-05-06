@@ -450,6 +450,15 @@ impl<T> EVMBlockFilter<T> {
 				// Evaluate single condition
 				match param.kind.as_str() {
 					"uint64" | "uint256" | "uint" => {
+						// Check if value is empty - invalid for numeric comparison
+						if value.is_empty() {
+							tracing::warn!(
+								"Comparison value is empty for numeric comparison against parameter '{}'",
+								param_name
+							);
+							return false;
+						}
+						
 						let Ok(param_value) = U256::from_str(&param.value) else {
 							tracing::warn!("Failed to parse parameter value: {}", param.value);
 							return false;
