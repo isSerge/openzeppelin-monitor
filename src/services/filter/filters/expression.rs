@@ -7,10 +7,10 @@ use regex::Regex;
 use thiserror::Error;
 use winnow::{
 	ascii::{digit1, space0, Caseless},
-	combinator::{alt, delimited, repeat},
+	combinator::{alt, delimited, opt, repeat},
 	error::ContextError,
 	prelude::*,
-	token::{literal, take_while},
+	token::{literal, one_of, take_while},
 };
 
 lazy_static! {
@@ -25,7 +25,8 @@ lazy_static! {
 pub enum Value<'a> {
 	Bool(bool),
 	Str(&'a str),
-	Number(i128), // TODO: double check if this is the right type
+	// Store as str, conversion to specific type is done within chain context
+	Number(&'a str),
 	Variable(&'a str),
 }
 
@@ -87,10 +88,11 @@ fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 
 /// Parser integer literals into `Value::Number`
 fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
-	digit1
-		.try_map(|s: &str| s.parse::<i128>())
-		.map(|n| Value::Number(n))
-		.parse_next(input)
+	let start_input = *input;
+	let _ = (opt(one_of(['+', '-'])), digit1).parse_next(input)?;
+	let consumed_len = start_input.len() - input.len();
+	let number_str = &start_input[..consumed_len];
+	Ok(Value::Number(number_str))
 }
 
 // TODO: handle escaped quotes
@@ -106,6 +108,7 @@ fn parse_string<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 	.parse_next(input)
 }
 
+// TODO: reject keywords like "true", "false", etc.
 /// Parses a variable name into `Value::Variable`
 fn parse_variable<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 	// Match variable names (alphanumeric and underscores)
@@ -240,8 +243,6 @@ fn parse_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	delimited(space0, parse_or_expression, space0).parse_next(input)
 }
 
-// TODO: add documentation
-// TODO: consider returning a Result instead of a bool
 pub fn evaluate_expression_core<F>(expression: &str, mut eval_single_condition: F) -> bool
 where
 	F: FnMut(&str, &str, &str) -> bool,
