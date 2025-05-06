@@ -458,7 +458,7 @@ impl<T> EVMBlockFilter<T> {
 							);
 							return false;
 						}
-						
+
 						let Ok(param_value) = U256::from_str(&param.value) else {
 							tracing::warn!("Failed to parse parameter value: {}", param.value);
 							return false;
