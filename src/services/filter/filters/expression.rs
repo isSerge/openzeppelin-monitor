@@ -7,8 +7,8 @@ use regex::Regex;
 use thiserror::Error;
 use winnow::{
 	ascii::{digit1, space0, Caseless},
-	combinator::{alt, delimited},
-	error::{ContextError, ParseError},
+	combinator::{alt, delimited, repeat},
+	error::ContextError,
 	prelude::*,
 	token::{literal, take_while},
 };
@@ -47,7 +47,7 @@ pub enum LogicalOperator {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Condition<'a> {
-	pub left: Value<'a>,
+	pub left: &'a str, // variable name
 	pub operator: ComparisonOperator,
 	pub right: Value<'a>,
 }
@@ -73,7 +73,6 @@ pub enum ExpressionParseError {
 
 /// --- Helper aliases ---
 type Input<'a> = &'a str;
-type ParserError<'a> = ParseError<Input<'a>, ContextError>;
 type ParserResult<T> = winnow::Result<T>;
 
 /// --- Parser functions ---
@@ -94,6 +93,7 @@ fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 		.parse_next(input)
 }
 
+// TODO: handle escaped quotes
 /// Parses string literals enclosed in single quotes into `Value::Str`
 fn parse_string<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 	// Match opening quote, content (non-quote characters), closing quote
@@ -148,8 +148,18 @@ fn parse_condition<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	let (left, op, right) =
 		(parse_variable, parse_comparison_operator, parse_value).parse_next(input)?;
 
+	// Ensure the left side is a variable name
+	let variable_name = match left {
+		Value::Variable(name) => name,
+		_ => {
+			// TODO: add more context
+			let error = ContextError::new();
+			return Err(error);
+		}
+	};
+
 	let condition = Condition {
-		left,
+		left: variable_name,
 		operator: op,
 		right,
 	};
@@ -157,20 +167,77 @@ fn parse_condition<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	Ok(Expression::Condition(condition))
 }
 
-/// Parses a logical expression (e.g., "A AND B OR C")
-/// Handles optional whitespace around the logical operator
-fn parse_logical_operator<'a>(
-	input: &mut Input<'a>,
-) -> ParserResult<LogicalOperator> {
+/// Parses the highest precedence components: conditions and parenthesized expressions
+fn parse_term<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	delimited(
 		space0,
 		alt((
-			literal(Caseless("AND")).map(|_| LogicalOperator::And),
-			literal(Caseless("OR")).map(|_| LogicalOperator::Or),
+			// Parse a condition
+			parse_condition,
+			// Parse a parenthesized expression
+			delimited(
+				(literal("("), space0),
+				parse_expression,
+				(space0, literal(")")),
+			),
 		)),
 		space0,
 	)
 	.parse_next(input)
+}
+
+// TODO: ensure EOF is reached after parsing
+/// Parses the AND operator and its components
+fn parse_and_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
+	let left = parse_term.parse_next(input)?;
+
+	let and_operator_parser = delimited(
+		space0,
+		literal(Caseless("AND")).value(LogicalOperator::And),
+		space0,
+	);
+
+	let trailing_parser = (and_operator_parser, parse_term);
+
+	let mut folded_and_parser = repeat(0.., trailing_parser).fold(
+		move || left.clone(), // Clone the left side for initial value
+		|acc, (op, right)| Expression::Logical {
+			left: Box::new(acc),
+			operator: op,
+			right: Box::new(right),
+		},
+	);
+
+	folded_and_parser.parse_next(input)
+}
+
+/// Parses the OR operator and its components
+fn parse_or_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
+	let left = parse_and_expression.parse_next(input)?;
+
+	let or_operator_parser = delimited(
+		space0,
+		literal(Caseless("OR")).value(LogicalOperator::Or),
+		space0,
+	);
+
+	let trailing_parser = (or_operator_parser, parse_and_expression);
+
+	let mut folded_or_parser = repeat(0.., trailing_parser).fold(
+		move || left.clone(), // Clone the left side for initial value
+		|acc, (op, right)| Expression::Logical {
+			left: Box::new(acc),
+			operator: op,
+			right: Box::new(right),
+		},
+	);
+
+	folded_or_parser.parse_next(input)
+}
+
+/// Parses the entire expression, starting from the highest precedence
+fn parse_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
+	delimited(space0, parse_or_expression, space0).parse_next(input)
 }
 
 // TODO: add documentation
