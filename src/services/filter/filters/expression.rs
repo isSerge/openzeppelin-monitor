@@ -4,6 +4,9 @@
 use crate::utils::split_expression;
 use lazy_static::lazy_static;
 use regex::Regex;
+use thiserror::Error;
+use winnow::error::{ContextError, ParseError};
+use winnow::prelude::*;
 
 lazy_static! {
 	// Matches "OR" with case-insensitivity and flexible whitespace
@@ -11,6 +14,60 @@ lazy_static! {
 	// Matches "AND" with case-insensitivity and flexible whitespace
 	static ref RE_AND: Regex = Regex::new(r"(?i)\s+AND\s+").unwrap();
 }
+
+/// --- AST definitions ---
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value<'a> {
+	Bool(bool),
+	Str(&'a str),
+	Number(i128), // TODO: double check if this is the right type
+	Variable(&'a str),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComparisonOperator {
+	Eq,
+	Ne,
+	Gt,
+	Gte,
+	Lt,
+	Lte,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogicalOperator {
+	And,
+	Or,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Condition<'a> {
+	pub left: &'a str,
+	pub operator: ComparisonOperator,
+	pub right: Value<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Expression<'a> {
+	Condition(Condition<'a>),
+	Logical {
+		left: Box<Expression<'a>>,
+		operator: LogicalOperator,
+		right: Box<Expression<'a>>,
+	}
+}
+
+/// --- Error definitions ---
+#[derive(Debug, PartialEq, Eq, Error)]
+pub enum ExpressionParseError {
+	#[error("Winnow parsing error")]
+	Parser(String),
+	// TODO: add more speciifc error types
+}
+
+/// --- Helper aliases ---
+type Input<'a> = &'a str;
+type SimpleError<'a> = ParseError<Input<'a>, ContextError>;
 
 // TODO: add documentation
 // TODO: consider returning a Result instead of a bool
