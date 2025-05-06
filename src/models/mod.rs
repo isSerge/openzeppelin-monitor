@@ -5,17 +5,19 @@
 //! - `blockchain`: Platform-specific implementations for different blockchains (EVM, Stellar)
 //! - `config`: Configuration loading and validation
 //! - `core`: Core domain models (Monitor, Network, Trigger)
+//! - `security`: Security models (Secret)
 
 mod blockchain;
 mod config;
 mod core;
+mod security;
 
 // Re-export blockchain types
 pub use blockchain::{BlockChainType, BlockType, MonitorMatch, ProcessedBlock, TransactionType};
 
 pub use blockchain::evm::{
-	EVMBaseTransaction, EVMBlock, EVMMatchArguments, EVMMatchParamEntry, EVMMatchParamsMap,
-	EVMMonitorMatch, EVMReceiptLog, EVMTransaction, EVMTransactionReceipt,
+	EVMBaseReceipt, EVMBaseTransaction, EVMBlock, EVMMatchArguments, EVMMatchParamEntry,
+	EVMMatchParamsMap, EVMMonitorMatch, EVMReceiptLog, EVMTransaction, EVMTransactionReceipt,
 };
 
 pub use blockchain::stellar::{
@@ -33,3 +35,6 @@ pub use core::{
 
 // Re-export config types
 pub use config::{ConfigError, ConfigLoader};
+
+// Re-export security types
+pub use security::{SecretString, SecretValue, SecurityError};

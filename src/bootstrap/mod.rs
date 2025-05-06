@@ -65,20 +65,20 @@ type ServiceResult<M, N, T> = Result<(
 /// - `Arc<Mutex<T>>`: Data access for trigger configs
 /// # Errors
 /// Returns an error if any service initialization fails
-pub fn initialize_services<M, N, T>(
+pub async fn initialize_services<M, N, T>(
 	monitor_service: Option<MonitorService<M, N, T>>,
 	network_service: Option<NetworkService<N>>,
 	trigger_service: Option<TriggerService<T>>,
 ) -> ServiceResult<M, N, T>
 where
-	M: MonitorRepositoryTrait<N, T>,
-	N: NetworkRepositoryTrait,
-	T: TriggerRepositoryTrait,
+	M: MonitorRepositoryTrait<N, T> + Send + Sync + 'static,
+	N: NetworkRepositoryTrait + Send + Sync + 'static,
+	T: TriggerRepositoryTrait + Send + Sync + 'static,
 {
 	let network_service = match network_service {
 		Some(service) => service,
 		None => {
-			let repository = N::new(None)?;
+			let repository = N::new(None).await?;
 			NetworkService::<N>::new_with_repository(repository)?
 		}
 	};
@@ -86,7 +86,7 @@ where
 	let trigger_service = match trigger_service {
 		Some(service) => service,
 		None => {
-			let repository = T::new(None)?;
+			let repository = T::new(None).await?;
 			TriggerService::<T>::new_with_repository(repository)?
 		}
 	};
@@ -98,7 +98,8 @@ where
 				None,
 				Some(network_service.clone()),
 				Some(trigger_service.clone()),
-			)?;
+			)
+			.await?;
 			MonitorService::<M, N, T>::new_with_repository(repository)?
 		}
 	};
@@ -393,10 +394,13 @@ async fn run_trigger_filters(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::models::{
-		EVMMonitorMatch, EVMTransaction, EVMTransactionReceipt, MatchConditions, Monitor,
-		MonitorMatch, ScriptLanguage, StellarBlock, StellarMonitorMatch, StellarTransaction,
-		StellarTransactionInfo, TriggerConditions,
+	use crate::{
+		models::{
+			EVMMonitorMatch, EVMTransaction, EVMTransactionReceipt, MatchConditions, Monitor,
+			MonitorMatch, ScriptLanguage, StellarBlock, StellarMonitorMatch, StellarTransaction,
+			StellarTransactionInfo, TriggerConditions,
+		},
+		utils::tests::builders::evm::monitor::MonitorBuilder,
 	};
 	use alloy::{
 		consensus::{
@@ -419,18 +423,16 @@ mod tests {
 		paused: bool,
 		script_path: Option<&str>,
 	) -> Monitor {
-		Monitor {
-			name: name.to_string(),
-			networks: networks.into_iter().map(|s| s.to_string()).collect(),
-			paused,
-			trigger_conditions: vec![TriggerConditions {
-				language: ScriptLanguage::Python,
-				script_path: script_path.unwrap_or("test.py").to_string(),
-				timeout_ms: 1000,
-				arguments: None,
-			}],
-			..Default::default()
+		let mut builder = MonitorBuilder::new()
+			.name(name)
+			.networks(networks.into_iter().map(|s| s.to_string()).collect())
+			.paused(paused);
+
+		if let Some(path) = script_path {
+			builder = builder.trigger_condition(path, 1000, ScriptLanguage::Python, None);
 		}
+
+		builder.build()
 	}
 
 	fn create_test_evm_transaction_receipt() -> EVMTransactionReceipt {
@@ -806,26 +808,12 @@ print(result)
 	#[tokio::test]
 	async fn test_run_trigger_filters_multiple_conditions_keep_match() {
 		// Create a monitor with two trigger conditions
-		let monitor = Monitor {
-			name: "monitor_test".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			trigger_conditions: vec![
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "test1.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "test2.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-			],
-			..Default::default()
-		};
+		let monitor = MonitorBuilder::new()
+			.name("monitor_test")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("test1.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("test2.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		// Create a match with this monitor
 		let match_item = create_mock_monitor_match_from_monitor(BlockChainType::EVM, monitor);
@@ -870,27 +858,12 @@ print(True)
 
 	#[tokio::test]
 	async fn test_run_trigger_filters_condition_two_combinations_exclude_match() {
-		// Create a monitor with three trigger conditions with different execution orders
-		let monitor = Monitor {
-			name: "monitor_test".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			trigger_conditions: vec![
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition1.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition2.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-			],
-			..Default::default()
-		};
+		let monitor = MonitorBuilder::new()
+			.name("monitor_test")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("condition1.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition2.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		let match_item = create_mock_monitor_match_from_monitor(BlockChainType::EVM, monitor);
 
@@ -912,27 +885,12 @@ print(True)
 
 	#[tokio::test]
 	async fn test_run_trigger_filters_condition_two_combinations_keep_match() {
-		// Create a monitor with three trigger conditions with different execution orders
-		let monitor = Monitor {
-			name: "monitor_test".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			trigger_conditions: vec![
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition1.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition2.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-			],
-			..Default::default()
-		};
+		let monitor = MonitorBuilder::new()
+			.name("monitor_test")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("condition1.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition2.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		let match_item = create_mock_monitor_match_from_monitor(BlockChainType::EVM, monitor);
 
@@ -953,27 +911,12 @@ print(True)
 
 	#[tokio::test]
 	async fn test_run_trigger_filters_condition_two_combinations_exclude_match_last_condition() {
-		// Create a monitor with three trigger conditions with different execution orders
-		let monitor = Monitor {
-			name: "monitor_test".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			trigger_conditions: vec![
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition1.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition2.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-			],
-			..Default::default()
-		};
+		let monitor = MonitorBuilder::new()
+			.name("monitor_test")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("condition1.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition2.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		let match_item = create_mock_monitor_match_from_monitor(BlockChainType::EVM, monitor);
 
@@ -994,33 +937,13 @@ print(True)
 
 	#[tokio::test]
 	async fn test_run_trigger_filters_condition_three_combinations_exclude_match() {
-		// Create a monitor with three trigger conditions with different execution orders
-		let monitor = Monitor {
-			name: "monitor_test".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			trigger_conditions: vec![
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition1.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition2.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition3.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-			],
-			..Default::default()
-		};
+		let monitor = MonitorBuilder::new()
+			.name("monitor_test")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("condition1.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition2.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition3.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		let match_item = create_mock_monitor_match_from_monitor(BlockChainType::EVM, monitor);
 
@@ -1045,33 +968,13 @@ print(True)
 
 	#[tokio::test]
 	async fn test_run_trigger_filters_condition_three_combinations_keep_match() {
-		// Create a monitor with three trigger conditions with different execution orders
-		let monitor = Monitor {
-			name: "monitor_test".to_string(),
-			networks: vec!["ethereum_mainnet".to_string()],
-			paused: false,
-			trigger_conditions: vec![
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition1.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition2.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition3.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-			],
-			..Default::default()
-		};
+		let monitor = MonitorBuilder::new()
+			.name("monitor_test")
+			.networks(vec!["ethereum_mainnet".to_string()])
+			.trigger_condition("condition1.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition2.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition3.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		let match_item = create_mock_monitor_match_from_monitor(BlockChainType::EVM, monitor);
 
@@ -1152,26 +1055,12 @@ print(result)
 
 	#[tokio::test]
 	async fn test_run_trigger_filters_stellar_multiple_conditions() {
-		let monitor = Monitor {
-			name: "monitor_test".to_string(),
-			networks: vec!["stellar_mainnet".to_string()],
-			paused: false,
-			trigger_conditions: vec![
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition1.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-				TriggerConditions {
-					language: ScriptLanguage::Python,
-					script_path: "condition2.py".to_string(),
-					timeout_ms: 1000,
-					arguments: None,
-				},
-			],
-			..Default::default()
-		};
+		let monitor = MonitorBuilder::new()
+			.name("monitor_test")
+			.networks(vec!["stellar_mainnet".to_string()])
+			.trigger_condition("condition1.py", 1000, ScriptLanguage::Python, None)
+			.trigger_condition("condition2.py", 1000, ScriptLanguage::Python, None)
+			.build();
 
 		let match_item = create_mock_monitor_match_from_monitor(BlockChainType::Stellar, monitor);
 

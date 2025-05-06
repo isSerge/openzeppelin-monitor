@@ -17,7 +17,6 @@ use crate::{
 };
 
 // Type aliases to simplify complex types in function signatures
-
 //  MonitorService
 pub type MonitorServiceData = web::Data<
 	Arc<
@@ -126,12 +125,12 @@ pub fn create_metrics_server(
 mod tests {
 	use super::*;
 	use crate::{
-		models::{
-			BlockChainType, Monitor, Network, NotificationMessage, RpcUrl, Trigger, TriggerType,
-			TriggerTypeConfig,
-		},
+		models::{BlockChainType, Monitor, Network, Trigger},
 		repositories::{
 			MonitorService, NetworkRepository, NetworkService, TriggerRepository, TriggerService,
+		},
+		utils::tests::{
+			evm::monitor::MonitorBuilder, network::NetworkBuilder, trigger::TriggerBuilder,
 		},
 	};
 	use actix_web::{test, App};
@@ -145,49 +144,34 @@ mod tests {
 		paused: bool,
 		triggers: Vec<&str>,
 	) -> Monitor {
-		Monitor {
-			name: name.to_string(),
-			networks: networks.into_iter().map(|s| s.to_string()).collect(),
-			paused,
-			triggers: triggers.into_iter().map(|s| s.to_string()).collect(),
-			..Default::default()
-		}
+		MonitorBuilder::new()
+			.name(name)
+			.networks(networks.into_iter().map(|s| s.to_string()).collect())
+			.paused(paused)
+			.triggers(triggers.into_iter().map(|s| s.to_string()).collect())
+			.build()
 	}
 
 	fn create_test_trigger(name: &str) -> Trigger {
-		Trigger {
-			name: name.to_string(),
-			trigger_type: TriggerType::Slack,
-			config: TriggerTypeConfig::Slack {
-				slack_url:
-					"https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX" // noboost
-						.to_string(),
-				message: NotificationMessage {
-					title: "Test Title".to_string(),
-					body: "Test Body".to_string(),
-				},
-			},
-		}
+		TriggerBuilder::new()
+			.name(name)
+			.slack("https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX") //noboost
+			.message("Test Title", "Test Body")
+			.build()
 	}
 
 	pub fn create_test_network(name: &str, slug: &str, network_type: BlockChainType) -> Network {
-		Network {
-			name: name.to_string(),
-			slug: slug.to_string(),
-			network_type,
-			rpc_urls: vec![RpcUrl {
-				url: "http://localhost:8545".to_string(),
-				type_: "rpc".to_string(),
-				weight: 100,
-			}],
-			cron_schedule: "*/5 * * * * *".to_string(),
-			confirmation_blocks: 1,
-			store_blocks: Some(false),
-			chain_id: Some(1),
-			network_passphrase: None,
-			block_time_ms: 1000,
-			max_past_blocks: None,
-		}
+		NetworkBuilder::new()
+			.name(name)
+			.slug(slug)
+			.network_type(network_type)
+			.chain_id(1)
+			.rpc_url("http://localhost:8545")
+			.block_time_ms(1000)
+			.confirmation_blocks(1)
+			.cron_schedule("*/5 * * * * *")
+			.store_blocks(false)
+			.build()
 	}
 
 	fn create_mock_configs() -> (PathBuf, PathBuf, PathBuf, TempDir) {
@@ -240,7 +224,7 @@ mod tests {
 		(monitor_dir, trigger_dir, network_dir, temp_dir)
 	}
 
-	fn create_test_services() -> (
+	async fn create_test_services() -> (
 		MonitorServiceArc,
 		NetworkServiceArc,
 		TriggerServiceArc,
@@ -248,14 +232,19 @@ mod tests {
 	) {
 		let (monitor_path, trigger_path, network_path, temp_dir) = create_mock_configs();
 		let network_service =
-			NetworkService::<NetworkRepository>::new(Some(network_path.parent().unwrap())).unwrap();
+			NetworkService::<NetworkRepository>::new(Some(network_path.parent().unwrap()))
+				.await
+				.unwrap();
 		let trigger_service =
-			TriggerService::<TriggerRepository>::new(Some(trigger_path.parent().unwrap())).unwrap();
+			TriggerService::<TriggerRepository>::new(Some(trigger_path.parent().unwrap()))
+				.await
+				.unwrap();
 		let monitor_service = MonitorService::new(
 			Some(monitor_path.parent().unwrap()),
 			Some(network_service.clone()),
 			Some(trigger_service.clone()),
 		)
+		.await
 		.unwrap();
 
 		(
@@ -269,7 +258,8 @@ mod tests {
 	#[actix_web::test]
 	async fn test_metrics_handler() {
 		// Create test services
-		let (monitor_service, network_service, trigger_service, _temp_dir) = create_test_services();
+		let (monitor_service, network_service, trigger_service, _temp_dir) =
+			create_test_services().await;
 
 		// Create test app
 		let app = test::init_service(
@@ -310,7 +300,8 @@ mod tests {
 	#[tokio::test]
 	async fn test_create_metrics_server() {
 		// Create test services
-		let (monitor_service, network_service, trigger_service, _temp_dir) = create_test_services();
+		let (monitor_service, network_service, trigger_service, _temp_dir) =
+			create_test_services().await;
 
 		// Find an available port
 		let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
