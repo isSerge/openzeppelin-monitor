@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use thiserror::Error;
 use winnow::{
-	ascii::{digit1, space0},
+	ascii::{digit1, space0, Caseless},
 	combinator::{alt, delimited},
 	error::{ContextError, ParseError},
 	prelude::*,
@@ -47,7 +47,7 @@ pub enum LogicalOperator {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Condition<'a> {
-	pub left: &'a str,
+	pub left: Value<'a>,
 	pub operator: ComparisonOperator,
 	pub right: Value<'a>,
 }
@@ -120,6 +120,54 @@ fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 	delimited(
 		space0,
 		alt((parse_boolean, parse_number, parse_string, parse_variable)),
+		space0,
+	)
+	.parse_next(input)
+}
+
+/// Parses a comparison operator (e.g., ==, !=, >, >=, <, <=)
+/// Handles optional whitespace around the operator
+fn parse_comparison_operator<'a>(input: &mut Input<'a>) -> ParserResult<ComparisonOperator> {
+	delimited(
+		space0,
+		alt((
+			literal("==").map(|_| ComparisonOperator::Eq),
+			literal("!=").map(|_| ComparisonOperator::Ne),
+			literal(">").map(|_| ComparisonOperator::Gt),
+			literal(">=").map(|_| ComparisonOperator::Gte),
+			literal("<").map(|_| ComparisonOperator::Lt),
+			literal("<=").map(|_| ComparisonOperator::Lte),
+		)),
+		space0,
+	)
+	.parse_next(input)
+}
+
+/// Parses a condition expression (e.g., "a == 1") into an `Expression::Condition`
+fn parse_condition<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
+	let (left, op, right) =
+		(parse_variable, parse_comparison_operator, parse_value).parse_next(input)?;
+
+	let condition = Condition {
+		left,
+		operator: op,
+		right,
+	};
+
+	Ok(Expression::Condition(condition))
+}
+
+/// Parses a logical expression (e.g., "A AND B OR C")
+/// Handles optional whitespace around the logical operator
+fn parse_logical_operator<'a>(
+	input: &mut Input<'a>,
+) -> ParserResult<LogicalOperator> {
+	delimited(
+		space0,
+		alt((
+			literal(Caseless("AND")).map(|_| LogicalOperator::And),
+			literal(Caseless("OR")).map(|_| LogicalOperator::Or),
+		)),
 		space0,
 	)
 	.parse_next(input)
