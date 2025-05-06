@@ -5,8 +5,13 @@ use crate::utils::split_expression;
 use lazy_static::lazy_static;
 use regex::Regex;
 use thiserror::Error;
-use winnow::error::{ContextError, ParseError};
-use winnow::prelude::*;
+use winnow::{
+	ascii::{digit1, space0},
+	combinator::{alt, delimited},
+	error::{ContextError, ParseError},
+	prelude::*,
+	token::{literal, take_while},
+};
 
 lazy_static! {
 	// Matches "OR" with case-insensitivity and flexible whitespace
@@ -54,7 +59,8 @@ pub enum Expression<'a> {
 		left: Box<Expression<'a>>,
 		operator: LogicalOperator,
 		right: Box<Expression<'a>>,
-	}
+	},
+	// TODO: Add Parenthesized Expression variant later
 }
 
 /// --- Error definitions ---
@@ -67,7 +73,57 @@ pub enum ExpressionParseError {
 
 /// --- Helper aliases ---
 type Input<'a> = &'a str;
-type SimpleError<'a> = ParseError<Input<'a>, ContextError>;
+type ParserError<'a> = ParseError<Input<'a>, ContextError>;
+type ParserResult<T> = winnow::Result<T>;
+
+/// --- Parser functions ---
+/// Parses boolean literals into `Value::Bool`
+fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+	alt((
+		literal("true").map(|_| Value::Bool(true)),
+		literal("false").map(|_| Value::Bool(false)),
+	))
+	.parse_next(input)
+}
+
+/// Parser integer literals into `Value::Number`
+fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+	digit1
+		.try_map(|s: &str| s.parse::<i128>())
+		.map(|n| Value::Number(n))
+		.parse_next(input)
+}
+
+/// Parses string literals enclosed in single quotes into `Value::Str`
+fn parse_string<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+	// Match opening quote, content (non-quote characters), closing quote
+	delimited(
+		'\'',                           // Start delimiter
+		take_while(0.., |c| c != '\''), // Content: take 0 or more chars that are not '
+		'\'',                           // End delimiter
+	)
+	.map(Value::Str)
+	.parse_next(input)
+}
+
+/// Parses a variable name into `Value::Variable`
+fn parse_variable<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+	// Match variable names (alphanumeric and underscores)
+	take_while(1.., |c: char| c.is_alphanumeric() || c == '_')
+		.map(Value::Variable)
+		.parse_next(input)
+}
+
+/// Parses any valid Value (boolean, number, string, or variable)
+/// Handles optional whitespace around the value
+fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+	delimited(
+		space0,
+		alt((parse_boolean, parse_number, parse_string, parse_variable)),
+		space0,
+	)
+	.parse_next(input)
+}
 
 // TODO: add documentation
 // TODO: consider returning a Result instead of a bool
