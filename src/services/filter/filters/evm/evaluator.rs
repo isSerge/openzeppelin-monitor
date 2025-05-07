@@ -1,14 +1,12 @@
-use alloy::primitives::U256;
-
+use super::helpers::are_same_address;
 use crate::{
 	models::EVMMatchParamEntry,
 	services::filter::expression::{
 		ComparisonOperator, ConditionEvaluator, EvaluationError, LiteralValue,
 	},
 };
+use alloy::primitives::U256;
 use std::str::FromStr;
-
-use super::helpers::are_same_address;
 
 // TODO: re-use for Stellar
 fn compare_ordered_values<T: Ord>(
@@ -23,13 +21,10 @@ fn compare_ordered_values<T: Ord>(
 		ComparisonOperator::Gte => Ok(left >= right),
 		ComparisonOperator::Lt => Ok(left < right),
 		ComparisonOperator::Lte => Ok(left <= right),
-		_ => Err(EvaluationError::UnsupportedOperator {
-			op: format!("Unsupported operator for ordered types: {:?}", op),
-		}),
 	}
 }
 
-type EVMArgs = Option<Vec<EVMMatchParamEntry>>;
+type EVMArgs = Vec<EVMMatchParamEntry>;
 
 pub struct EVMConditionEvaluator<'a> {
 	args: &'a EVMArgs,
@@ -48,13 +43,15 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 		operator: ComparisonOperator,
 		value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		// TODO: check args when creating the evaluator
-		let Some(args) = self.args else {
-			return Err(EvaluationError::Internal("No args provided".to_string()));
-		};
+		tracing::debug!(
+			"Evaluating condition: {} {:?} {:?}",
+			variable_name,
+			operator,
+			value
+		);
 
 		// Find the parameter in args
-		let Some(param) = args.iter().find(|p| p.name == variable_name) else {
+		let Some(param) = self.args.iter().find(|p| p.name == variable_name) else {
 			return Err(EvaluationError::VariableNotFound(variable_name.to_string()));
 		};
 
@@ -85,6 +82,8 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 					))
 				})?;
 
+				tracing::debug!("Comparing numeric: left: {}, right: {}", left, right);
+
 				compare_ordered_values(&left, operator, &right)
 			}
 			"address" => {
@@ -98,6 +97,8 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 						)));
 					}
 				};
+
+				tracing::debug!("Comapring addresses: left: {}, right: {}", left, right);
 
 				match operator {
 					ComparisonOperator::Eq => Ok(are_same_address(left, right)),
@@ -119,6 +120,8 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 						)));
 					}
 				};
+
+				tracing::debug!("Comparing strings: left: {}, right: {}", left, right);
 
 				match operator {
 					ComparisonOperator::Eq => Ok(left == right),

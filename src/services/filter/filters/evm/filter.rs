@@ -7,12 +7,12 @@
 //! - Event log processing and filtering
 //! - ABI-based decoding of function calls and events
 
-use alloy::primitives::{U256, U64};
+use alloy::primitives::U64;
 use anyhow::Context;
 use async_trait::async_trait;
 use ethabi::Contract;
 use serde_json::Value;
-use std::{marker::PhantomData, str::FromStr};
+use std::marker::PhantomData;
 use tracing::instrument;
 
 use crate::{
@@ -29,7 +29,8 @@ use crate::{
 				are_same_address, are_same_signature, b256_to_string, format_token_value,
 				h160_to_string, h256_to_string, normalize_address,
 			},
-			filters::expression::evaluate_expression_core,
+			expression,
+			filters::evm::evaluator::EVMConditionEvaluator,
 			BlockFilter, FilterError,
 		},
 	},
@@ -395,6 +396,7 @@ impl<T> EVMBlockFilter<T> {
 		}
 	}
 
+	// TODO: should return Result<bool>
 	/// Evaluates a match expression against provided parameters.
 	///
 	/// # Arguments
@@ -408,86 +410,34 @@ impl<T> EVMBlockFilter<T> {
 		expression: &str,
 		args: &Option<Vec<EVMMatchParamEntry>>,
 	) -> bool {
+		// TODO: double-check cases where args is None
 		let Some(args) = args else {
+			tracing::warn!("No arguments provided for expression evaluation");
 			return false;
 		};
 
-		evaluate_expression_core(expression, |param_name, operator, value| {
-			// Find the parameter in args
-			let Some(param) = args.iter().find(|p| p.name == param_name) else {
-				tracing::warn!("Parameter {} not found in event args", param_name);
+		let evaluator = EVMConditionEvaluator::new(args);
+
+		// Parse the expression
+		let parsed_ast = match expression::parse(expression) {
+			Ok(parsed) => {
+				tracing::debug!("Parsed AST for '{}': {:?}", expression, parsed);
+				parsed
+			}
+			Err(e) => {
+				tracing::warn!("Failed to parse expression '{}': {}", expression, e);
 				return false;
-			};
+			}
+		};
 
-				// Evaluate single condition
-				match param.kind.as_str() {
-					"uint64" | "uint256" | "uint" => {
-						// Check if value is empty - invalid for numeric comparison
-						if value.is_empty() {
-							tracing::warn!(
-								"Comparison value is empty for numeric comparison against parameter '{}'",
-								param_name
-							);
-							return false;
-						}
-
-						let Ok(param_value) = U256::from_str(&param.value) else {
-							tracing::warn!("Failed to parse parameter value: {}", param.value);
-							return false;
-						};
-						let Ok(compare_value) = U256::from_str(value) else {
-							tracing::warn!("Failed to parse comparison value: {}", value);
-							return false;
-						};
-
-						match operator {
-							">" => param_value > compare_value,
-							">=" => param_value >= compare_value,
-							"<" => param_value < compare_value,
-							"<=" => param_value <= compare_value,
-							"==" => param_value == compare_value,
-							"!=" => param_value != compare_value,
-							_ => {
-								tracing::warn!("Unsupported operator: {}", operator);
-								false
-							}
-						}
-					}
-					"address" => match operator {
-						"==" => are_same_address(&param.value, value),
-						"!=" => !are_same_address(&param.value, value),
-						_ => {
-							tracing::warn!("Unsupported operator: {}", operator);
-							false
-						}
-					},
-					"string" => {
-						// Perform case-insensitive comparisons for all string operators
-						let param_lower = param.value.to_lowercase();
-						let value_lower = value.to_lowercase();
-
-						match operator {
-							// case insensitive comparison
-							"==" => param_lower == value_lower,
-							"!=" => param_lower != value_lower,
-							"starts_with" => param_lower.starts_with(&value_lower),
-							"ends_with" => param_lower.ends_with(&value_lower),
-							"contains" => param_lower.contains(&value_lower),
-							_ => {
-								tracing::warn!(
-									"Unsupported operator for string type: {}",
-									operator
-								);
-								false
-							}
-						}
-					}
-					_ => {
-						tracing::warn!("Unsupported parameter type: {}", param.kind);
-						false
-					}
-				}
-		})
+		// Evaluate the expression
+		match expression::evaluate(&parsed_ast, &evaluator) {
+			Ok(result) => result,
+			Err(e) => {
+				tracing::warn!("Failed to evaluate expression: {}", e);
+				return false;
+			}
+		}
 	}
 
 	/// Decodes event logs using the provided ABI.
@@ -820,6 +770,7 @@ mod tests {
 	use alloy::primitives::{Address, Bytes, B256, U256};
 	use ethabi::{Function, Param, ParamType};
 	use serde_json::json;
+	use std::str::FromStr;
 
 	fn create_test_filter() -> EVMBlockFilter<()> {
 		EVMBlockFilter::<()> {

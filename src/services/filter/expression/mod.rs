@@ -1,9 +1,9 @@
 //! Shared logic for parsing and evaluating expressions
 
+mod ast;
 mod evaluation;
 mod parsing;
-mod ast;
 
-pub use ast::{ComparisonOperator, Condition, Expression, LogicalOperator, LiteralValue};
+pub use ast::{ComparisonOperator, LiteralValue};
 pub use evaluation::{evaluate, ConditionEvaluator, EvaluationError};
-pub use parsing::{parse, ExpressionParseError};
+pub use parsing::parse;
