@@ -6,11 +6,10 @@
 //! - EVM-specific implementation
 //! - Stellar-specific implementation
 
-mod expression;
-
 pub mod evm {
 	pub mod filter;
 	pub mod helpers;
+	pub mod evaluator;
 }
 pub mod stellar {
 	pub mod filter;
