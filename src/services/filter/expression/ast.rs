@@ -8,7 +8,7 @@ pub enum LiteralValue<'a> {
 	Number(&'a str),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComparisonOperator {
 	Eq,
 	Ne,
@@ -16,6 +16,9 @@ pub enum ComparisonOperator {
 	Gte,
 	Lt,
 	Lte,
+	StartsWith,
+	EndsWith,
+	Contains,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

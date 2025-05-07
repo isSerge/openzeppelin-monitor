@@ -21,6 +21,9 @@ fn compare_ordered_values<T: Ord>(
 		ComparisonOperator::Gte => Ok(left >= right),
 		ComparisonOperator::Lt => Ok(left < right),
 		ComparisonOperator::Lte => Ok(left <= right),
+		_ => Err(EvaluationError::UnsupportedOperator {
+			op: format!("Unsupported operator for ordered types: {:?}", op),
+		}),
 	}
 }
 
@@ -121,15 +124,18 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 					}
 				};
 
+				println!("string Left: {}, right: {}", left, right);
+
 				tracing::debug!("Comparing strings: left: {}, right: {}", left, right);
 
 				match operator {
 					ComparisonOperator::Eq => Ok(left == right),
 					ComparisonOperator::Ne => Ok(left != right),
-					// TODO: Implement these operators
-					// "starts_with" => param_lower.starts_with(&value_lower),
-					// "ends_with" => param_lower.ends_with(&value_lower),
-					// "contains" => param_lower.contains(&value_lower),
+					ComparisonOperator::StartsWith => Ok(left.starts_with(&right)),
+					ComparisonOperator::EndsWith => {
+						println!("End with left: {}, right: {}", left, right);
+						Ok(left.ends_with(&right))},
+					ComparisonOperator::Contains => Ok(left.contains(&right)),
 					_ => Err(EvaluationError::UnsupportedOperator {
 						op: format!("Unsupported operator for string type: {:?}", operator),
 					}),

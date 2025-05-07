@@ -38,7 +38,7 @@ pub fn evaluate<'a>(
 			Expression::Condition(condition) => {
 					evaluator.evaluate_ast_condition(
 							condition.left,
-							condition.operator.clone(),
+							condition.operator,
 							&condition.right,
 					)
 			}
