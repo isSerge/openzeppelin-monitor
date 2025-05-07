@@ -1,12 +1,11 @@
 ///! This module defines the abstract syntax tree (AST) for the filter expressions
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Value<'a> {
+pub enum LiteralValue<'a> {
 	Bool(bool),
 	Str(&'a str),
 	// Store as str, conversion to specific type is done within chain context
 	Number(&'a str),
-	Variable(&'a str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +28,7 @@ pub enum LogicalOperator {
 pub struct Condition<'a> {
 	pub left: &'a str, // variable name
 	pub operator: ComparisonOperator,
-	pub right: Value<'a>,
+	pub right: LiteralValue<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

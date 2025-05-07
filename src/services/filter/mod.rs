@@ -8,6 +8,7 @@
 mod error;
 mod filter_match;
 mod filters;
+mod expression;
 
 pub use error::FilterError;
 pub use filter_match::handle_match;

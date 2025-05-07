@@ -1,7 +1,7 @@
 use thiserror::Error;
 
-use crate::services::filter::filters::expression::ast::{
-	ComparisonOperator, Expression, LogicalOperator, Value,
+use crate::services::filter::expression::ast::{
+	ComparisonOperator, Expression, LogicalOperator, LiteralValue,
 };
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -23,7 +23,7 @@ pub trait ConditionEvaluator {
 			&self,
 			variable_name: &str,
 			operator: ComparisonOperator,
-			value: &Value<'_>,
+			value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError>;
 }
 

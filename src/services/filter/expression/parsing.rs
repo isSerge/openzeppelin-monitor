@@ -7,8 +7,8 @@ use winnow::{
 	token::{literal, one_of, take_while},
 };
 
-use crate::services::filter::filters::expression::ast::{
-	ComparisonOperator, Condition, Expression, LogicalOperator, Value,
+use crate::services::filter::expression::ast::{
+	ComparisonOperator, Condition, Expression, LiteralValue, LogicalOperator,
 };
 
 /// --- Error definitions ---
@@ -25,34 +25,34 @@ type ParserResult<T> = winnow::Result<T>;
 
 /// --- Parser functions ---
 /// Parses boolean literals into `Value::Bool`
-fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	alt((
-		literal("true").map(|_| Value::Bool(true)),
-		literal("false").map(|_| Value::Bool(false)),
+		literal("true").map(|_| LiteralValue::Bool(true)),
+		literal("false").map(|_| LiteralValue::Bool(false)),
 	))
 	.parse_next(input)
 }
 
 /// Parser integer literals into `Value::Number`
-fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	let start_input = *input;
 	let _ = (opt(one_of(['+', '-'])), digit1).parse_next(input)?;
 	let consumed_len = start_input.len() - input.len();
 	let number_str = &start_input[..consumed_len];
-	Ok(Value::Number(number_str))
+	Ok(LiteralValue::Number(number_str))
 }
 
 // TODO: handle escaped quotes
 /// Parses string literals enclosed in single quotes into `Value::Str`
-fn parse_string<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+fn parse_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	// Match opening quote, content (non-quote characters), closing quote
 	delimited('\'', take_while(0.., |c| c != '\''), '\'')
-		.map(Value::Str)
+		.map(LiteralValue::Str)
 		.parse_next(input)
 }
 
-/// Parses a variable name into `Value::Variable`
-fn parse_variable<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+/// Parses a variable name into string slice
+fn parse_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> {
 	let start_input = *input;
 	let first_char = one_of(|c: char| c.is_alphabetic() || c == '_').parse_next(input)?;
 	let rest_chars: &str =
@@ -64,18 +64,17 @@ fn parse_variable<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 	if ident == "true" || ident == "false" {
 		let mut context = ContextError::new();
 		context.push(StrContext::Label("keyword used as identifier"));
-		Err(context)
-	} else {
-		Ok(Value::Variable(ident))
+		return Err(context);
 	}
+	Ok(ident)
 }
 
 /// Parses any valid Value (boolean, number, string, or variable)
 /// Handles optional whitespace around the value
-fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
+fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	delimited(
 		space0,
-		alt((parse_boolean, parse_number, parse_string, parse_variable)),
+		alt((parse_boolean, parse_number, parse_string)),
 		space0,
 	)
 	.parse_next(input)
@@ -101,22 +100,12 @@ fn parse_comparison_operator<'a>(input: &mut Input<'a>) -> ParserResult<Comparis
 
 /// Parses a condition expression (e.g., "a == 1") into an `Expression::Condition`
 fn parse_condition<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
-	let (left, op, right) =
-		(parse_variable, parse_comparison_operator, parse_value).parse_next(input)?;
-
-	// Ensure the left side is a variable name
-	let variable_name = match left {
-		Value::Variable(name) => name,
-		_ => {
-			let mut context = ContextError::new();
-			context.push(StrContext::Label("left side must be a variable name"));
-			return Err(context);
-		}
-	};
+	let (left, operator, right) =
+		(parse_variable_name, parse_comparison_operator, parse_value).parse_next(input)?;
 
 	let condition = Condition {
-		left: variable_name,
-		operator: op,
+		left,
+		operator,
 		right,
 	};
 
