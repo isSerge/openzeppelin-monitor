@@ -3,7 +3,7 @@
 use thiserror::Error;
 use winnow::{
 	ascii::{digit1, space0, Caseless},
-	combinator::{alt, delimited, opt, repeat},
+	combinator::{alt, delimited, eof, opt, repeat},
 	error::{ContextError, StrContext},
 	prelude::*,
 	token::{literal, one_of, take_while},
@@ -187,7 +187,6 @@ fn parse_term<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	.parse_next(input)
 }
 
-// TODO: ensure EOF is reached after parsing
 /// Parses the AND operator and its components
 fn parse_and_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	let left = parse_term.parse_next(input)?;
@@ -239,4 +238,16 @@ fn parse_or_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>
 /// Parses the entire expression, starting from the highest precedence
 fn parse_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	delimited(space0, parse_or_expression, space0).parse_next(input)
+}
+
+/// Public method, which parses a string expression into an `Expression` AST
+pub fn parse<'a>(expression_str: &'a str) -> Result<Expression<'a>, ExpressionParseError> {
+	// Define the parser for the entire expression
+	// This parser will parse the expression and ensure it ends with EOF
+	let mut full_expression_parser = (parse_expression, eof).map(|(expr, _)| expr);
+
+	match full_expression_parser.parse(expression_str) {
+		Ok(expr) => Ok(expr),
+		Err(err) => Err(ExpressionParseError::Parser(err.to_string())),
+	}
 }
