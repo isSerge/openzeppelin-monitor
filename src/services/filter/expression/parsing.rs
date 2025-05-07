@@ -2,7 +2,7 @@ use thiserror::Error;
 use winnow::{
 	ascii::{digit1, space0, Caseless},
 	combinator::{alt, delimited, eof, opt, repeat},
-	error::{ContextError, StrContext},
+	error::{ContextError, ErrMode, StrContext},
 	prelude::*,
 	token::{literal, one_of, take_while},
 };
@@ -21,7 +21,7 @@ pub enum ExpressionParseError {
 
 /// --- Helper aliases ---
 type Input<'a> = &'a str;
-type ParserResult<T> = winnow::Result<T>;
+type ParserResult<T> = winnow::Result<T, ErrMode<ContextError>>;
 
 /// --- Parser functions ---
 /// Parses boolean literals into `Value::Bool`
@@ -40,6 +40,37 @@ fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	let consumed_len = start_input.len() - input.len();
 	let number_str = &start_input[..consumed_len];
 	Ok(LiteralValue::Number(number_str))
+}
+
+
+// Helper to check if a char is a hex digit (a-f, A-F, 0-9)
+fn is_hex_digit(c: char) -> bool {
+	c.is_ascii_hexdigit()
+}
+
+// Parses an unquoted "0x..." or "0X..." sequence as a string.
+fn parse_hex_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
+	// Checkpoint the input before attempting this specific format
+	let initial_input = *input;
+
+	let mut zero_x_parser = alt((
+		literal::<_, _, ContextError>("0x"),
+		literal::<_, _, ContextError>("0X"),
+	));
+
+	// Attempt to parse "0x" or "0X"
+	if zero_x_parser.parse_next(input).is_err() {
+		let context = ContextError::new();
+		return Err(ErrMode::Backtrack(context));
+	}
+
+	// We need to ensure hex digits are present and consume them, but we don't need their value separately
+	// if we're slicing the original input.
+	let _parsed_hex_digits: &str = take_while(1.., is_hex_digit).parse_next(input)?;
+	let total_consumed_len = initial_input.len() - input.len();
+	let full_hex_literal_str = &initial_input[..total_consumed_len];
+
+	Ok(LiteralValue::Str(full_hex_literal_str))
 }
 
 // TODO: handle escaped quotes
@@ -64,7 +95,7 @@ fn parse_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> {
 	if ident == "true" || ident == "false" {
 		let mut context = ContextError::new();
 		context.push(StrContext::Label("keyword used as identifier"));
-		return Err(context);
+		return Err(ErrMode::Backtrack(context));
 	}
 	Ok(ident)
 }
@@ -74,7 +105,7 @@ fn parse_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> {
 fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	delimited(
 		space0,
-		alt((parse_boolean, parse_number, parse_string)),
+		alt((parse_string, parse_boolean, parse_hex_string, parse_number)),
 		space0,
 	)
 	.parse_next(input)
@@ -86,12 +117,12 @@ fn parse_comparison_operator<'a>(input: &mut Input<'a>) -> ParserResult<Comparis
 	delimited(
 		space0,
 		alt((
+			literal(">=").map(|_| ComparisonOperator::Gte),
+			literal("<=").map(|_| ComparisonOperator::Lte),
 			literal("==").map(|_| ComparisonOperator::Eq),
 			literal("!=").map(|_| ComparisonOperator::Ne),
 			literal(">").map(|_| ComparisonOperator::Gt),
-			literal(">=").map(|_| ComparisonOperator::Gte),
 			literal("<").map(|_| ComparisonOperator::Lt),
-			literal("<=").map(|_| ComparisonOperator::Lte),
 		)),
 		space0,
 	)
