@@ -1,5 +1,3 @@
-//! Shared logic for evaluating logical expressions
-
 use thiserror::Error;
 use winnow::{
 	ascii::{digit1, space0, Caseless},
@@ -9,55 +7,16 @@ use winnow::{
 	token::{literal, one_of, take_while},
 };
 
-/// --- AST definitions ---
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Value<'a> {
-	Bool(bool),
-	Str(&'a str),
-	// Store as str, conversion to specific type is done within chain context
-	Number(&'a str),
-	Variable(&'a str),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ComparisonOperator {
-	Eq,
-	Ne,
-	Gt,
-	Gte,
-	Lt,
-	Lte,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LogicalOperator {
-	And,
-	Or,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Condition<'a> {
-	pub left: &'a str, // variable name
-	pub operator: ComparisonOperator,
-	pub right: Value<'a>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Expression<'a> {
-	Condition(Condition<'a>),
-	Logical {
-		left: Box<Expression<'a>>,
-		operator: LogicalOperator,
-		right: Box<Expression<'a>>,
-	},
-}
+use crate::services::filter::filters::expression::ast::{
+	ComparisonOperator, Condition, Expression, LogicalOperator, Value,
+};
 
 /// --- Error definitions ---
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum ExpressionParseError {
 	#[error("Winnow parsing error")]
 	Parser(String),
-	// TODO: add more speciifc error types
+	// TODO: add more specific error types
 }
 
 /// --- Helper aliases ---
@@ -87,13 +46,9 @@ fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 /// Parses string literals enclosed in single quotes into `Value::Str`
 fn parse_string<'a>(input: &mut Input<'a>) -> ParserResult<Value<'a>> {
 	// Match opening quote, content (non-quote characters), closing quote
-	delimited(
-		'\'',                           // Start delimiter
-		take_while(0.., |c| c != '\''), // Content: take 0 or more chars that are not '
-		'\'',                           // End delimiter
-	)
-	.map(Value::Str)
-	.parse_next(input)
+	delimited('\'', take_while(0.., |c| c != '\''), '\'')
+		.map(Value::Str)
+		.parse_next(input)
 }
 
 /// Parses a variable name into `Value::Variable`
