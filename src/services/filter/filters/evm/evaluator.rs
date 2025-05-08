@@ -114,17 +114,26 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 			"string" => {
 				// Perform case-insensitive comparisons for all string operators
 				let left = param.value.to_lowercase();
-				let right = match value {
-					LiteralValue::Str(str) => str.to_lowercase(),
-					_ => {
-						return Err(EvaluationError::TypeMismatch(format!(
-							"Expected string literal for comparison with '{}', found: {:?}",
-							param.name, value
-						)));
-					}
-				};
 
-				println!("string Left: {}, right: {}", left, right);
+				// Make sure right is a string when using starts_with, ends_with, or contains operators
+				let right = match operator {
+					ComparisonOperator::StartsWith
+					| ComparisonOperator::EndsWith
+					| ComparisonOperator::Contains => match value {
+						LiteralValue::Str(s) => s.to_lowercase(),
+						LiteralValue::Number(n) => n.to_string().to_lowercase(),
+						LiteralValue::Bool(b) => b.to_string().to_lowercase(),
+					},
+					_ => match value {
+						LiteralValue::Str(str) => str.to_lowercase(),
+						_ => {
+							return Err(EvaluationError::TypeMismatch(format!(
+								"Expected string literal for comparison with '{}', found: {:?}",
+								param.name, value
+							)));
+						}
+					},
+				};
 
 				tracing::debug!("Comparing strings: left: {}, right: {}", left, right);
 
@@ -132,9 +141,7 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 					ComparisonOperator::Eq => Ok(left == right),
 					ComparisonOperator::Ne => Ok(left != right),
 					ComparisonOperator::StartsWith => Ok(left.starts_with(&right)),
-					ComparisonOperator::EndsWith => {
-						println!("End with left: {}, right: {}", left, right);
-						Ok(left.ends_with(&right))},
+					ComparisonOperator::EndsWith => Ok(left.ends_with(&right)),
 					ComparisonOperator::Contains => Ok(left.contains(&right)),
 					_ => Err(EvaluationError::UnsupportedOperator {
 						op: format!("Unsupported operator for string type: {:?}", operator),
