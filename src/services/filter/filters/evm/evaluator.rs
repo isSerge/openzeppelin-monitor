@@ -2,30 +2,12 @@ use super::helpers::are_same_address;
 use crate::{
 	models::EVMMatchParamEntry,
 	services::filter::expression::{
-		ComparisonOperator, ConditionEvaluator, EvaluationError, LiteralValue,
+		compare_ordered_values, ComparisonOperator, ConditionEvaluator, EvaluationError,
+		LiteralValue,
 	},
 };
 use alloy::primitives::U256;
 use std::str::FromStr;
-
-// TODO: re-use for Stellar
-fn compare_ordered_values<T: Ord>(
-	left: &T,
-	op: ComparisonOperator,
-	right: &T,
-) -> Result<bool, EvaluationError> {
-	match op {
-		ComparisonOperator::Eq => Ok(left == right),
-		ComparisonOperator::Ne => Ok(left != right),
-		ComparisonOperator::Gt => Ok(left > right),
-		ComparisonOperator::Gte => Ok(left >= right),
-		ComparisonOperator::Lt => Ok(left < right),
-		ComparisonOperator::Lte => Ok(left <= right),
-		_ => Err(EvaluationError::UnsupportedOperator {
-			op: format!("Unsupported operator for ordered types: {:?}", op),
-		}),
-	}
-}
 
 type EVMArgs = Vec<EVMMatchParamEntry>;
 
@@ -47,7 +29,7 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 		value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		tracing::debug!(
-			"Evaluating condition: {} {:?} {:?}",
+			"Evaluating EVM condition: {} {:?} {:?}",
 			variable_name,
 			operator,
 			value

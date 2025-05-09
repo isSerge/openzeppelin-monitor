@@ -14,8 +14,6 @@ pub enum EvaluationError {
     UnsupportedOperator { op: String },
     #[error("Failed to parse value: {0}")]
     ParseError(String),
-    #[error("Evaluation logic error: {0}")]
-    Internal(String),
 }
 
 pub trait ConditionEvaluator {
@@ -49,5 +47,23 @@ pub fn evaluate<'a>(
 							LogicalOperator::Or =>  if left_val { Ok(true) } else { evaluate(right, evaluator) },
 					}
 			}
+	}
+}
+
+pub fn compare_ordered_values<T: Ord>(
+	left: &T,
+	op: ComparisonOperator,
+	right: &T,
+) -> Result<bool, EvaluationError> {
+	match op {
+		ComparisonOperator::Eq => Ok(left == right),
+		ComparisonOperator::Ne => Ok(left != right),
+		ComparisonOperator::Gt => Ok(left > right),
+		ComparisonOperator::Gte => Ok(left >= right),
+		ComparisonOperator::Lt => Ok(left < right),
+		ComparisonOperator::Lte => Ok(left <= right),
+		_ => Err(EvaluationError::UnsupportedOperator {
+			op: format!("Unsupported operator for ordered types: {:?}", op),
+		}),
 	}
 }

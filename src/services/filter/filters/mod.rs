@@ -14,6 +14,7 @@ pub mod evm {
 pub mod stellar {
 	pub mod filter;
 	pub mod helpers;
+	pub mod evaluator;
 }
 
 use async_trait::async_trait;

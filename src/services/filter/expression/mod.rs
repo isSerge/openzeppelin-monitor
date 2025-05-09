@@ -5,5 +5,5 @@ mod evaluation;
 mod parsing;
 
 pub use ast::{ComparisonOperator, LiteralValue};
-pub use evaluation::{evaluate, ConditionEvaluator, EvaluationError};
+pub use evaluation::{compare_ordered_values, evaluate, ConditionEvaluator, EvaluationError};
 pub use parsing::parse;
