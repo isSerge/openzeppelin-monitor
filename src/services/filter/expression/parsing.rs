@@ -1,14 +1,11 @@
+use super::ast::{ComparisonOperator, Condition, Expression, LiteralValue, LogicalOperator};
 use thiserror::Error;
 use winnow::{
-	ascii::{digit1, space0, Caseless},
-	combinator::{alt, delimited, eof, opt, repeat},
+	ascii::{digit1, space0, space1, Caseless},
+	combinator::{alt, delimited, eof, opt, peek, repeat},
 	error::{ContextError, ErrMode, StrContext, StrContextValue},
 	prelude::*,
 	token::{literal, one_of, take_while},
-};
-
-use crate::services::filter::expression::ast::{
-	ComparisonOperator, Condition, Expression, LiteralValue, LogicalOperator,
 };
 
 /// --- Error definitions ---
@@ -58,7 +55,7 @@ type ParserResult<T> = winnow::Result<T, ErrMode<ContextError>>;
 pub type TopLevelParseResult<T> = Result<T, ExpressionParseError>;
 
 /// --- Parser functions ---
-/// Parses boolean literals into `Value::Bool`
+/// Parses boolean literals into `LiteralValue::Bool`
 fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	alt((
 		literal("true").map(|_| LiteralValue::Bool(true)),
@@ -70,17 +67,31 @@ fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	.parse_next(input)
 }
 
-/// Parser integer literals into `Value::Number`
+/// Parser integer literals into `LiteralValue::Number`
 fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	let start_input = *input;
-	let _ = (opt(one_of(['+', '-'])), digit1)
-		.context(StrContext::Expected(StrContextValue::Description(
-			"integer literal (digits with optional sign)",
-		)))
-		.parse_next(input)?;
-	let consumed_len = start_input.len() - input.len();
-	let number_str = &start_input[..consumed_len];
-	Ok(LiteralValue::Number(number_str))
+	// Parse optional sign and digits
+	// Define the parser sequence including the peek for the delimiter
+	let mut parser_sequence = (
+		opt(one_of::<_, _, ContextError>(['+', '-'])), // Optional sign
+		digit1,
+		peek(alt((
+			space1.value(()),
+			one_of([')', '(']).value(()),
+			one_of(['=', '!', '>', '<']).value(()), // TODO: Only first char of operator needed? Check this.
+			eof.value(()),
+		))),
+	);
+
+	let parse_result = parser_sequence.parse_next(input);
+	match parse_result {
+		Ok(_) => {
+			let consumed_len = start_input.len() - input.len();
+			let number_str = &start_input[..consumed_len];
+			Ok(LiteralValue::Number(number_str))
+		}
+		Err(e) => Err(ErrMode::Backtrack(e)),
+	}
 }
 
 // Helper to check if a char is a hex digit (a-f, A-F, 0-9)
@@ -118,7 +129,7 @@ fn parse_hex_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>>
 }
 
 // TODO: handle escaped quotes
-/// Parses string literals enclosed in single quotes into `Value::Str`
+/// Parses string literals enclosed in single quotes into `LiteralValue::Str`
 fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	// Match opening quote, content (non-quote characters), closing quote
 	delimited('\'', take_while(0.., |c| c != '\''), '\'')
@@ -131,37 +142,12 @@ fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'
 
 /// Fallback parser for unquoted strings (applied last)
 fn parse_unquoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
-	let initial_input = *input;
+	// Take anything that's alphanumeric/underscore
+	// ASSUMPTION: If we got here, it's not quoted, not bool, not hex, not pure number.
+	let word: &str =
+		take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
 
-	let first_char_result: Result<char, ContextError> =
-		one_of(|c: char| c.is_alphabetic() || c == '_')
-			.context(StrContext::Expected(StrContextValue::Description(
-				"unquoted string literal (first character)",
-			)))
-			.parse_next(input);
-
-	// If it doesn't start like a typical bare word, this parser fails.
-	if first_char_result.is_err() {
-		*input = initial_input;
-		return Err(ErrMode::Backtrack(ContextError::new()));
-	}
-
-	let _rest_chars_result: Result<&str, ContextError> =
-		take_while(0.., |c: char| c.is_alphanumeric() || c == '_')
-			.context(StrContext::Expected(StrContextValue::Description(
-				"unquoted string literal (subsequent characters)",
-			)))
-			.parse_next(input);
-
-	let total_consumed_len = initial_input.len() - input.len();
-	let word: &str = &initial_input[..total_consumed_len];
-
-	if word == "true" || word == "false" {
-		// This should have been caught by parse_boolean, but if it wasn't, we need to backtrack.
-		*input = initial_input;
-		return Err(ErrMode::Backtrack(ContextError::new()));
-	}
-
+	// NO checks for keywords or numbers here - rely purely on alt order.
 	Ok(LiteralValue::Str(word))
 }
 
@@ -183,7 +169,7 @@ fn parse_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> {
 	Ok(ident)
 }
 
-/// Parses any valid Value (boolean, number, string, or variable)
+/// Parses any valid LiteralValue (boolean, number, string, or variable)
 /// Handles optional whitespace around the value
 fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	delimited(
