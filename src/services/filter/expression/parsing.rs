@@ -1,58 +1,29 @@
 use super::ast::{ComparisonOperator, Condition, Expression, LiteralValue, LogicalOperator};
-use thiserror::Error;
 use winnow::{
 	ascii::{digit1, space0, space1, Caseless},
 	combinator::{alt, delimited, eof, opt, peek, repeat},
-	error::{ContextError, ErrMode, StrContext, StrContextValue},
+	error::{ContextError, ErrMode, ParseError, StrContext, StrContextValue},
 	prelude::*,
 	token::{literal, one_of, take_while},
 };
-
-/// --- Error definitions ---
-#[derive(Debug, PartialEq, Eq, Error)]
-pub enum ParseErrorKind {
-	#[error("Expected a valid number literal")]
-	ExpectedNumber,
-	#[error("Expected a boolean literal ('true' or 'false')")]
-	ExpectedBoolean,
-	#[error("Expected a single-quoted string literal")]
-	ExpectedString,
-	#[error("Expected a valid variable name (identifier)")]
-	ExpectedVariableName,
-	#[error("Keyword '{0}' cannot be used as an identifier")]
-	KeywordAsIdentifier(String), // Store the keyword
-	#[error("Expected a comparison operator (e.g., ==, >, starts_with)")]
-	ExpectedComparisonOperator,
-	#[error("Expected a logical operator ('AND' or 'OR')")]
-	ExpectedLogicalOperator,
-	#[error("Expected a closing parenthesis ')'")]
-	ExpectedClosingParen,
-	#[error("Expected an expression term (condition or parenthesized expression)")]
-	ExpectedTerm,
-	#[error("Incomplete expression or unexpected end of input")]
-	UnexpectedEOF,
-	#[error("Trailing input after a valid expression: '{0}'")]
-	TrailingInput(String),
-	#[error("Generic winnow parsing error: {0}")] // Fallback
-	GenericWinnowError(String),
-}
-
-pub struct ExpressionParseError {
-	pub kind: ParseErrorKind,
-	pub input: String,
-}
-
-impl std::fmt::Display for ExpressionParseError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "Parse error: {}. Input: '{}'", self.kind, self.input)
-	}
-}
 
 /// --- Helper aliases ---
 type Input<'a> = &'a str;
 /// Result for internal parser functions
 type ParserResult<T> = winnow::Result<T, ErrMode<ContextError>>;
-pub type TopLevelParseResult<T> = Result<T, ExpressionParseError>;
+
+// Helper to check for keywords
+fn is_keyword(ident: &str) -> bool {
+	matches!(
+		ident.to_ascii_lowercase().as_str(),
+		"true" | "false" | "and" | "or" | "contains" | "starts_with" | "ends_with"
+	)
+}
+
+// Helper to check if a char is a hex digit (a-f, A-F, 0-9)
+fn is_hex_digit(c: char) -> bool {
+	c.is_ascii_hexdigit()
+}
 
 /// --- Parser functions ---
 /// Parses boolean literals into `LiteralValue::Bool`
@@ -73,7 +44,7 @@ fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	// Parse optional sign and digits
 	// Define the parser sequence including the peek for the delimiter
 	let mut parser_sequence = (
-		opt(one_of::<_, _, ContextError>(['+', '-'])), // Optional sign
+		opt(one_of(['+', '-'])),
 		digit1,
 		peek(alt((
 			space1.value(()),
@@ -92,11 +63,6 @@ fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 		}
 		Err(e) => Err(ErrMode::Backtrack(e)),
 	}
-}
-
-// Helper to check if a char is a hex digit (a-f, A-F, 0-9)
-fn is_hex_digit(c: char) -> bool {
-	c.is_ascii_hexdigit()
 }
 
 // Parses an unquoted "0x..." or "0X..." sequence as a string.
@@ -144,8 +110,18 @@ fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'
 fn parse_unquoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	// Take anything that's alphanumeric/underscore
 	// ASSUMPTION: If we got here, it's not quoted, not bool, not hex, not pure number.
-	let word: &str =
-		take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
+	let word: &str = take_while(1.., |c: char| c.is_alphanumeric() || c == '_')
+		// Avoid matching keywords or simple numbers again
+		.verify(|s: &str| {
+			!is_keyword(s)
+				&& !s
+					.chars()
+					.all(|c| c.is_ascii_digit() || c == '+' || c == '-')
+		})
+		.context(StrContext::Expected(StrContextValue::Description(
+			"unquoted string literal",
+		)))
+		.parse_next(input)?;
 
 	// NO checks for keywords or numbers here - rely purely on alt order.
 	Ok(LiteralValue::Str(word))
@@ -161,7 +137,7 @@ fn parse_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> {
 	let ident = &start_input[..consumed_len];
 
 	// Check if the identifier is a reserved keyword
-	if ident == "true" || ident == "false" {
+	if is_keyword(ident) {
 		let mut context = ContextError::new();
 		context.push(StrContext::Label("keyword used as identifier"));
 		return Err(ErrMode::Backtrack(context));
@@ -241,7 +217,9 @@ fn parse_term<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 			delimited(
 				(literal("("), space0),
 				parse_expression,
-				(space0, literal(")")),
+				(space0, literal(")")).context(StrContext::Expected(StrContextValue::Description(
+					"closing parenthesis ')'",
+				))),
 			),
 		)),
 		space0,
@@ -260,7 +238,10 @@ fn parse_and_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a
 		space0,
 		literal(Caseless("AND")).value(LogicalOperator::And),
 		space0,
-	);
+	)
+	.context(StrContext::Expected(StrContextValue::Description(
+		"logical operator AND",
+	)));
 
 	let trailing_parser = (and_operator_parser, parse_term);
 
@@ -288,7 +269,10 @@ fn parse_or_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>
 		space0,
 		literal(Caseless("OR")).value(LogicalOperator::Or),
 		space0,
-	);
+	)
+	.context(StrContext::Expected(StrContextValue::Description(
+		"logical operator OR",
+	)));
 
 	let trailing_parser = (or_operator_parser, parse_and_expression);
 
@@ -312,22 +296,18 @@ fn parse_or_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>
 fn parse_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	delimited(space0, parse_or_expression, space0)
 		.context(StrContext::Expected(StrContextValue::Description(
-			"expression (AND/OR conditions)",
+			"a full expression",
 		)))
 		.parse_next(input)
 }
 
 /// Public method, which parses a string expression into an `Expression` AST
-pub fn parse<'a>(expression_str: &'a str) -> TopLevelParseResult<Expression<'a>> {
+pub fn parse<'a>(
+	expression_str: &'a str,
+) -> Result<Expression<'a>, ParseError<Input<'a>, ContextError>> {
 	// Define the parser for the entire expression
 	// This parser will parse the expression and ensure it ends with EOF
 	let mut full_expression_parser = (parse_expression, eof).map(|(expr, _)| expr);
 
-	match full_expression_parser.parse(expression_str) {
-		Ok(expr) => Ok(expr),
-		Err(winnow_err) => Err(ExpressionParseError {
-			kind: ParseErrorKind::GenericWinnowError(format!("Parsing error: {}", winnow_err)),
-			input: expression_str.to_string(),
-		}),
-	}
+	full_expression_parser.parse(expression_str)
 }
