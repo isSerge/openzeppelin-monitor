@@ -52,7 +52,7 @@ pub fn evaluate<'a>(
 
 pub fn compare_ordered_values<T: Ord>(
 	left: &T,
-	op: ComparisonOperator,
+	op: &ComparisonOperator,
 	right: &T,
 ) -> Result<bool, EvaluationError> {
 	match op {

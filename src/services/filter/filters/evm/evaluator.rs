@@ -69,7 +69,7 @@ impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 
 				tracing::debug!("Comparing numeric: left: {}, right: {}", left, right);
 
-				compare_ordered_values(&left, operator, &right)
+				compare_ordered_values(&left, &operator, &right)
 			}
 			"address" => {
 				let left = &param.value;
