@@ -31,7 +31,8 @@ impl<'a> StellarConditionEvaluator<'a> {
 	/// * `compare_value` - The value to compare against
 	///
 	/// # Returns
-	/// Boolean indicating if the comparison evaluates to true
+	/// Result with inner boolean value indicating if the comparison evaluates to true
+	/// or an error if the comparison fails
 	fn compare_values(
 		&self,
 		param_type: &str,
@@ -83,6 +84,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 				param_value
 			)));
 		};
+
 		let right = match compare_value {
 			LiteralValue::Bool(b) => *b,
 			_ => {
@@ -92,6 +94,9 @@ impl<'a> StellarConditionEvaluator<'a> {
 				)))
 			}
 		};
+
+		tracing::debug!("Comparing bool: left: {}, right: {}", left, right);
+
 		match operator {
 			ComparisonOperator::Eq => Ok(left == right),
 			ComparisonOperator::Ne => Ok(left != right),
@@ -115,6 +120,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 				param_value
 			)));
 		};
+
 		let right = match compare_value {
 			LiteralValue::Number(num_str) => num_str.parse::<u64>().map_err(|_| {
 				EvaluationError::ParseError(format!(
@@ -129,6 +135,8 @@ impl<'a> StellarConditionEvaluator<'a> {
 				)))
 			}
 		};
+
+		tracing::debug!("Comparing u64: left: {}, right: {}", left, right);
 
 		compare_ordered_values(&left, operator, &right)
 	}
@@ -161,6 +169,8 @@ impl<'a> StellarConditionEvaluator<'a> {
 			}
 		};
 
+		tracing::debug!("Comparing u32: left: {}, right: {}", left, right);
+
 		compare_ordered_values(&left, operator, &right)
 	}
 
@@ -191,6 +201,9 @@ impl<'a> StellarConditionEvaluator<'a> {
 				)))
 			}
 		};
+
+		tracing::debug!("Comparing i32: left: {}, right: {}", left, right);
+
 		compare_ordered_values(&left, operator, &right)
 	}
 
@@ -221,6 +234,9 @@ impl<'a> StellarConditionEvaluator<'a> {
 				)))
 			}
 		};
+
+		tracing::debug!("Comparing i64: left: {}, right: {}", left, right);
+
 		compare_ordered_values(&left, operator, &right)
 	}
 
@@ -251,6 +267,9 @@ impl<'a> StellarConditionEvaluator<'a> {
 				)))
 			}
 		};
+
+		tracing::debug!("Comparing u128: left: {}, right: {}", left, right);
+
 		compare_ordered_values(&left, operator, &right)
 	}
 
@@ -281,20 +300,23 @@ impl<'a> StellarConditionEvaluator<'a> {
 				)))
 			}
 		};
+
+		tracing::debug!("Comparing i128: left: {}, right: {}", left, right);
+
 		compare_ordered_values(&left, operator, &right)
 	}
 
 	fn compare_i256(
 		&self,
-		param_value: &str, // LHS is a string representation of i256
+		left: &str, // left is a string representation of i256
 		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>, // RHS should also resolve to a string for i256
+		compare_value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		// For i256, since we only support Eq/Ne via string comparison,
-		// the RHS must also be a string (from LiteralValue::Number or LiteralValue::Str).
-		let right_str = match compare_value {
+		// the right must also be a string (from LiteralValue::Number or LiteralValue::Str).
+		let right = match compare_value {
 			LiteralValue::Number(s) => s,
-			LiteralValue::Str(s) => s, // Allow comparing i256 param with a string literal
+			LiteralValue::Str(s) => s,
 			_ => {
 				return Err(EvaluationError::TypeMismatch(format!(
 					"Expected number or string literal for i256 comparison, found: {:?}",
@@ -303,9 +325,11 @@ impl<'a> StellarConditionEvaluator<'a> {
 			}
 		};
 
+		tracing::debug!("Comparing i256: left: {}, right: {}", left, right);
+
 		match operator {
-			ComparisonOperator::Eq => Ok(param_value == *right_str),
-			ComparisonOperator::Ne => Ok(param_value != *right_str),
+			ComparisonOperator::Eq => Ok(left == *right),
+			ComparisonOperator::Ne => Ok(left != *right),
 			_ => Err(EvaluationError::UnsupportedOperator {
 				op: format!(
 					"Operator {:?} not supported for i256 string comparison",
@@ -704,7 +728,7 @@ mod tests {
 	//////////////////////////////////////////////////////////////////////////////
 	#[test]
 	fn test_compare_bool() {
-		let args: StellarArgs = vec![]; // args owned by the test function
+		let args: StellarArgs = vec![];
 		let evaluator = StellarConditionEvaluator::new(&args);
 
 		assert!(evaluator
@@ -713,6 +737,7 @@ mod tests {
 		assert!(!evaluator
 			.compare_bool("true", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
 			.unwrap());
+
 		// Test TypeMismatch for RHS
 		let type_mismatch_result = evaluator.compare_bool(
 			"true",
@@ -751,6 +776,7 @@ mod tests {
 		);
 	}
 
+	// TODO: add macro to avoid duplicating test cases for u32, i32, u64, i64, u128, i128
 	#[test]
 	fn test_compare_u64() {
 		let args: StellarArgs = vec![];
@@ -773,6 +799,67 @@ mod tests {
 		assert!(matches!(
 			evaluator.compare_u64("100", &ComparisonOperator::Gt, &LiteralValue::Number("xyz")),
 			Err(EvaluationError::ParseError(_))
+		));
+	}
+
+	#[test]
+	fn test_compare_i256() {
+		let args: StellarArgs = vec![];
+		let evaluator = StellarConditionEvaluator::new(&args);
+
+		// Eq
+		assert!(evaluator
+			.compare_i256(
+				"12345",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("12345")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_i256(
+				"12345",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("12345")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_i256(
+				"12345",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("54321")
+			)
+			.unwrap());
+
+		// Ne
+		assert!(evaluator
+			.compare_i256(
+				"12345",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Number("54321")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_i256(
+				"12345",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Number("12345")
+			)
+			.unwrap());
+
+		// Unsupported operator
+		assert!(matches!(
+			evaluator.compare_i256(
+				"12345",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number("54321")
+			),
+			Err(EvaluationError::UnsupportedOperator { .. })
+		));
+
+		// Type Mismatch RHS
+		assert!(matches!(
+			evaluator.compare_i256("12345", &ComparisonOperator::Eq, &LiteralValue::Bool(true)),
+			Err(EvaluationError::TypeMismatch(_))
 		));
 	}
 
