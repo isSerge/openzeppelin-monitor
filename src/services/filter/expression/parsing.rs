@@ -1,4 +1,7 @@
-use super::ast::{ComparisonOperator, Condition, Expression, LiteralValue, LogicalOperator};
+use super::ast::{
+	Accessor, ComparisonOperator, Condition, ConditionLeft, Expression, LiteralValue,
+	LogicalOperator, VariablePath,
+};
 use winnow::{
 	ascii::{digit1, space0, space1, Caseless},
 	combinator::{alt, delimited, eof, opt, peek, repeat},
@@ -20,11 +23,6 @@ fn is_keyword(ident: &str) -> bool {
 	)
 }
 
-// Helper to check if a char is a hex digit (a-f, A-F, 0-9)
-fn is_hex_digit(c: char) -> bool {
-	c.is_ascii_hexdigit()
-}
-
 /// --- Parser functions ---
 /// Parses boolean literals into `LiteralValue::Bool`
 fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
@@ -40,58 +38,40 @@ fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 
 /// Parser integer literals into `LiteralValue::Number`
 fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
-	let start_input = *input;
-	// Parse optional sign and digits
-	// Define the parser sequence including the peek for the delimiter
-	let mut parser_sequence = (
+	(
 		opt(one_of(['+', '-'])),
 		digit1,
 		peek(alt((
 			space1.value(()),
-			one_of([')', '(']).value(()),
-			one_of(['=', '!', '>', '<']).value(()), // TODO: Only first char of operator needed? Check this.
 			eof.value(()),
+			one_of([')', '(', ',', '=', '!', '>', '<']).value(()),
 		))),
-	);
-
-	let parse_result = parser_sequence.parse_next(input);
-	match parse_result {
-		Ok(_) => {
-			let consumed_len = start_input.len() - input.len();
-			let number_str = &start_input[..consumed_len];
-			Ok(LiteralValue::Number(number_str))
-		}
-		Err(e) => Err(ErrMode::Backtrack(e)),
-	}
+	)
+		.take()
+		.map(|s: &str| LiteralValue::Number(s))
+		.context(StrContext::Expected(StrContextValue::Description(
+			"numeric literal",
+		)))
+		.parse_next(input)
 }
 
 // Parses an unquoted "0x..." or "0X..." sequence as a string.
 fn parse_hex_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
-	// Checkpoint the input before attempting this specific format
-	let initial_input = *input;
-
-	let mut zero_x_parser = alt((
-		literal::<_, _, ContextError>("0x"),
-		literal::<_, _, ContextError>("0X"),
-	));
-
-	// Attempt to parse "0x" or "0X"
-	if zero_x_parser.parse_next(input).is_err() {
-		let context = ContextError::new();
-		return Err(ErrMode::Backtrack(context));
-	}
-
-	// We need to ensure hex digits are present and consume them, but we don't need their value separately
-	// if we're slicing the original input.
-	let _parsed_hex_digits: &str = take_while(1.., is_hex_digit)
+	(
+		alt((literal("0x"), literal("0X"))),
+		take_while(1.., |c: char| c.is_ascii_hexdigit()), // Ensure at least one hex digit
+		peek(alt((
+			space1.value(()),
+			eof.value(()),
+			one_of([')', '(', ',', '=', '!', '>', '<']).value(()),
+		))),
+	)
+		.take()
+		.map(|s: &str| LiteralValue::Str(s))
 		.context(StrContext::Expected(StrContextValue::Description(
-			"hexadecimal digits after '0x' or '0X'",
+			"hexadecimal string literal",
 		)))
-		.parse_next(input)?;
-	let total_consumed_len = initial_input.len() - input.len();
-	let full_hex_literal_str = &initial_input[..total_consumed_len];
-
-	Ok(LiteralValue::Str(full_hex_literal_str))
+		.parse_next(input)
 }
 
 // TODO: handle escaped quotes
@@ -108,41 +88,90 @@ fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'
 
 /// Fallback parser for unquoted strings (applied last)
 fn parse_unquoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
-	// Take anything that's alphanumeric/underscore
-	// ASSUMPTION: If we got here, it's not quoted, not bool, not hex, not pure number.
-	let word: &str = take_while(1.., |c: char| c.is_alphanumeric() || c == '_')
-		// Avoid matching keywords or simple numbers again
-		.verify(|s: &str| {
-			!is_keyword(s)
-				&& !s
-					.chars()
-					.all(|c| c.is_ascii_digit() || c == '+' || c == '-')
+	take_while(1.., |c: char| c.is_alphanum() || c == '_' || c == '-')
+		.take()
+		.verify(|s: &&str| {
+			let word = *s;
+			!is_keyword(word)
+				&& !(word.contains(|c: char| c.is_ascii_digit() || c == '+' || c == '-')
+					&& word
+						.chars()
+						.all(|c| c.is_ascii_digit() || c == '+' || c == '-'))
+				&& !((word.starts_with("0x") || word.starts_with("0X"))
+					&& word.chars().skip(2).all(|c| c.is_ascii_hexdigit()))
 		})
+		.map(|s: &str| LiteralValue::Str(s))
 		.context(StrContext::Expected(StrContextValue::Description(
 			"unquoted string literal",
 		)))
-		.parse_next(input)?;
-
-	// NO checks for keywords or numbers here - rely purely on alt order.
-	Ok(LiteralValue::Str(word))
+		.parse_next(input)
 }
 
-/// Parses a variable name into string slice
-fn parse_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> {
-	let start_input = *input;
-	let first_char = one_of(|c: char| c.is_alphabetic() || c == '_').parse_next(input)?;
-	let rest_chars: &str =
-		take_while(0.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
-	let consumed_len = (first_char.len_utf8() + rest_chars.len()) as usize;
-	let ident = &start_input[..consumed_len];
+/// Parses an accessor (either an index or a key) from the input
+fn parse_accessor<'a>(input: &mut Input<'a>) -> ParserResult<Accessor> {
+	let index_parser = delimited(
+		literal("["),
+		// digit1 itself returns &str, try_map converts it
+		digit1.try_map(|s: &str| s.parse::<usize>()),
+		literal("]"),
+	)
+	.map(Accessor::Index)
+	.context(StrContext::Expected(StrContextValue::Description(
+		"array index accessor like '[0]'",
+	)));
 
-	// Check if the identifier is a reserved keyword
-	if is_keyword(ident) {
-		let mut context = ContextError::new();
-		context.push(StrContext::Label("keyword used as identifier"));
-		return Err(ErrMode::Backtrack(context));
+	let key_parser = (
+		literal("."),
+		(
+			one_of(|c: char| c.is_alpha() || c == '_'),
+			take_while(0.., |c: char| c.is_alphanum() || c == '_'),
+		)
+			.take(),
+	)
+		.map(|(_, key_slice): (_, &str)| Accessor::Key(key_slice.to_string()))
+		.context(StrContext::Expected(StrContextValue::Description(
+			"object key accessor like '.key'",
+		)));
+
+	alt((index_parser, key_parser)).parse_next(input)
+}
+
+fn parse_base_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> {
+	alt((
+		// Standard identifier
+		(
+				one_of(|c: char| c.is_alpha() || c == '_'),
+				take_while(0.., |c: char| c.is_alphanum() || c == '_')
+		).take(), // Use .take()
+
+		// Purely numeric identifier
+		(
+				digit1,
+				peek(alt(( // Peek ensures it's properly delimited for an LHS base
+						literal('['), literal('.'), space1, eof,
+						literal("=="), literal("!="), literal(">="), literal("<="), literal(">"), literal("<"),
+						// one_of([')', '(']),
+				)))
+		).take() // Use .take()
+))
+.verify(|ident_slice: &&str| !is_keyword(*ident_slice)) // Verify the taken slice
+.map(|s:&str|s) // if verify needs &&str
+.context(StrContext::Expected(StrContextValue::Description("variable base name (e.g., 'request', '0')")))
+.parse_next(input)
+}
+
+fn parse_condition_lhs<'a>(input: &mut Input<'a>) -> ParserResult<ConditionLeft<'a>> {
+	// Parse the base variable name
+	let base = parse_base_variable_name.parse_next(input)?;
+
+	// Parse any accessors (e.g., .key or [0])
+	let accessors: Vec<Accessor> = repeat(0.., parse_accessor).parse_next(input)?;
+
+	if accessors.is_empty() {
+		Ok(ConditionLeft::Simple(base))
+	} else {
+		Ok(ConditionLeft::Path(VariablePath { base, accessors }))
 	}
-	Ok(ident)
 }
 
 /// Parses any valid LiteralValue (boolean, number, string, or variable)
@@ -151,11 +180,11 @@ fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	delimited(
 		space0,
 		alt((
-			parse_quoted_string,
-			parse_boolean,
-			parse_hex_string,
-			parse_number,
-			parse_unquoted_string, // Fallback for unquoted strings
+			parse_quoted_string,   // "'string'"
+			parse_boolean,         // "true" / "false"
+			parse_hex_string,      // "0x..."
+			parse_number,          // "123" / "-123"
+			parse_unquoted_string, // "unquoted_string"
 		)),
 		space0,
 	)
@@ -191,7 +220,7 @@ fn parse_comparison_operator<'a>(input: &mut Input<'a>) -> ParserResult<Comparis
 
 /// Parses a condition expression (e.g., "a == 1") into an `Expression::Condition`
 fn parse_condition<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
-	let (left, operator, right) = (parse_variable_name, parse_comparison_operator, parse_value)
+	let (left, operator, right) = (parse_condition_lhs, parse_comparison_operator, parse_value)
 		.context(StrContext::Expected(StrContextValue::Description(
 			"condition expression (e.g., variable == value)",
 		)))
