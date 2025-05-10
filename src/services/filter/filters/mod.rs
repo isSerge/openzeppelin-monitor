@@ -7,14 +7,14 @@
 //! - Stellar-specific implementation
 
 pub mod evm {
+	pub mod evaluator;
 	pub mod filter;
 	pub mod helpers;
-	pub mod evaluator;
 }
 pub mod stellar {
+	pub mod evaluator;
 	pub mod filter;
 	pub mod helpers;
-	pub mod evaluator;
 }
 
 use async_trait::async_trait;

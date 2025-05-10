@@ -1,27 +1,31 @@
 use thiserror::Error;
 
 use crate::services::filter::expression::ast::{
-	ComparisonOperator, Expression, LogicalOperator, LiteralValue,
+	ComparisonOperator, ConditionLeft, Expression, LiteralValue, LogicalOperator,
 };
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum EvaluationError {
-    #[error("Variable not found: {0}")]
-    VariableNotFound(String),
-    #[error("Type mismatch: {0}")]
-    TypeMismatch(String),
-    #[error("Unsupported operator '{op}' for types")]
-    UnsupportedOperator { op: String },
-    #[error("Failed to parse value: {0}")]
-    ParseError(String),
+	#[error("Variable not found: {0}")]
+	VariableNotFound(String),
+	#[error("Type mismatch: {0}")]
+	TypeMismatch(String),
+	#[error("Unsupported operator '{op}' for types")]
+	UnsupportedOperator { op: String },
+	#[error("Failed to parse value: {0}")]
+	ParseError(String),
+	#[error("Index out of bounds during path traversal: {0}")]
+	IndexOutOfBounds(String),
+	#[error("Field not found during path traversal: {0}")]
+	FieldNotFound(String),
 }
 
 pub trait ConditionEvaluator {
 	fn evaluate_ast_condition(
-			&self,
-			variable_name: &str,
-			operator: ComparisonOperator,
-			value: &LiteralValue<'_>,
+		&self,
+		left_expr: &ConditionLeft<'_>,
+		operator: ComparisonOperator,
+		value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError>;
 }
 
@@ -33,20 +37,32 @@ pub fn evaluate<'a>(
 	evaluator: &impl ConditionEvaluator,
 ) -> Result<bool, EvaluationError> {
 	match expression {
-			Expression::Condition(condition) => {
-					evaluator.evaluate_ast_condition(
-							condition.left,
-							condition.operator,
-							&condition.right,
-					)
-			}
-			Expression::Logical { left, operator, right } => {
-					let left_val = evaluate(left, evaluator)?;
-					match operator {
-							LogicalOperator::And => if !left_val { Ok(false) } else { evaluate(right, evaluator) },
-							LogicalOperator::Or =>  if left_val { Ok(true) } else { evaluate(right, evaluator) },
+		Expression::Condition(condition) => {
+			evaluator.evaluate_ast_condition(&condition.left, condition.operator, &condition.right)
+		}
+		Expression::Logical {
+			left,
+			operator,
+			right,
+		} => {
+			let left_val = evaluate(left, evaluator)?;
+			match operator {
+				LogicalOperator::And => {
+					if !left_val {
+						Ok(false)
+					} else {
+						evaluate(right, evaluator)
 					}
+				}
+				LogicalOperator::Or => {
+					if left_val {
+						Ok(true)
+					} else {
+						evaluate(right, evaluator)
+					}
+				}
 			}
+		}
 	}
 }
 

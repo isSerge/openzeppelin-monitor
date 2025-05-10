@@ -1,8 +1,11 @@
 use crate::{
 	models::StellarMatchParamEntry,
-	services::filter::expression::{
-		compare_ordered_values, ComparisonOperator, ConditionEvaluator, EvaluationError,
-		LiteralValue,
+	services::filter::{
+		expression::{
+			compare_ordered_values, Accessor, ComparisonOperator, ConditionEvaluator,
+			ConditionLeft, EvaluationError, LiteralValue,
+		},
+		stellar_helpers::get_kind_from_value,
 	},
 };
 
@@ -40,26 +43,22 @@ impl<'a> StellarConditionEvaluator<'a> {
 		operator: &ComparisonOperator,
 		compare_value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		// Remove quotes from the values to normalize them
-		let param_value = param_value.trim_matches('"');
-
-		match param_type {
-			"Bool" | "bool" => self.compare_bool(param_value, operator, compare_value),
-			"U32" | "u32" => self.compare_u32(param_value, operator, compare_value),
-			"U64" | "u64" | "Timepoint" | "timepoint" | "Duration" | "duration" => {
+		match param_type.to_lowercase().as_str() {
+			"bool" => self.compare_bool(param_value, operator, compare_value),
+			"u32" => self.compare_u32(param_value, operator, compare_value),
+			"u64" | "timepoint" | "duration" => {
 				self.compare_u64(param_value, operator, compare_value)
 			}
-			"I32" | "i32" => self.compare_i32(param_value, operator, compare_value),
-			"I64" | "i64" => self.compare_i64(param_value, operator, compare_value),
-			"U128" | "u128" => self.compare_u128(param_value, operator, compare_value),
-			"I128" | "i128" => self.compare_i128(param_value, operator, compare_value),
-			"U256" | "u256" | "I256" | "i256" => {
-				self.compare_i256(param_value, operator, compare_value)
+			"i32" => self.compare_i32(param_value, operator, compare_value),
+			"i64" => self.compare_i64(param_value, operator, compare_value),
+			"u128" => self.compare_u128(param_value, operator, compare_value),
+			"i128" => self.compare_i128(param_value, operator, compare_value),
+			"u256" | "i256" => {
+				self.compare_large_int_as_string(param_value, operator, compare_value)
 			}
-			"Vec" | "vec" => self.compare_vec(param_value, operator, compare_value),
-			"Map" | "map" => self.compare_map(param_value, operator, compare_value),
-			"String" | "string" | "Symbol" | "symbol" | "Address" | "address" | "Bytes"
-			| "bytes" => self.compare_string(
+			"vec" => self.compare_vec(param_value, operator, compare_value),
+			"map" => self.compare_map(param_value, operator, compare_value),
+			"string" | "symbol" | "address" | "bytes" => self.compare_string(
 				param_type.to_ascii_lowercase().as_str(),
 				param_value,
 				operator,
@@ -306,14 +305,13 @@ impl<'a> StellarConditionEvaluator<'a> {
 		compare_ordered_values(&left, operator, &right)
 	}
 
-	fn compare_i256(
+	/// Compares two large integers (u256/i256) as strings.
+	fn compare_large_int_as_string(
 		&self,
-		left: &str, // left is a string representation of i256
+		left: &str,
 		operator: &ComparisonOperator,
 		compare_value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		// For i256, since we only support Eq/Ne via string comparison,
-		// the right must also be a string (from LiteralValue::Number or LiteralValue::Str).
 		let right = match compare_value {
 			LiteralValue::Number(s) => s,
 			LiteralValue::Str(s) => s,
@@ -325,7 +323,11 @@ impl<'a> StellarConditionEvaluator<'a> {
 			}
 		};
 
-		tracing::debug!("Comparing i256: left: {}, right: {}", left, right);
+		tracing::debug!(
+			"Comparing large integer strings: left: {}, right: {}",
+			left,
+			right
+		);
 
 		match operator {
 			ComparisonOperator::Eq => Ok(left == *right),
@@ -629,93 +631,139 @@ impl<'a> StellarConditionEvaluator<'a> {
 impl<'a> ConditionEvaluator for StellarConditionEvaluator<'a> {
 	fn evaluate_ast_condition(
 		&self,
-		param_expr: &str,
+		left_expr: &ConditionLeft<'_>,
 		operator: ComparisonOperator,
-		value: &LiteralValue<'_>,
+		value_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		tracing::debug!(
-			"Evaluating Stellar condition: {} {:?} {:?}",
-			param_expr,
+			"Evaluating Stellar condition: {:?} {:?} {:?}",
+			left_expr,
 			operator,
-			value
+			value_literal
 		);
 
-		// TODO: decide how to handle nested structures
-		// Find the parameter and its type
-		// if param_expr.contains('[') {
-		// 	// Array indexing: arguments[0][0]
-		// 	let indices: Vec<usize> = param_expr
-		// 		.split('[')
-		// 		.skip(1)
-		// 		.filter_map(|s| s.trim_end_matches(']').parse::<usize>().ok())
-		// 		.collect();
+		match left_expr {
+			ConditionLeft::Simple(var_name) => {
+				// Find the base parameter directly
+				let param = self
+					.args
+					.iter()
+					.find(|p| p.name == *var_name)
+					.ok_or_else(|| EvaluationError::VariableNotFound((*var_name).to_string()))?;
 
-		// 	if indices.len() != 2 || indices[0] >= self.args.len() {
-		// 		tracing::debug!("Invalid array indices: {:?}", indices);
-		// 		return Ok(false);
-		// 	}
+				// Directly compare its value and kind
+				self.compare_values(&param.kind, &param.value, &operator, &value_literal)
+			}
+			ConditionLeft::Path(variable_path) => {
+				let base_var_name = variable_path.base;
+				let accessors = &variable_path.accessors;
 
-		// 	let param = &self.args[indices[0]];
-		// 	let array_values: Vec<&str> = param.value.split(',').collect();
-		// 	if indices[1] >= array_values.len() {
-		// 		tracing::debug!("Array index out of bounds: {}", indices[1]);
-		// 		return Ok(false);
-		// 	}
+				// Find the initial parameter (the base of the path)
+				let initial_param = self
+					.args
+					.iter()
+					.find(|p| p.name == base_var_name)
+					.ok_or_else(|| {
+						EvaluationError::VariableNotFound(format!(
+							"Base variable '{}' in path not found.",
+							base_var_name
+						))
+					})?;
 
-		// 	Ok(self.compare_values(
-		// 		&param.kind,
-		// 		array_values[indices[1]].trim(),
-		// 		operator,
-		// 		value,
-		// 	))
-		// } else if param_expr.contains('.') {
-		// 	// Map access: map.key
-		// 	let parts: Vec<&str> = param_expr.split('.').collect();
-		// 	if parts.len() != 2 {
-		// 		tracing::debug!("Invalid map access format: {}", param_expr);
-		// 		return Ok(false);
-		// 	}
+				// If accessors list is somehow empty for a Path variant (parser should prevent this),
+				// it's effectively a simple lookup. This is a defensive check.
+				if accessors.is_empty() {
+					tracing::warn!("ConditionLeft::Path encountered with empty accessors for base '{}'. Treating as simple.", base_var_name);
+					return self.compare_values(
+						&initial_param.kind,
+						&initial_param.value,
+						&operator,
+						value_literal,
+					);
+				}
 
-		// 	let [map_name, key] = [parts[0], parts[1]];
+				// The value of the initial parameter must be parsable as JSON for path traversal
+				let mut current_json_value: serde_json::Value =
+					serde_json::from_str(&initial_param.value).map_err(|e| {
+						EvaluationError::ParseError(format!(
+							"Failed to parse value of base variable '{}' (kind: '{}', value: '{}') as JSON for path traversal. Error: {}. Path: {:?}",
+							base_var_name, initial_param.kind, initial_param.value, e, variable_path
+						))
+					})?;
 
-		// 	let Some(param) = self.args.iter().find(|p| p.name == map_name) else {
-		// 		tracing::debug!("Map {} not found", map_name);
-		// 		return Ok(false);
-		// 	};
+				// This will be the kind of the `current_json_value` as we traverse
+				let mut current_kind_str = get_kind_from_value(&current_json_value);
 
-		// 	let Ok(mut map_value) = serde_json::from_str::<serde_json::Value>(&param.value) else {
-		// 		tracing::debug!("Failed to parse map: {}", param.value);
-		// 		return Ok(false);
-		// 	};
+				// Traverse the path using the accessors
+				for (accessor_idx, accessor) in accessors.iter().enumerate() {
+					let path_so_far_for_err_msg = variable_path
+						.accessors
+						.iter()
+						.take(accessor_idx + 1)
+						.fold(base_var_name.to_string(), |acc, ac| match ac {
+							Accessor::Index(i) => format!("{}[{}]", acc, i),
+							Accessor::Key(k) => format!("{}.{}", acc, k),
+						});
 
-		// 	// Unescape the keys in the map_value
-		// 	if let serde_json::Value::Object(ref mut map) = map_value {
-		// 		let unescaped_map: serde_json::Map<String, serde_json::Value> = map
-		// 			.iter()
-		// 			.map(|(k, v)| (k.trim_matches('"').to_string(), v.clone()))
-		// 			.collect();
-		// 		*map = unescaped_map;
-		// 	}
+					match accessor {
+						Accessor::Index(idx) => {
+							let arr = current_json_value.as_array().ok_or_else(|| {
+								EvaluationError::TypeMismatch(format!(
+									"Attempted array indexing on a non-array type ('{}') at path segment '{}'. Full path: {:?}.",
+									current_kind_str, path_so_far_for_err_msg, variable_path
+								))
+							})?;
+							current_json_value = arr.get(*idx).cloned().ok_or_else(|| {
+								// clone to own the Value
+								EvaluationError::IndexOutOfBounds(format!(
+									"Index {} out of bounds for array (len {}) at path segment '{}'. Full path: {:?}.",
+									idx, arr.len(), path_so_far_for_err_msg, variable_path
+								))
+							})?;
+							current_kind_str = get_kind_from_value(&current_json_value);
+						}
+						Accessor::Key(key_str) => {
+							let obj = current_json_value.as_object().ok_or_else(|| {
+								EvaluationError::TypeMismatch(format!(
+									"Attempted key access on a non-object type ('{}') at path segment '{}'. Full path: {:?}.",
+									current_kind_str, path_so_far_for_err_msg, variable_path
+								))
+							})?;
+							current_json_value = obj.get(key_str).cloned().ok_or_else(|| {
+								// clone to own the Value
+								EvaluationError::FieldNotFound(format!(
+									"Key '{}' not found in object at path segment '{}'. Full path: {:?}.",
+									key_str, path_so_far_for_err_msg, variable_path
+								))
+							})?;
+							current_kind_str = get_kind_from_value(&current_json_value);
+						}
+					}
+				}
 
-		// 	let Some(key_value) = map_value.get(key) else {
-		// 		tracing::debug!("Key {} not found in map", key);
-		// 		return Ok(false);
-		// 	};
+				// After traversal, current_json_value holds the target value.
+				// Convert it to a string representation for compare_values.
+				// compare_values expects the LHS value as a string.
+				let final_value_str = match current_json_value {
+					serde_json::Value::Null => "null".to_string(), // Or handle as a special type/error
+					serde_json::Value::Bool(b) => b.to_string(),
+					serde_json::Value::Number(n) => n.to_string(),
+					serde_json::Value::String(s) => s.clone(), // s is already unquoted
+					serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+						// If the path resolves to another collection, compare_values for "vec" or "map"
+						// expects a JSON string.
+						current_json_value.to_string()
+					}
+				};
 
-		// 	Ok(self.compare_values(
-		// 		&get_kind_from_value(key_value),
-		// 		&key_value.to_string(),
-		// 		operator,
-		// 		value,
-		// 	))
-		// } else {
-		// Regular parameter
-		let Some(param) = self.args.iter().find(|p| p.name == param_expr) else {
-			return Err(EvaluationError::VariableNotFound(param_expr.to_string()));
-		};
-
-		self.compare_values(&param.kind, &param.value, &operator, value)
-		// }
+				self.compare_values(
+					&current_kind_str,
+					&final_value_str,
+					&operator,
+					value_literal,
+				)
+			}
+		}
 	}
 }
 
@@ -809,21 +857,21 @@ mod tests {
 
 		// Eq
 		assert!(evaluator
-			.compare_i256(
+			.compare_large_int_as_string(
 				"12345",
 				&ComparisonOperator::Eq,
 				&LiteralValue::Number("12345")
 			)
 			.unwrap());
 		assert!(evaluator
-			.compare_i256(
+			.compare_large_int_as_string(
 				"12345",
 				&ComparisonOperator::Eq,
 				&LiteralValue::Str("12345")
 			)
 			.unwrap());
 		assert!(!evaluator
-			.compare_i256(
+			.compare_large_int_as_string(
 				"12345",
 				&ComparisonOperator::Eq,
 				&LiteralValue::Number("54321")
@@ -832,14 +880,14 @@ mod tests {
 
 		// Ne
 		assert!(evaluator
-			.compare_i256(
+			.compare_large_int_as_string(
 				"12345",
 				&ComparisonOperator::Ne,
 				&LiteralValue::Number("54321")
 			)
 			.unwrap());
 		assert!(!evaluator
-			.compare_i256(
+			.compare_large_int_as_string(
 				"12345",
 				&ComparisonOperator::Ne,
 				&LiteralValue::Number("12345")
@@ -848,7 +896,7 @@ mod tests {
 
 		// Unsupported operator
 		assert!(matches!(
-			evaluator.compare_i256(
+			evaluator.compare_large_int_as_string(
 				"12345",
 				&ComparisonOperator::Gt,
 				&LiteralValue::Number("54321")
@@ -858,7 +906,11 @@ mod tests {
 
 		// Type Mismatch RHS
 		assert!(matches!(
-			evaluator.compare_i256("12345", &ComparisonOperator::Eq, &LiteralValue::Bool(true)),
+			evaluator.compare_large_int_as_string(
+				"12345",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Bool(true)
+			),
 			Err(EvaluationError::TypeMismatch(_))
 		));
 	}
