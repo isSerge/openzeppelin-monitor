@@ -2,8 +2,8 @@ use super::helpers::are_same_address;
 use crate::{
 	models::EVMMatchParamEntry,
 	services::filter::expression::{
-		compare_ordered_values, ComparisonOperator, ConditionEvaluator, EvaluationError,
-		LiteralValue,
+		compare_ordered_values, ComparisonOperator, ConditionEvaluator, ConditionLeft,
+		EvaluationError, LiteralValue,
 	},
 };
 use alloy::primitives::U256;
@@ -24,16 +24,26 @@ impl<'a> EVMConditionEvaluator<'a> {
 impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
 	fn evaluate_ast_condition(
 		&self,
-		variable_name: &str,
+		left_expr: &ConditionLeft<'_>,
 		operator: ComparisonOperator,
 		value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		tracing::debug!(
-			"Evaluating EVM condition: {} {:?} {:?}",
-			variable_name,
+			"Evaluating EVM condition: {:?} {:?} {:?}",
+			left_expr,
 			operator,
 			value
 		);
+
+		// Extract variable name from left expression
+		let variable_name = match left_expr {
+			ConditionLeft::Simple(name) => *name,
+			ConditionLeft::Path(path) => {
+				return Err(EvaluationError::UnsupportedOperator {
+					op: format!("Path accessors are not supported for EVM: {:?}", path),
+				});
+			}
+		};
 
 		// Find the parameter in args
 		let Some(param) = self.args.iter().find(|p| p.name == variable_name) else {

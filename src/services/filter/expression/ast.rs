@@ -28,8 +28,28 @@ pub enum LogicalOperator {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Accessor {
+	Index(usize),
+	Key(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariablePath<'a> {
+	pub base: &'a str,
+	pub accessors: Vec<Accessor>,
+}
+
+// The left side of a condition can be either a simple variable name or a path
+// (e.g., "a.b.c" or "a[0].b")
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionLeft<'a> {
+	Simple(&'a str),
+	Path(VariablePath<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Condition<'a> {
-	pub left: &'a str, // variable name
+	pub left: ConditionLeft<'a>,
 	pub operator: ComparisonOperator,
 	pub right: LiteralValue<'a>,
 }
