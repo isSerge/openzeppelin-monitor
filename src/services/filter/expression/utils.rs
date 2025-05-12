@@ -14,7 +14,48 @@ pub fn evaluate<'a>(
 ) -> Result<bool, EvaluationError> {
 	match expression {
 		Expression::Condition(condition) => {
-			evaluator.evaluate_ast_condition(&condition.left, condition.operator, &condition.right)
+			let base_name = condition.left.base_name();
+			let accessors = condition.left.accessors();
+			let (base_value_str, base_kind_str) = evaluator.get_base_param(base_name)?;
+
+			let final_left_value_str: String;
+			let final_left_kind: String;
+
+			if accessors.is_empty() {
+				// No accessors, use the base value directly
+				final_left_value_str = base_value_str.to_string();
+				final_left_kind = base_kind_str.to_string();
+			} else {
+				let resolved_value = resolve_path_to_json_value(
+					base_value_str,
+					base_kind_str,
+					accessors,
+					base_name,
+					&condition.left,
+				)?;
+
+        // Convert the resolved JSON value to a string representation
+				final_left_value_str = match resolved_value.clone() {
+					serde_json::Value::String(s) => s,
+					serde_json::Value::Number(n) => n.to_string(),
+					serde_json::Value::Bool(b) => b.to_string(),
+					serde_json::Value::Null => "null".to_string(),
+					serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            // If the resolved value is an array or object, we need to convert it to a string
+						resolved_value.to_string()
+					}
+				};
+
+        // Get the kind from the resolved JSON value from chain-specific evaluator
+        final_left_kind = evaluator.get_kind_from_json_value(&resolved_value)?;
+			}
+
+      evaluator.compare_final_values(
+        &final_left_kind,
+        &final_left_value_str,
+        &condition.operator,
+        &condition.right,
+      )
 		}
 		Expression::Logical {
 			left,

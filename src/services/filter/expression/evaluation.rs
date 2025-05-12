@@ -37,7 +37,7 @@ pub trait ConditionEvaluator {
 		&self,
 		left_kind: &str,
 		left_resolved_value: &str,
-		operator: ComparisonOperator,
+		operator: &ComparisonOperator,
 		right_literal: &LiteralValue,
 	) -> Result<bool, EvaluationError>;
 

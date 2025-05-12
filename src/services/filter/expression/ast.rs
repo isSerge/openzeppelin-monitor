@@ -39,12 +39,29 @@ pub struct VariablePath<'a> {
 	pub accessors: Vec<Accessor>,
 }
 
+// TODO: consider better naming for this struct
 // The left side of a condition can be either a simple variable name or a path
 // (e.g., "a.b.c" or "a[0].b")
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConditionLeft<'a> {
 	Simple(&'a str),
 	Path(VariablePath<'a>),
+}
+
+impl<'a> ConditionLeft<'a> {
+	pub fn base_name(&self) -> &'a str {
+		match self {
+			ConditionLeft::Simple(name) => name,
+			ConditionLeft::Path(path) => path.base,
+		}
+	}
+
+	pub fn accessors(&self) -> &[Accessor] {
+		match self {
+			ConditionLeft::Simple(_) => &[],
+			ConditionLeft::Path(path) => &path.accessors,
+		}
+	}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
