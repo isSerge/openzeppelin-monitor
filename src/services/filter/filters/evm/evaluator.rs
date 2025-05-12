@@ -1,4 +1,4 @@
-use super::helpers::are_same_address;
+use super::helpers::{are_same_address, string_to_u256};
 use crate::{
 	models::EVMMatchParamEntry,
 	services::filter::expression::{
@@ -6,8 +6,6 @@ use crate::{
 		LiteralValue,
 	},
 };
-use alloy::primitives::U256;
-use std::str::FromStr;
 
 type EVMArgs = Vec<EVMMatchParamEntry>;
 
@@ -20,38 +18,40 @@ impl<'a> EVMConditionEvaluator<'a> {
 		Self { args }
 	}
 
-	// TODO: check if need support for 0x values
+	/// Compares potential U256 LHS value with the RHS literal value
+	/// Handles decimal and hex inputs for both sides
 	fn compare_u256(
 		&self,
 		left_str: &str,
 		operator: &ComparisonOperator,
 		right_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		let left = U256::from_str(left_str).map_err(|error| {
+		let left = string_to_u256(left_str).map_err(|error| {
 			EvaluationError::ParseError(format!(
-				"Failed to parse EVM parameter '{}' as U256: {}",
+				"Failed to parse LHS value '{}' as U256: {}",
 				left_str, error,
 			))
 		})?;
 
-		let right_num_str = match right_literal {
-			LiteralValue::Number(num_str) => num_str,
+		let right_str = match right_literal {
+			LiteralValue::Number(s) => s,
+			LiteralValue::Str(s) => s,
 			_ => {
 				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected number literal for U256 comparison with found: {:?}",
+					"Expected number or string literal for U256 comparison with found: {:?}",
 					right_literal
 				)));
 			}
 		};
 
-		let right = U256::from_str(right_num_str).map_err(|error| {
+		let right = string_to_u256(right_str).map_err(|error| {
 			EvaluationError::ParseError(format!(
-				"Failed to parse comparison value '{}' as U256: {}",
-				right_num_str, error,
+				"Failed to parse RHS value '{}' as U256: {}",
+				right_str, error,
 			))
 		})?;
 
-		tracing::debug!("Comparing numeric: left: {}, right: {}", left, right);
+		tracing::debug!("Comparing U256: left: {}, op: {:?}, right: {}", left, operator, right);
 
 		compare_ordered_values(&left, operator, &right)
 	}
