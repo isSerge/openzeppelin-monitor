@@ -20,23 +20,23 @@ impl<'a> StellarConditionEvaluator<'a> {
 
 	fn compare_bool(
 		&self,
-		param_value: &str,
+		lhs_str: &str,
 		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>,
+		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		let Ok(left) = param_value.parse::<bool>() else {
+		let Ok(left) = lhs_str.parse::<bool>() else {
 			return Err(EvaluationError::ParseError(format!(
 				"Failed to parse bool parameter value: {}",
-				param_value
+				lhs_str
 			)));
 		};
 
-		let right = match compare_value {
+		let right = match rhs_literal {
 			LiteralValue::Bool(b) => *b,
 			_ => {
 				return Err(EvaluationError::TypeMismatch(format!(
 					"Expected bool literal for comparison, found: {:?}",
-					compare_value
+					rhs_literal
 				)))
 			}
 		};
@@ -52,200 +52,40 @@ impl<'a> StellarConditionEvaluator<'a> {
 		}
 	}
 
-	fn compare_u64(
+	/// Compares two numeric values (u64/i64/u32/i32) using the specified operator.
+	fn compare_numeric<T: std::str::FromStr + Ord + std::fmt::Display>(
 		&self,
-		param_value: &str,
+		lhs_str: &str,
 		operator: &ComparisonOperator,
-		compare_value: &LiteralValue,
-	) -> Result<bool, EvaluationError> {
-		let Ok(left) = param_value.parse::<u64>() else {
-			return Err(EvaluationError::ParseError(format!(
-				"Failed to parse u64 parameter value: {}",
-				param_value
-			)));
-		};
-
-		let right = match compare_value {
-			LiteralValue::Number(num_str) => num_str.parse::<u64>().map_err(|_| {
-				EvaluationError::ParseError(format!(
-					"Failed to parse comparison value '{}' as u64",
-					num_str
-				))
-			})?,
-			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected number literal for comparison with '{}', found: {:?}",
-					param_value, compare_value
-				)))
-			}
-		};
-
-		tracing::debug!("Comparing u64: left: {}, right: {}", left, right);
-
-		compare_ordered_values(&left, operator, &right)
-	}
-
-	fn compare_u32(
-		&self,
-		param_value: &str,
-		operator: &ComparisonOperator,
-		compare_value: &LiteralValue,
-	) -> Result<bool, EvaluationError> {
-		let Ok(left) = param_value.parse::<u32>() else {
-			return Err(EvaluationError::ParseError(format!(
-				"Failed to parse u32 parameter value: {}",
-				param_value
-			)));
-		};
-
-		let right = match compare_value {
-			LiteralValue::Number(num_str) => num_str.parse::<u32>().map_err(|_| {
-				EvaluationError::ParseError(format!(
-					"Failed to parse comparison value '{}' as u32",
-					num_str
-				))
-			})?,
-			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected number literal for comparison with '{}', found: {:?}",
-					param_value, compare_value
-				)))
-			}
-		};
-
-		tracing::debug!("Comparing u32: left: {}, right: {}", left, right);
-
-		compare_ordered_values(&left, operator, &right)
-	}
-
-	fn compare_i32(
-		&self,
-		param_value: &str,
-		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError> {
-		let left = param_value.parse::<i32>().map_err(|_| {
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError>
+	where
+		<T as std::str::FromStr>::Err: std::fmt::Debug,
+	{
+		let left = lhs_str.parse::<T>().map_err(|_| {
 			EvaluationError::ParseError(format!(
-				"Failed to parse i32 parameter value: {}",
-				param_value
+				"Failed to parse numeric parameter value: {}",
+				lhs_str
 			))
 		})?;
 
-		let right = match compare_value {
-			LiteralValue::Number(num_str) => num_str.parse::<i32>().map_err(|_| {
-				EvaluationError::ParseError(format!(
-					"Failed to parse comparison value '{}' as i32",
-					num_str
-				))
-			})?,
+		let rhs_str = match rhs_literal {
+			LiteralValue::Number(s) => s,
 			_ => {
 				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected number literal for i32 comparison with '{}', found: {:?}",
-					param_value, compare_value
+					"Expected number literal for {} comparison",
+					std::any::type_name::<T>()
 				)))
 			}
 		};
 
-		tracing::debug!("Comparing i32: left: {}, right: {}", left, right);
-
-		compare_ordered_values(&left, operator, &right)
-	}
-
-	fn compare_i64(
-		&self,
-		param_value: &str,
-		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError> {
-		let left = param_value.parse::<i64>().map_err(|_| {
+		let right = rhs_str.parse::<T>().map_err(|_| {
 			EvaluationError::ParseError(format!(
-				"Failed to parse i64 parameter value: {}",
-				param_value
+				"Failed to parse comparison value '{}' as {}",
+				rhs_str,
+				std::any::type_name::<T>()
 			))
 		})?;
-
-		let right = match compare_value {
-			LiteralValue::Number(num_str) => num_str.parse::<i64>().map_err(|_| {
-				EvaluationError::ParseError(format!(
-					"Failed to parse comparison value '{}' as i64",
-					num_str
-				))
-			})?,
-			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected number literal for i64 comparison with '{}', found: {:?}",
-					param_value, compare_value
-				)))
-			}
-		};
-
-		tracing::debug!("Comparing i64: left: {}, right: {}", left, right);
-
-		compare_ordered_values(&left, operator, &right)
-	}
-
-	fn compare_u128(
-		&self,
-		param_value: &str,
-		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError> {
-		let left = param_value.parse::<u128>().map_err(|_| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse u128 parameter value: {}",
-				param_value
-			))
-		})?;
-
-		let right = match compare_value {
-			LiteralValue::Number(num_str) => num_str.parse::<u128>().map_err(|_| {
-				EvaluationError::ParseError(format!(
-					"Failed to parse comparison value '{}' as u128",
-					num_str
-				))
-			})?,
-			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected number literal for u128 comparison with '{}', found: {:?}",
-					param_value, compare_value
-				)))
-			}
-		};
-
-		tracing::debug!("Comparing u128: left: {}, right: {}", left, right);
-
-		compare_ordered_values(&left, operator, &right)
-	}
-
-	fn compare_i128(
-		&self,
-		param_value: &str,
-		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError> {
-		let left = param_value.parse::<i128>().map_err(|_| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse i128 parameter value: {}",
-				param_value
-			))
-		})?;
-
-		let right = match compare_value {
-			LiteralValue::Number(num_str) => num_str.parse::<i128>().map_err(|_| {
-				EvaluationError::ParseError(format!(
-					"Failed to parse comparison value '{}' as i128",
-					num_str
-				))
-			})?,
-			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected number literal for i128 comparison with '{}', found: {:?}",
-					param_value, compare_value
-				)))
-			}
-		};
-
-		tracing::debug!("Comparing i128: left: {}, right: {}", left, right);
 
 		compare_ordered_values(&left, operator, &right)
 	}
@@ -253,30 +93,30 @@ impl<'a> StellarConditionEvaluator<'a> {
 	/// Compares two large integers (u256/i256) as strings.
 	fn compare_large_int_as_string(
 		&self,
-		left: &str,
+		lhs_str: &str,
 		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>,
+		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		let right = match compare_value {
+		let right = match rhs_literal {
 			LiteralValue::Number(s) => s,
 			LiteralValue::Str(s) => s,
 			_ => {
 				return Err(EvaluationError::TypeMismatch(format!(
 					"Expected number or string literal for i256 comparison, found: {:?}",
-					compare_value
+					rhs_literal
 				)))
 			}
 		};
 
 		tracing::debug!(
 			"Comparing large integer strings: left: {}, right: {}",
-			left,
+			lhs_str,
 			right
 		);
 
 		match operator {
-			ComparisonOperator::Eq => Ok(left == *right),
-			ComparisonOperator::Ne => Ok(left != *right),
+			ComparisonOperator::Eq => Ok(lhs_str == *right),
+			ComparisonOperator::Ne => Ok(lhs_str != *right),
 			_ => Err(EvaluationError::UnsupportedOperator {
 				op: format!(
 					"Operator {:?} not supported for i256 string comparison",
@@ -288,12 +128,12 @@ impl<'a> StellarConditionEvaluator<'a> {
 
 	fn compare_string(
 		&self,
-		param_kind: &str,  // "string", "address", "symbol", "bytes"
-		param_value: &str, // LHS value
+		lhs_kind: &str, // "string", "address", "symbol", "bytes"
+		lhs_str: &str,
 		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>, // RHS value
+		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		let right_str_val = match compare_value {
+		let right_str_val = match rhs_literal {
 			LiteralValue::Str(s) => *s,
 			LiteralValue::Number(n) => {
 				// Allow comparing stringy params with number literals if op is textual
@@ -304,7 +144,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 					_ => {
 						return Err(EvaluationError::TypeMismatch(format!(
 						"Expected string literal for {} comparison with '{}', found number: {:?}",
-						param_kind, param_value, compare_value
+						lhs_kind, lhs_str, rhs_literal
 					)))
 					}
 				}
@@ -324,7 +164,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 					_ => {
 						return Err(EvaluationError::TypeMismatch(format!(
 						"Expected string literal for {} comparison with '{}', found boolean: {:?}",
-						param_kind, param_value, compare_value
+						lhs_kind, lhs_str, rhs_literal
 					)))
 					}
 				}
@@ -335,24 +175,24 @@ impl<'a> StellarConditionEvaluator<'a> {
 		let left_normalized;
 		let right_normalized;
 
-		if param_kind == "address" {
+		if lhs_kind == "address" {
 			// Use normalize_address for both sides if it's an address comparison
 			// and the operator is Eq or Ne.
 			// For other operators like Contains on an address, treat as normal string.
 			match operator {
 				ComparisonOperator::Eq | ComparisonOperator::Ne => {
-					left_normalized = helpers::normalize_address(param_value);
+					left_normalized = helpers::normalize_address(lhs_str);
 					right_normalized = helpers::normalize_address(right_str_val);
 				}
 				_ => {
 					// StartsWith, EndsWith, Contains for addresses are case-insensitive string ops
-					left_normalized = param_value.to_lowercase();
+					left_normalized = lhs_str.to_lowercase();
 					right_normalized = right_str_val.to_lowercase();
 				}
 			}
 		} else {
 			// For "string", "symbol", "bytes", and address with textual ops
-			left_normalized = param_value.to_lowercase();
+			left_normalized = lhs_str.to_lowercase();
 			right_normalized = right_str_val.to_lowercase();
 		}
 
@@ -365,7 +205,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 			_ => Err(EvaluationError::UnsupportedOperator {
 				op: format!(
 					"Operator {:?} not supported for type {}",
-					operator, param_kind
+					operator, lhs_kind
 				),
 			}),
 		}
@@ -373,28 +213,28 @@ impl<'a> StellarConditionEvaluator<'a> {
 
 	fn compare_vec(
 		&self,
-		param_value: &str, // Comma-separated string for LHS
+		lhs_str: &str,
 		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>, // RHS
+		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		let right_str_val = match compare_value {
+		let right_str = match rhs_literal {
 			LiteralValue::Str(s) => *s,
 			LiteralValue::Number(n) => *n, // Allow comparing vec elements with numbers if they parse
 			_ => {
 				return Err(EvaluationError::TypeMismatch(format!(
 					"Expected string or number literal for Vec comparison, found: {:?}",
-					compare_value
+					rhs_literal
 				)))
 			}
 		};
 
 		match operator {
 			ComparisonOperator::Contains => {
-				let values: Vec<&str> = param_value.split(',').map(str::trim).collect();
-				Ok(values.contains(&right_str_val.trim()))
+				let values: Vec<&str> = lhs_str.split(',').map(str::trim).collect();
+				Ok(values.contains(&right_str.trim()))
 			}
-			ComparisonOperator::Eq => Ok(param_value == right_str_val), // Exact string match for the whole vec
-			ComparisonOperator::Ne => Ok(param_value != right_str_val),
+			ComparisonOperator::Eq => Ok(lhs_str == right_str), // Exact string match for the whole vec
+			ComparisonOperator::Ne => Ok(lhs_str != right_str),
 			_ => Err(EvaluationError::UnsupportedOperator {
 				op: format!("Operator {:?} not supported for Vec type", operator),
 			}),
@@ -469,32 +309,32 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 
 	fn compare_final_values(
 		&self,
-		param_type: &str,
-		param_value: &str,
+		lhs_kind: &str,
+		lhs_str: &str,
 		operator: &ComparisonOperator,
-		compare_value: &LiteralValue<'_>,
+		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		match param_type.to_lowercase().as_str() {
-			"bool" => self.compare_bool(param_value, operator, compare_value),
-			"u32" => self.compare_u32(param_value, operator, compare_value),
+		match lhs_kind.to_lowercase().as_str() {
+			"bool" => self.compare_bool(lhs_str, operator, rhs_literal),
+			"u32" => self.compare_numeric::<u32>(lhs_str, operator, rhs_literal),
 			"u64" | "timepoint" | "duration" => {
-				self.compare_u64(param_value, operator, compare_value)
+				self.compare_numeric::<u64>(lhs_str, operator, rhs_literal)
 			}
-			"i32" => self.compare_i32(param_value, operator, compare_value),
-			"i64" => self.compare_i64(param_value, operator, compare_value),
-			"u128" => self.compare_u128(param_value, operator, compare_value),
-			"i128" => self.compare_i128(param_value, operator, compare_value),
+			"i32" => self.compare_numeric::<i32>(lhs_str, operator, rhs_literal),
+			"i64" => self.compare_numeric::<i64>(lhs_str, operator, rhs_literal),
+			"u128" => self.compare_numeric::<u128>(lhs_str, operator, rhs_literal),
+			"i128" => self.compare_numeric::<i128>(lhs_str, operator, rhs_literal),
 			"u256" | "i256" => {
-				self.compare_large_int_as_string(param_value, operator, compare_value)
+				self.compare_large_int_as_string(lhs_str, operator, rhs_literal)
 			}
-			"vec" => self.compare_vec(param_value, operator, compare_value),
+			"vec" => self.compare_vec(lhs_str, operator, rhs_literal),
 			// handle "object" as potential type from JSON inference
-			"map" | "object" => self.compare_map(param_value, operator, compare_value),
+			"map" | "object" => self.compare_map(lhs_str, operator, rhs_literal),
 			"string" | "symbol" | "address" | "bytes" => self.compare_string(
-				param_type.to_ascii_lowercase().as_str(),
-				param_value,
+				lhs_kind.to_ascii_lowercase().as_str(),
+				lhs_str,
 				operator,
-				compare_value,
+				rhs_literal,
 			),
 			unknown_type => Err(EvaluationError::TypeMismatch(format!(
 				"Unknown parameter type: {}",
@@ -561,28 +401,39 @@ mod tests {
 		);
 	}
 
-	// TODO: add macro to avoid duplicating test cases for u32, i32, u64, i64, u128, i128
 	#[test]
-	fn test_compare_u64() {
+	fn test_compare_numeric() {
 		let args: StellarArgs = vec![];
 		let evaluator = StellarConditionEvaluator::new(&args);
 
 		assert!(evaluator
-			.compare_u64("100", &ComparisonOperator::Gt, &LiteralValue::Number("50"))
+			.compare_numeric::<u64>("100", &ComparisonOperator::Gt, &LiteralValue::Number("50"))
 			.unwrap());
 		// Type Mismatch
 		assert!(matches!(
-			evaluator.compare_u64("100", &ComparisonOperator::Gt, &LiteralValue::Bool(true)),
+			evaluator.compare_numeric::<u64>(
+				"100",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Bool(true)
+			),
 			Err(EvaluationError::TypeMismatch(_))
 		));
 		// Parse Error LHS
 		assert!(matches!(
-			evaluator.compare_u64("abc", &ComparisonOperator::Gt, &LiteralValue::Number("50")),
+			evaluator.compare_numeric::<u64>(
+				"abc",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number("50")
+			),
 			Err(EvaluationError::ParseError(_))
 		));
 		// Parse Error RHS
 		assert!(matches!(
-			evaluator.compare_u64("100", &ComparisonOperator::Gt, &LiteralValue::Number("xyz")),
+			evaluator.compare_numeric::<u64>(
+				"100",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number("xyz")
+			),
 			Err(EvaluationError::ParseError(_))
 		));
 	}
@@ -807,108 +658,5 @@ mod tests {
 		assert!(evaluator
 			.compare_bool("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
 			.is_err());
-	}
-
-	//////////////////////////////////////////////////////////////////////////////
-	// Test cases for compare_u64 method:
-	//////////////////////////////////////////////////////////////////////////////
-
-	#[test]
-	fn test_compare_u64_valid_comparisons() {
-		let args = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
-
-		// Test greater than
-		assert!(evaluator
-			.compare_u64("100", &ComparisonOperator::Gt, &LiteralValue::Number("50"))
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("50", &ComparisonOperator::Gt, &LiteralValue::Number("100"))
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("100", &ComparisonOperator::Gt, &LiteralValue::Number("100"))
-			.unwrap());
-
-		// Test greater than or equal
-		assert!(evaluator
-			.compare_u64("100", &ComparisonOperator::Gte, &LiteralValue::Number("50"))
-			.unwrap());
-		assert!(evaluator
-			.compare_u64(
-				"100",
-				&ComparisonOperator::Gte,
-				&LiteralValue::Number("100")
-			)
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("50", &ComparisonOperator::Gte, &LiteralValue::Number("100"))
-			.unwrap());
-
-		// Test less than
-		assert!(evaluator
-			.compare_u64("50", &ComparisonOperator::Lt, &LiteralValue::Number("100"))
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("100", &ComparisonOperator::Lt, &LiteralValue::Number("50"))
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("100", &ComparisonOperator::Lt, &LiteralValue::Number("100"))
-			.unwrap());
-
-		// Test less than or equal
-		assert!(evaluator
-			.compare_u64("50", &ComparisonOperator::Lte, &LiteralValue::Number("100"))
-			.unwrap());
-		assert!(evaluator
-			.compare_u64(
-				"100",
-				&ComparisonOperator::Lte,
-				&LiteralValue::Number("100")
-			)
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("100", &ComparisonOperator::Lte, &LiteralValue::Number("50"))
-			.unwrap());
-
-		// Test equality
-		assert!(evaluator
-			.compare_u64("100", &ComparisonOperator::Eq, &LiteralValue::Number("100"))
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("100", &ComparisonOperator::Eq, &LiteralValue::Number("50"))
-			.unwrap());
-
-		// Test inequality
-		assert!(evaluator
-			.compare_u64("100", &ComparisonOperator::Ne, &LiteralValue::Number("50"))
-			.unwrap());
-		assert!(!evaluator
-			.compare_u64("100", &ComparisonOperator::Ne, &LiteralValue::Number("100"))
-			.unwrap());
-	}
-
-	#[test]
-	fn test_compare_u64_invalid_values() {
-		let args = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
-
-		// Test invalid param_value
-		assert!(evaluator
-			.compare_u64(
-				"not_a_number",
-				&ComparisonOperator::Gt,
-				&LiteralValue::Number("100")
-			)
-			.is_err());
-		assert!(evaluator
-			.compare_u64("", &ComparisonOperator::Gt, &LiteralValue::Number("100"))
-			.is_err());
-		assert!(evaluator
-			.compare_u64(
-				"-100",
-				&ComparisonOperator::Gt,
-				&LiteralValue::Number("100")
-			)
-			.is_err()); // Negative numbers aren't valid u64
 	}
 }
