@@ -5,7 +5,7 @@ mod evaluation;
 mod parsing;
 mod utils;
 
-pub use ast::{Accessor, ComparisonOperator, ConditionLeft, LiteralValue};
+pub use ast::{ComparisonOperator, LiteralValue};
 pub use evaluation::{ConditionEvaluator, EvaluationError};
 pub use parsing::parse;
-pub use utils::{compare_ordered_values, evaluate, resolve_path_to_json_value};
+pub use utils::{compare_ordered_values, evaluate};

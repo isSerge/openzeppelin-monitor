@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::services::filter::expression::ast::{ComparisonOperator, ConditionLeft, LiteralValue};
+use crate::services::filter::expression::ast::{ComparisonOperator, LiteralValue};
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum EvaluationError {
@@ -19,16 +19,6 @@ pub enum EvaluationError {
 }
 
 pub trait ConditionEvaluator {
-	/// Evaluates a condition in the AST
-	/// Returns true if the condition is satisfied, false otherwise
-	/// Returns an error if the evaluation fails
-	fn evaluate_ast_condition(
-		&self,
-		left_expr: &ConditionLeft<'_>,
-		operator: ComparisonOperator,
-		value: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError>;
-
 	/// Gets the raw string value and kind for a base variable name
 	fn get_base_param(&self, name: &str) -> Result<(&str, &str), EvaluationError>;
 
@@ -42,8 +32,5 @@ pub trait ConditionEvaluator {
 	) -> Result<bool, EvaluationError>;
 
 	/// Gets the chain-specific kind of a value from a JSON value
-	fn get_kind_from_json_value(
-		&self,
-		value: &serde_json::Value,
-	) -> Result<String, EvaluationError>;
+	fn get_kind_from_json_value(&self, value: &serde_json::Value) -> String;
 }

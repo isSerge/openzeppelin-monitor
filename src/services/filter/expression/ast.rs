@@ -1,4 +1,4 @@
-///! This module defines the abstract syntax tree (AST) for the filter expressions
+//! This module defines the abstract syntax tree (AST) for the filter expressions
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiteralValue<'a> {
@@ -28,18 +28,17 @@ pub enum LogicalOperator {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Accessor {
+pub enum Accessor<'a> {
 	Index(usize),
-	Key(String),
+	Key(&'a str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariablePath<'a> {
 	pub base: &'a str,
-	pub accessors: Vec<Accessor>,
+	pub accessors: Vec<Accessor<'a>>,
 }
 
-// TODO: consider better naming for this struct
 // The left side of a condition can be either a simple variable name or a path
 // (e.g., "a.b.c" or "a[0].b")
 #[derive(Debug, Clone, PartialEq, Eq)]

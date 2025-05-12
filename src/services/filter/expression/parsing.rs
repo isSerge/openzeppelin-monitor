@@ -93,12 +93,12 @@ fn parse_unquoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue
 		.verify(|s: &&str| {
 			let word = *s;
 			!is_keyword(word)
-				&& !(word.contains(|c: char| c.is_ascii_digit() || c == '+' || c == '-')
+				|| (word.contains(|c: char| c.is_ascii_digit() || c == '+' || c == '-')
 					&& word
 						.chars()
 						.all(|c| c.is_ascii_digit() || c == '+' || c == '-'))
-				&& !((word.starts_with("0x") || word.starts_with("0X"))
-					&& word.chars().skip(2).all(|c| c.is_ascii_hexdigit()))
+					&& !((word.starts_with("0x") || word.starts_with("0X"))
+						&& word.chars().skip(2).all(|c| c.is_ascii_hexdigit()))
 		})
 		.map(|s: &str| LiteralValue::Str(s))
 		.context(StrContext::Expected(StrContextValue::Description(
@@ -108,7 +108,7 @@ fn parse_unquoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue
 }
 
 /// Parses an accessor (either an index or a key) from the input
-fn parse_accessor<'a>(input: &mut Input<'a>) -> ParserResult<Accessor> {
+fn parse_accessor<'a>(input: &mut Input<'a>) -> ParserResult<Accessor<'a>> {
 	let index_parser = delimited(
 		literal("["),
 		// digit1 itself returns &str, try_map converts it
@@ -128,7 +128,7 @@ fn parse_accessor<'a>(input: &mut Input<'a>) -> ParserResult<Accessor> {
 		)
 			.take(),
 	)
-		.map(|(_, key_slice): (_, &str)| Accessor::Key(key_slice.to_string()))
+		.map(|(_, key_slice): (_, &str)| Accessor::Key(key_slice))
 		.context(StrContext::Expected(StrContextValue::Description(
 			"object key accessor like '.key'",
 		)));
@@ -154,7 +154,7 @@ fn parse_base_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> 
 				)))
 		).take() // Use .take()
 ))
-.verify(|ident_slice: &&str| !is_keyword(*ident_slice)) // Verify the taken slice
+.verify(|ident_slice: &&str| !is_keyword(ident_slice)) // Verify the taken slice
 .map(|s:&str|s) // if verify needs &&str
 .context(StrContext::Expected(StrContextValue::Description("variable base name (e.g., 'request', '0')")))
 .parse_next(input)
@@ -196,7 +196,7 @@ fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 
 /// Parses a comparison operator (e.g., ==, !=, >, >=, <, <=)
 /// Handles optional whitespace around the operator
-fn parse_comparison_operator<'a>(input: &mut Input<'a>) -> ParserResult<ComparisonOperator> {
+fn parse_comparison_operator(input: &mut Input<'_>) -> ParserResult<ComparisonOperator> {
 	delimited(
 		space0,
 		alt((
@@ -331,9 +331,7 @@ fn parse_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 }
 
 /// Public method, which parses a string expression into an `Expression` AST
-pub fn parse<'a>(
-	expression_str: &'a str,
-) -> Result<Expression<'a>, ParseError<Input<'a>, ContextError>> {
+pub fn parse(expression_str: &str) -> Result<Expression<'_>, ParseError<Input<'_>, ContextError>> {
 	// Define the parser for the entire expression
 	// This parser will parse the expression and ensure it ends with EOF
 	let mut full_expression_parser = (parse_expression, eof).map(|(expr, _)| expr);

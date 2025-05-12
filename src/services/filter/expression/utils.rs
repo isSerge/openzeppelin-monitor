@@ -8,8 +8,8 @@ use crate::services::filter::expression::ast::{
 /// Traverses the Expression AST and uses ConditionEvaluator to evaluate conditions
 /// Returns true if the expression evaluates to true, false otherwise
 /// Returns an error if the evaluation fails
-pub fn evaluate<'a>(
-	expression: &Expression<'a>,
+pub fn evaluate(
+	expression: &Expression<'_>,
 	evaluator: &impl ConditionEvaluator,
 ) -> Result<bool, EvaluationError> {
 	match expression {
@@ -34,8 +34,11 @@ pub fn evaluate<'a>(
 					&condition.left,
 				)?;
 
+        // Get the kind from the resolved JSON value from chain-specific evaluator
+        final_left_kind = evaluator.get_kind_from_json_value(&resolved_value);
+
         // Convert the resolved JSON value to a string representation
-				final_left_value_str = match resolved_value.clone() {
+				final_left_value_str = match resolved_value {
 					serde_json::Value::String(s) => s,
 					serde_json::Value::Number(n) => n.to_string(),
 					serde_json::Value::Bool(b) => b.to_string(),
@@ -45,9 +48,6 @@ pub fn evaluate<'a>(
 						resolved_value.to_string()
 					}
 				};
-
-        // Get the kind from the resolved JSON value from chain-specific evaluator
-        final_left_kind = evaluator.get_kind_from_json_value(&resolved_value)?;
 			}
 
       evaluator.compare_final_values(
@@ -104,7 +104,7 @@ pub fn compare_ordered_values<T: Ord>(
 /// Resolves a JSON path from a base variable name and accessors
 /// Returns the resolved JSON value
 /// Returns an error if the traversal fails
-pub fn resolve_path_to_json_value<'a>(
+fn resolve_path_to_json_value(
 	base_value_str: &str,
 	base_kind_str: &str,
 	accessors: &[Accessor],
@@ -192,7 +192,7 @@ fn access_json_value(
 				))
 			})?;
 
-			obj.get(key.as_str()).cloned().ok_or_else(|| {
+			obj.get(*key).cloned().ok_or_else(|| {
 				EvaluationError::FieldNotFound(format!(
 					"Key '{}' not found at '{}'",
 					key, path_segment
