@@ -9,6 +9,10 @@ use crate::{
 
 type EVMArgs = Vec<EVMMatchParamEntry>;
 
+const NUMERIC_KINDS: &[&str] = &[
+	"uint8", "uint16", "uint32", "uint64", "uint128", "uint256", "number",
+];
+
 pub struct EVMConditionEvaluator<'a> {
 	args: &'a EVMArgs,
 }
@@ -51,7 +55,12 @@ impl<'a> EVMConditionEvaluator<'a> {
 			))
 		})?;
 
-		tracing::debug!("Comparing U256: left: {}, op: {:?}, right: {}", left, operator, right);
+		tracing::debug!(
+			"Comparing U256: left: {}, op: {:?}, right: {}",
+			left,
+			operator,
+			right
+		);
 
 		compare_ordered_values(&left, operator, &right)
 	}
@@ -120,6 +129,55 @@ impl<'a> EVMConditionEvaluator<'a> {
 			}),
 		}
 	}
+
+	/// Compares an EVM array (represented as a comma-separated string)
+	/// with a literal value based on the operator.
+	/// Supports Eq, Ne (for the whole string) and Contains (for elements).
+	fn compare_array(
+		&self,
+		lhs_kind: &str, // "uint8[]" or "string[]"
+		lhs_str: &str,
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		tracing::debug!(
+			"Comparing array: lhs_kind='{}', lhs_str='{}', operator={:?}, rhs_literal={:?}",
+			lhs_kind,
+			lhs_str,
+			operator,
+			rhs_literal
+		);
+
+		let rhs_str = match rhs_literal {
+			LiteralValue::Str(s) => *s,
+			LiteralValue::Number(n) => *n,
+			LiteralValue::Bool(b) => {
+				if *b {
+					"true"
+				} else {
+					"false"
+				}
+			}
+		};
+
+		match operator {
+			ComparisonOperator::Eq => Ok(lhs_str == rhs_str),
+			ComparisonOperator::Ne => Ok(lhs_str != rhs_str),
+			ComparisonOperator::Contains => {
+				// Split the LHS comma-separated string into elements
+				// Trim whitespace from each element for both LHS and RHS
+				let lhs_elements: Vec<&str> = lhs_str.split(',').map(str::trim).collect();
+				let trimmed_rhs_str = rhs_str.trim();
+				Ok(lhs_elements.iter().any(|&el| el == trimmed_rhs_str))
+			}
+			_ => Err(EvaluationError::UnsupportedOperator {
+				op: format!(
+					"Operator {:?} not supported for EVM array (kind: {})",
+					operator, lhs_kind
+				),
+			}),
+		}
+	}
 }
 
 impl ConditionEvaluator for EVMConditionEvaluator<'_> {
@@ -145,6 +203,15 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 			operator,
 			rhs_literal
 		);
+
+		if NUMERIC_KINDS.contains(&lhs_kind_str) {
+			return self.compare_u256(lhs_value_str, operator, rhs_literal);
+		}
+
+		// Check for EVM comma-separated array kind
+		if lhs_kind_str.ends_with("[]") {
+			return self.compare_array(&lhs_kind_str, lhs_value_str, operator, rhs_literal);
+		}
 
 		match lhs_kind_str.to_lowercase().as_str() {
 			// "number" if inferred from JSON number
@@ -172,14 +239,6 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 						op: format!("Unsupported op {:?} for EVM Bool", operator),
 					}),
 				}
-			}
-			// TODO: Implement support for EVM collections (arrays, maps, etc.)
-			"vec" | "map" => {
-				unimplemented!("EVM collections (arrays, maps) not yet supported in comparison");
-			}
-			// TODO: Implement support for bytes
-			"bytes" | "bytes32" => {
-				unimplemented!("EVM bytes not yet supported in comparison");
 			}
 			_ => Err(EvaluationError::TypeMismatch(format!(
 				"Unsupported EVM parameter kind for comparison: {}",
