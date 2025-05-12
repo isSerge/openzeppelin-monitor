@@ -1,8 +1,6 @@
 use thiserror::Error;
 
-use crate::services::filter::expression::ast::{
-	ComparisonOperator, ConditionLeft, Expression, LiteralValue, LogicalOperator,
-};
+use crate::services::filter::expression::ast::{ComparisonOperator, ConditionLeft, LiteralValue};
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum EvaluationError {
@@ -21,65 +19,31 @@ pub enum EvaluationError {
 }
 
 pub trait ConditionEvaluator {
+	/// Evaluates a condition in the AST
+	/// Returns true if the condition is satisfied, false otherwise
+	/// Returns an error if the evaluation fails
 	fn evaluate_ast_condition(
 		&self,
 		left_expr: &ConditionLeft<'_>,
 		operator: ComparisonOperator,
 		value: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError>;
-}
 
-/// Traverses the Expression AST and uses ConditionEvaluator to evaluate conditions
-/// Returns true if the expression evaluates to true, false otherwise
-/// Returns an error if the evaluation fails
-pub fn evaluate<'a>(
-	expression: &Expression<'a>,
-	evaluator: &impl ConditionEvaluator,
-) -> Result<bool, EvaluationError> {
-	match expression {
-		Expression::Condition(condition) => {
-			evaluator.evaluate_ast_condition(&condition.left, condition.operator, &condition.right)
-		}
-		Expression::Logical {
-			left,
-			operator,
-			right,
-		} => {
-			let left_val = evaluate(left, evaluator)?;
-			match operator {
-				LogicalOperator::And => {
-					if !left_val {
-						Ok(false)
-					} else {
-						evaluate(right, evaluator)
-					}
-				}
-				LogicalOperator::Or => {
-					if left_val {
-						Ok(true)
-					} else {
-						evaluate(right, evaluator)
-					}
-				}
-			}
-		}
-	}
-}
+	/// Gets the raw string value and kind for a base variable name
+	fn get_base_param(&self, name: &str) -> Result<(&str, &str), EvaluationError>;
 
-pub fn compare_ordered_values<T: Ord>(
-	left: &T,
-	op: &ComparisonOperator,
-	right: &T,
-) -> Result<bool, EvaluationError> {
-	match op {
-		ComparisonOperator::Eq => Ok(left == right),
-		ComparisonOperator::Ne => Ok(left != right),
-		ComparisonOperator::Gt => Ok(left > right),
-		ComparisonOperator::Gte => Ok(left >= right),
-		ComparisonOperator::Lt => Ok(left < right),
-		ComparisonOperator::Lte => Ok(left <= right),
-		_ => Err(EvaluationError::UnsupportedOperator {
-			op: format!("Unsupported operator for ordered types: {:?}", op),
-		}),
-	}
+	/// Performs the final comparison between the left resolved value (after all path traversal) and the literal value
+	fn compare_final_values(
+		&self,
+		left_kind: &str,
+		left_resolved_value: &str,
+		operator: ComparisonOperator,
+		right_literal: &LiteralValue,
+	) -> Result<bool, EvaluationError>;
+
+	/// Gets the chain-specific kind of a value from a JSON value
+	fn get_kind_from_json_value(
+		&self,
+		value: &serde_json::Value,
+	) -> Result<String, EvaluationError>;
 }
