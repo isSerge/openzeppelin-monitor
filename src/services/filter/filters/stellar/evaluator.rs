@@ -133,41 +133,13 @@ impl<'a> StellarConditionEvaluator<'a> {
 		operator: &ComparisonOperator,
 		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
-		let right_str_val = match rhs_literal {
+		let right_str = match rhs_literal {
 			LiteralValue::Str(s) => *s,
-			LiteralValue::Number(n) => {
-				// Allow comparing stringy params with number literals if op is textual
-				match operator {
-					ComparisonOperator::StartsWith
-					| ComparisonOperator::EndsWith
-					| ComparisonOperator::Contains => *n,
-					_ => {
-						return Err(EvaluationError::TypeMismatch(format!(
-						"Expected string literal for {} comparison with '{}', found number: {:?}",
-						lhs_kind, lhs_str, rhs_literal
-					)))
-					}
-				}
-			}
-			LiteralValue::Bool(b) => {
-				// Allow comparing stringy params with bool literals if op is textual
-				match operator {
-					ComparisonOperator::StartsWith
-					| ComparisonOperator::EndsWith
-					| ComparisonOperator::Contains => {
-						if *b {
-							"true"
-						} else {
-							"false"
-						}
-					}
-					_ => {
-						return Err(EvaluationError::TypeMismatch(format!(
-						"Expected string literal for {} comparison with '{}', found boolean: {:?}",
-						lhs_kind, lhs_str, rhs_literal
-					)))
-					}
-				}
+			_ => {
+				return Err(EvaluationError::TypeMismatch(format!(
+					"Expected string literal for {} comparison, found: {:?}",
+					lhs_kind, rhs_literal
+				)))
 			}
 		};
 
@@ -175,26 +147,25 @@ impl<'a> StellarConditionEvaluator<'a> {
 		let left_normalized;
 		let right_normalized;
 
-		if lhs_kind == "address" {
-			// Use normalize_address for both sides if it's an address comparison
-			// and the operator is Eq or Ne.
-			// For other operators like Contains on an address, treat as normal string.
-			match operator {
-				ComparisonOperator::Eq | ComparisonOperator::Ne => {
-					left_normalized = helpers::normalize_address(lhs_str);
-					right_normalized = helpers::normalize_address(right_str_val);
-				}
-				_ => {
-					// StartsWith, EndsWith, Contains for addresses are case-insensitive string ops
-					left_normalized = lhs_str.to_lowercase();
-					right_normalized = right_str_val.to_lowercase();
-				}
-			}
+		let is_address_kind = lhs_kind == "address";
+		let is_strict_eq_operator =
+			operator == &ComparisonOperator::Eq || operator == &ComparisonOperator::Ne;
+
+		if is_address_kind && is_strict_eq_operator {
+			left_normalized = helpers::normalize_address(lhs_str);
+			right_normalized = helpers::normalize_address(right_str);
 		} else {
-			// For "string", "symbol", "bytes", and address with textual ops
 			left_normalized = lhs_str.to_lowercase();
-			right_normalized = right_str_val.to_lowercase();
+			right_normalized = right_str.to_lowercase();
 		}
+
+		tracing::debug!(
+			"Comparing strings: kind: {}, left: {}, operator: {:?}, right: {}",
+			lhs_kind,
+			left_normalized,
+			operator,
+			right_normalized,
+		);
 
 		match operator {
 			ComparisonOperator::Eq => Ok(left_normalized == right_normalized),
@@ -324,9 +295,7 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 			"i64" => self.compare_numeric::<i64>(lhs_str, operator, rhs_literal),
 			"u128" => self.compare_numeric::<u128>(lhs_str, operator, rhs_literal),
 			"i128" => self.compare_numeric::<i128>(lhs_str, operator, rhs_literal),
-			"u256" | "i256" => {
-				self.compare_large_int_as_string(lhs_str, operator, rhs_literal)
-			}
+			"u256" | "i256" => self.compare_large_int_as_string(lhs_str, operator, rhs_literal),
 			"vec" => self.compare_vec(lhs_str, operator, rhs_literal),
 			// handle "object" as potential type from JSON inference
 			"map" | "object" => self.compare_map(lhs_str, operator, rhs_literal),

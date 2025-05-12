@@ -2,8 +2,8 @@ use super::helpers::are_same_address;
 use crate::{
 	models::EVMMatchParamEntry,
 	services::filter::expression::{
-		compare_ordered_values, ComparisonOperator, ConditionEvaluator, ConditionLeft,
-		EvaluationError, LiteralValue,
+		compare_ordered_values, ComparisonOperator, ConditionEvaluator, EvaluationError,
+		LiteralValue,
 	},
 };
 use alloy::primitives::U256;
@@ -19,130 +19,204 @@ impl<'a> EVMConditionEvaluator<'a> {
 	pub fn new(args: &'a EVMArgs) -> Self {
 		Self { args }
 	}
-}
 
-impl<'a> ConditionEvaluator for EVMConditionEvaluator<'a> {
-	fn evaluate_ast_condition(
+	// TODO: check if need support for 0x values
+	fn compare_u256(
 		&self,
-		left_expr: &ConditionLeft<'_>,
-		operator: ComparisonOperator,
-		value: &LiteralValue<'_>,
+		left_str: &str,
+		operator: &ComparisonOperator,
+		right_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
+		let left = U256::from_str(left_str).map_err(|error| {
+			EvaluationError::ParseError(format!(
+				"Failed to parse EVM parameter '{}' as U256: {}",
+				left_str, error,
+			))
+		})?;
+
+		let right_num_str = match right_literal {
+			LiteralValue::Number(num_str) => num_str,
+			_ => {
+				return Err(EvaluationError::TypeMismatch(format!(
+					"Expected number literal for U256 comparison with found: {:?}",
+					right_literal
+				)));
+			}
+		};
+
+		let right = U256::from_str(right_num_str).map_err(|error| {
+			EvaluationError::ParseError(format!(
+				"Failed to parse comparison value '{}' as U256: {}",
+				right_num_str, error,
+			))
+		})?;
+
+		tracing::debug!("Comparing numeric: left: {}, right: {}", left, right);
+
+		compare_ordered_values(&left, operator, &right)
+	}
+
+	fn compare_address(
+		&self,
+		left: &str,
+		operator: &ComparisonOperator,
+		right_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let right = match right_literal {
+			LiteralValue::Str(str) => *str,
+			_ => {
+				return Err(EvaluationError::TypeMismatch(format!(
+					"Expected string literal for address comparison, found: {:?}",
+					right_literal
+				)));
+			}
+		};
+
+		tracing::debug!("Comapring addresses: left: {}, right: {}", left, right);
+
+		match operator {
+			ComparisonOperator::Eq => Ok(are_same_address(left, right)),
+			ComparisonOperator::Ne => Ok(!are_same_address(left, right)),
+			_ => Err(EvaluationError::UnsupportedOperator {
+				op: format!("Unsupported operator for address type: {:?}", operator),
+			}),
+		}
+	}
+
+	fn compare_string(
+		&self,
+		lhs_str: &str,
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		// Perform case-insensitive comparisons for all string operators
+		let left = lhs_str.to_lowercase();
+
+		let right = match rhs_literal {
+			LiteralValue::Str(s) => s.to_lowercase(),
+			_ => {
+				return Err(EvaluationError::TypeMismatch(format!(
+					"Expected string literal comparison, found: {:?}",
+					rhs_literal
+				)));
+			}
+		};
+
 		tracing::debug!(
-			"Evaluating EVM condition: {:?} {:?} {:?}",
-			left_expr,
+			"Comparing strings: left: {}, operator: {:?}, right: {}",
+			left,
 			operator,
-			value
+			right,
 		);
 
-		// Extract variable name from left expression
-		let variable_name = match left_expr {
-			ConditionLeft::Simple(name) => *name,
-			ConditionLeft::Path(path) => {
-				return Err(EvaluationError::UnsupportedOperator {
-					op: format!("Path accessors are not supported for EVM: {:?}", path),
-				});
+		match operator {
+			ComparisonOperator::Eq => Ok(left == right),
+			ComparisonOperator::Ne => Ok(left != right),
+			ComparisonOperator::StartsWith => Ok(left.starts_with(&right)),
+			ComparisonOperator::EndsWith => Ok(left.ends_with(&right)),
+			ComparisonOperator::Contains => Ok(left.contains(&right)),
+			_ => Err(EvaluationError::UnsupportedOperator {
+				op: format!("Operator {:?} not supported for type String", operator),
+			}),
+		}
+	}
+}
+
+impl ConditionEvaluator for EVMConditionEvaluator<'_> {
+	fn get_base_param(&self, name: &str) -> Result<(&str, &str), EvaluationError> {
+		self.args
+			.iter()
+			.find(|p| p.name == name)
+			.map(|p| (p.value.as_str(), p.kind.as_str()))
+			.ok_or_else(|| EvaluationError::VariableNotFound(name.to_string()))
+	}
+
+	fn compare_final_values(
+		&self,
+		lhs_kind_str: &str,
+		lhs_value_str: &str, // Value after path traversal, or original base value
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		tracing::debug!(
+			"EVM Comparing: lhs_val='{}', lhs_kind='{}', op='{:?}', rhs_lit='{:?}'",
+			lhs_value_str,
+			lhs_kind_str,
+			operator,
+			rhs_literal
+		);
+
+		match lhs_kind_str.to_lowercase().as_str() {
+			// "number" if inferred from JSON number
+			"uint32" | "uint64" | "uint256" | "uint" | "u256" | "number" => {
+				self.compare_u256(lhs_value_str, operator, rhs_literal)
 			}
-		};
-
-		// Find the parameter in args
-		let Some(param) = self.args.iter().find(|p| p.name == variable_name) else {
-			return Err(EvaluationError::VariableNotFound(variable_name.to_string()));
-		};
-
-		// Evaluate single condition
-		match param.kind.as_str() {
-			"uint64" | "uint256" | "uint" => {
-				let left = U256::from_str(&param.value).map_err(|_| {
-					EvaluationError::ParseError(format!(
-						"Failed to parse parameter '{}' (value: {}) as U256",
-						param.name, param.value,
-					))
+			"address" => self.compare_address(lhs_value_str, operator, rhs_literal),
+			"string" => self.compare_string(lhs_value_str, operator, rhs_literal),
+			"bool" => {
+				let lhs = lhs_value_str.parse::<bool>().map_err(|_| {
+					EvaluationError::ParseError(format!("Invalid EVM bool LHS: {}", lhs_value_str))
 				})?;
-
-				let right_num_str = match value {
-					LiteralValue::Number(num_str) => num_str,
+				let rhs = match rhs_literal {
+					LiteralValue::Bool(b) => *b,
 					_ => {
-						return Err(EvaluationError::TypeMismatch(format!(
-							"Expected number literal for comparison with '{}', found: {:?}",
-							param.name, value
-						)));
+						return Err(EvaluationError::TypeMismatch(
+							"Expected bool literal for EVM Bool comparison".into(),
+						))
 					}
 				};
-
-				let right = U256::from_str(right_num_str).map_err(|error| {
-					EvaluationError::ParseError(format!(
-						"Failed to parse comparison value '{}' as U256: {}",
-						right_num_str, error,
-					))
-				})?;
-
-				tracing::debug!("Comparing numeric: left: {}, right: {}", left, right);
-
-				compare_ordered_values(&left, &operator, &right)
-			}
-			"address" => {
-				let left = &param.value;
-				let right = match value {
-					LiteralValue::Str(str) => *str,
-					_ => {
-						return Err(EvaluationError::TypeMismatch(format!(
-							"Expected string literal for address comparison with '{}', found: {:?}",
-							param.name, value
-						)));
-					}
-				};
-
-				tracing::debug!("Comapring addresses: left: {}, right: {}", left, right);
-
 				match operator {
-					ComparisonOperator::Eq => Ok(are_same_address(left, right)),
-					ComparisonOperator::Ne => Ok(!are_same_address(left, right)),
+					ComparisonOperator::Eq => Ok(lhs == rhs),
+					ComparisonOperator::Ne => Ok(lhs != rhs),
 					_ => Err(EvaluationError::UnsupportedOperator {
-						op: format!("Unsupported operator for address type: {:?}", operator),
+						op: format!("Unsupported op {:?} for EVM Bool", operator),
 					}),
 				}
 			}
-			"string" => {
-				// Perform case-insensitive comparisons for all string operators
-				let left = param.value.to_lowercase();
+			// TODO: Implement support for EVM collections (arrays, maps, etc.)
+			"vec" | "map" => {
+				unimplemented!("EVM collections (arrays, maps) not yet supported in comparison");
+			}
+			// TODO: Implement support for bytes
+			"bytes" | "bytes32" => {
+				unimplemented!("EVM bytes not yet supported in comparison");
+			}
+			_ => Err(EvaluationError::TypeMismatch(format!(
+				"Unsupported EVM parameter kind for comparison: {}",
+				lhs_kind_str
+			))),
+		}
+	}
 
-				// Make sure right is a string when using starts_with, ends_with, or contains operators
-				let right = match operator {
-					ComparisonOperator::StartsWith
-					| ComparisonOperator::EndsWith
-					| ComparisonOperator::Contains => match value {
-						LiteralValue::Str(s) => s.to_lowercase(),
-						LiteralValue::Number(n) => n.to_string().to_lowercase(),
-						LiteralValue::Bool(b) => b.to_string().to_lowercase(),
-					},
-					_ => match value {
-						LiteralValue::Str(str) => str.to_lowercase(),
-						_ => {
-							return Err(EvaluationError::TypeMismatch(format!(
-								"Expected string literal for comparison with '{}', found: {:?}",
-								param.name, value
-							)));
-						}
-					},
-				};
+	fn get_kind_from_json_value(&self, value: &serde_json::Value) -> String {
+		match value {
+			serde_json::Value::String(s) => {
+				let is_address = s.starts_with("0x")
+					&& s.len() == 42
+					&& s.chars().skip(2).all(|c| c.is_ascii_hexdigit());
+				let is_bytes =
+					s.starts_with("0x") && s.chars().skip(2).all(|c| c.is_ascii_hexdigit());
 
-				tracing::debug!("Comparing strings: left: {}, right: {}", left, right);
-
-				match operator {
-					ComparisonOperator::Eq => Ok(left == right),
-					ComparisonOperator::Ne => Ok(left != right),
-					ComparisonOperator::StartsWith => Ok(left.starts_with(&right)),
-					ComparisonOperator::EndsWith => Ok(left.ends_with(&right)),
-					ComparisonOperator::Contains => Ok(left.contains(&right)),
-					_ => Err(EvaluationError::UnsupportedOperator {
-						op: format!("Unsupported operator for string type: {:?}", operator),
-					}),
+				if is_address {
+					"Address".to_string()
+				} else if is_bytes {
+					// Could be Bytes or a hex-encoded U256
+					if s.len() == 66 {
+						// 0x + 32 bytes (64 hex chars)
+						"Bytes32".to_string()
+					} else {
+						"Bytes".to_string()
+					}
+				} else {
+					"String".to_string()
 				}
 			}
-			_ => Err(EvaluationError::TypeMismatch(
-				"Unsupported EVM parameter type".to_string(),
-			)),
+			// Use generic "Number" for JSON numbers since all map to U256
+			serde_json::Value::Number(_) => "Number".to_string(),
+			serde_json::Value::Bool(_) => "Bool".to_string(),
+			serde_json::Value::Array(_) => "Vec".to_string(),
+			serde_json::Value::Object(_) => "Map".to_string(),
+			serde_json::Value::Null => "Null".to_string(),
 		}
 	}
 }

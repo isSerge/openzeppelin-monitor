@@ -2128,7 +2128,7 @@ mod tests {
 			"string",
 		)]);
 
-		assert!(filter.evaluate_expression("input contains 567890", &args));
+		assert!(filter.evaluate_expression("input contains '567890'", &args));
 		assert!(filter.evaluate_expression("input contains 0x1234", &args));
 		assert!(filter.evaluate_expression("input contains abcdef", &args));
 		assert!(!filter.evaluate_expression("input contains ffffff", &args));
