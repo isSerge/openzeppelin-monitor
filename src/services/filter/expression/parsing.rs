@@ -1,6 +1,6 @@
 //! This module contains the parser for the filter expression language.
 //! It uses the `winnow` library for parsing and defines the grammar for the expression language.
-//! The parser converts the input string into an abstract syntax tree (AST) representation of the expression. 
+//! The parser converts the input string into an abstract syntax tree (AST) representation of the expression.
 
 use super::ast::{
 	Accessor, ComparisonOperator, Condition, ConditionLeft, Expression, LiteralValue,
@@ -8,7 +8,7 @@ use super::ast::{
 };
 use winnow::{
 	ascii::{digit1, space0, space1, Caseless},
-	combinator::{alt, delimited, eof, opt, peek, repeat},
+	combinator::{alt, delimited, eof, opt, peek, repeat, Repeat},
 	error::{ContextError, ErrMode, ParseError, StrContext, StrContextValue},
 	prelude::*,
 	token::{literal, one_of, take_while},
@@ -20,6 +20,7 @@ type Input<'a> = &'a str;
 type ParserResult<T> = winnow::Result<T, ErrMode<ContextError>>;
 
 // Helper to check for keywords
+// These words cannot be used as unquoted string literals or variable names
 fn is_keyword(ident: &str) -> bool {
 	matches!(
 		ident.to_ascii_lowercase().as_str(),
@@ -68,7 +69,7 @@ fn parse_hex_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>>
 		peek(alt((
 			space1.value(()),
 			eof.value(()),
-			one_of([')', '(', ',', '=', '!', '>', '<']).value(()),
+			one_of([')', '(', ',', '=', '!', '>', '<', '&', '|']).value(()),
 		))),
 	)
 		.take()
@@ -79,16 +80,34 @@ fn parse_hex_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>>
 		.parse_next(input)
 }
 
-// TODO: handle escaped quotes
 /// Parses string literals enclosed in single quotes into `LiteralValue::Str`
 fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
-	// Match opening quote, content (non-quote characters), closing quote
-	delimited('\'', take_while(0.., |c| c != '\''), '\'')
-		.map(LiteralValue::Str)
+	// Match and consume opening quote
+	literal('\'').parse_next(input)?;
+
+	// Parser for the content within the quotes.
+	let string_inner_content_parser: Repeat<_, _, _, Vec<&'a str>, _> = repeat(
+		0.., // The string can be empty
+		alt((
+			literal("\\'"),  // Matches and consumes an escaped single quote: \'
+			literal("\\\\"), // Matches and consumes an escaped backslash: \\
+			take_while(1.., |c: char| c != '\'' && c != '\\'),
+		)),
+	);
+
+	// Get slice of the input
+	let string_content_slice: &'a str = string_inner_content_parser
+			.take() 
+			.parse_next(input)?;
+
+	// Match and consume the closing quote
+	literal('\'')
 		.context(StrContext::Expected(StrContextValue::Description(
-			"single-quoted string literal",
+			"closing single quote (') for string literal",
 		)))
-		.parse_next(input)
+		.parse_next(input)?;
+
+	Ok(LiteralValue::Str(string_content_slice))
 }
 
 /// Fallback parser for unquoted strings (applied last)
