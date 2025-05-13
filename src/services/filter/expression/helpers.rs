@@ -1,8 +1,8 @@
 //! Utility functions for evaluating expressions and resolving JSON paths
 
-use super::evaluation::{ConditionEvaluator, EvaluationError};
-use crate::services::filter::expression::ast::{
-	Accessor, ComparisonOperator, ConditionLeft, Expression, LogicalOperator,
+use super::{
+	ast::{Accessor, ComparisonOperator, ConditionLeft, Expression, LogicalOperator},
+	evaluation::{ConditionEvaluator, EvaluationError},
 };
 
 /// Traverses the Expression AST and uses ConditionEvaluator to evaluate conditions
@@ -202,5 +202,162 @@ fn access_json_value(
 				))
 			})
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::services::filter::expression::ast::{ComparisonOperator, VariablePath};
+	use serde_json::json;
+
+	// --- Tests for `compare_ordered_values` ---
+	#[test]
+	fn test_compare_ordered_values_integers() {
+		assert_eq!(
+			compare_ordered_values(&5, &ComparisonOperator::Eq, &5),
+			Ok(true)
+		);
+		assert_eq!(
+			compare_ordered_values(&5, &ComparisonOperator::Eq, &10),
+			Ok(false)
+		);
+		assert_eq!(
+			compare_ordered_values(&10, &ComparisonOperator::Gt, &5),
+			Ok(true)
+		);
+		assert_eq!(
+			compare_ordered_values(&5, &ComparisonOperator::Lt, &10),
+			Ok(true)
+		);
+		assert_eq!(
+			compare_ordered_values(&5, &ComparisonOperator::Gte, &5),
+			Ok(true)
+		);
+		assert_eq!(
+			compare_ordered_values(&5, &ComparisonOperator::Lte, &5),
+			Ok(true)
+		);
+		assert_eq!(
+			compare_ordered_values(&5, &ComparisonOperator::Ne, &10),
+			Ok(true)
+		);
+	}
+
+	#[test]
+	fn test_compare_ordered_values_unsupported_operator() {
+		let result = compare_ordered_values(&5, &ComparisonOperator::Contains, &5);
+		assert!(matches!(
+			result,
+			Err(EvaluationError::UnsupportedOperator { .. })
+		));
+	}
+
+	// --- Tests for `parse_base_value` ---
+	#[test]
+	fn test_parse_base_value_ok() {
+		let val = parse_base_value(
+			r#"{"key": "value"}"#,
+			"json_string",
+			"data",
+			&ConditionLeft::Simple("data"),
+		);
+		assert_eq!(val.unwrap(), json!({"key": "value"}));
+	}
+
+	#[test]
+	fn test_parse_base_value_err() {
+		let result = parse_base_value("not json", "string", "data", &ConditionLeft::Simple("data"));
+		assert!(matches!(result, Err(EvaluationError::ParseError(_))));
+	}
+
+	// --- Tests for `access_json_value` ---
+	#[test]
+	fn test_access_json_value_key() {
+		let obj = json!({"user": {"name": "Alice"}});
+		let accessed = access_json_value(obj, &Accessor::Key("user"), "obj.user").unwrap();
+		assert_eq!(accessed, json!({"name": "Alice"}));
+	}
+
+	#[test]
+	fn test_access_json_value_index() {
+		let arr = json!([10, 20, 30]);
+		let accessed = access_json_value(arr, &Accessor::Index(1), "arr[1]").unwrap();
+		assert_eq!(accessed, json!(20));
+	}
+
+	#[test]
+	fn test_access_json_value_errors() {
+		// Key not found
+		let obj = json!({"name": "Bob"});
+		let res1 = access_json_value(obj.clone(), &Accessor::Key("age"), "obj.age");
+		assert!(matches!(res1, Err(EvaluationError::FieldNotFound(_))));
+
+		// Index out of bounds
+		let arr = json!([1]);
+		let res2 = access_json_value(arr.clone(), &Accessor::Index(5), "arr[5]");
+		assert!(matches!(res2, Err(EvaluationError::IndexOutOfBounds(_))));
+
+		// Type mismatch (key access on array)
+		let res3 = access_json_value(arr.clone(), &Accessor::Key("key"), "arr.key");
+		assert!(matches!(res3, Err(EvaluationError::TypeMismatch(_))));
+
+		// Type mismatch (index access on object)
+		let res4 = access_json_value(obj.clone(), &Accessor::Index(0), "obj[0]");
+		assert!(matches!(res4, Err(EvaluationError::TypeMismatch(_))));
+	}
+
+	// --- Tests for `resolve_path_to_json_value` ---
+	#[test]
+	fn test_resolve_path_simple_key() {
+		let base_val_str = r#"{"name": "Alice", "age": 30}"#;
+		let accessors = vec![Accessor::Key("age")];
+		let lhs = ConditionLeft::Path(VariablePath {
+			base: "user",
+			accessors: accessors.clone(),
+		});
+		let resolved =
+			resolve_path_to_json_value(base_val_str, "object", &accessors, "user", &lhs).unwrap();
+		assert_eq!(resolved, json!(30));
+	}
+
+	#[test]
+	fn test_resolve_path_nested() {
+		let base_val_str = r#"{"user": {"details": {"status": "active"}}}"#;
+		let accessors = vec![
+			Accessor::Key("user"),
+			Accessor::Key("details"),
+			Accessor::Key("status"),
+		];
+		let lhs = ConditionLeft::Path(VariablePath {
+			base: "data",
+			accessors: accessors.clone(),
+		});
+		let resolved =
+			resolve_path_to_json_value(base_val_str, "object", &accessors, "data", &lhs).unwrap();
+		assert_eq!(resolved, json!("active"));
+	}
+
+	#[test]
+	fn test_resolve_path_array_index() {
+		let base_val_str = r#"[{"id": 1}, {"id": 2}]"#;
+		let accessors = vec![Accessor::Index(1), Accessor::Key("id")];
+		let lhs = ConditionLeft::Path(VariablePath {
+			base: "items",
+			accessors: accessors.clone(),
+		});
+		let resolved =
+			resolve_path_to_json_value(base_val_str, "array", &accessors, "items", &lhs).unwrap();
+		assert_eq!(resolved, json!(2));
+	}
+
+	// --- Tests for `build_path_segments` ---
+	#[test]
+	fn test_build_path_segments_formatting() {
+		let segments = build_path_segments("base", &[Accessor::Key("field"), Accessor::Index(0)]);
+		assert_eq!(
+			segments,
+			vec!["base.field".to_string(), "base.field[0]".to_string()]
+		);
 	}
 }

@@ -115,9 +115,7 @@ fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'
 	);
 
 	// Get slice of the input
-	let string_content_slice: &'a str = string_inner_content_parser
-			.take() 
-			.parse_next(input)?;
+	let string_content_slice: &'a str = string_inner_content_parser.take().parse_next(input)?;
 
 	// Match and consume the closing quote
 	literal('\'')

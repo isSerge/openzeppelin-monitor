@@ -4,9 +4,8 @@
 //! The `ConditionEvaluator` trait is implemented by specific evaluators that provide the logic
 //! for evaluating conditions based on the context of the chain.
 
-use thiserror::Error;
-
 use crate::services::filter::expression::ast::{ComparisonOperator, LiteralValue};
+use thiserror::Error;
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum EvaluationError {
