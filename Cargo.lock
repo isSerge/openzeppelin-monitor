@@ -3768,6 +3768,7 @@ dependencies = [
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",

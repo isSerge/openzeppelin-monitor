@@ -34,28 +34,28 @@ pub fn evaluate(
 					&condition.left,
 				)?;
 
-        // Get the kind from the resolved JSON value from chain-specific evaluator
-        final_left_kind = evaluator.get_kind_from_json_value(&resolved_value);
+				// Get the kind from the resolved JSON value from chain-specific evaluator
+				final_left_kind = evaluator.get_kind_from_json_value(&resolved_value);
 
-        // Convert the resolved JSON value to a string representation
+				// Convert the resolved JSON value to a string representation
 				final_left_value_str = match resolved_value {
 					serde_json::Value::String(s) => s,
 					serde_json::Value::Number(n) => n.to_string(),
 					serde_json::Value::Bool(b) => b.to_string(),
 					serde_json::Value::Null => "null".to_string(),
 					serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            // If the resolved value is an array or object, we need to convert it to a string
+						// If the resolved value is an array or object, we need to convert it to a string
 						resolved_value.to_string()
 					}
 				};
 			}
 
-      evaluator.compare_final_values(
-        &final_left_kind,
-        &final_left_value_str,
-        &condition.operator,
-        &condition.right,
-      )
+			evaluator.compare_final_values(
+				&final_left_kind,
+				&final_left_value_str,
+				&condition.operator,
+				&condition.right,
+			)
 		}
 		Expression::Logical {
 			left,

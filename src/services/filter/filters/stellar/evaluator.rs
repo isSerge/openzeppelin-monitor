@@ -256,11 +256,9 @@ impl<'a> StellarConditionEvaluator<'a> {
 					!result
 				})
 			}
-			_ => {
-				Err(EvaluationError::UnsupportedOperator {
-					op: format!("Operator {:?} not supported for map comparison", operator),
-				})
-			}
+			_ => Err(EvaluationError::UnsupportedOperator {
+				op: format!("Operator {:?} not supported for map comparison", operator),
+			}),
 		}
 	}
 }

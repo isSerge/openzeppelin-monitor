@@ -1,3 +1,7 @@
+//! This module contains the parser for the filter expression language.
+//! It uses the `winnow` library for parsing and defines the grammar for the expression language.
+//! The parser converts the input string into an abstract syntax tree (AST) representation of the expression. 
+
 use super::ast::{
 	Accessor, ComparisonOperator, Condition, ConditionLeft, Expression, LiteralValue,
 	LogicalOperator, VariablePath,
@@ -36,23 +40,24 @@ fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	.parse_next(input)
 }
 
-/// Parser integer literals into `LiteralValue::Number`
-fn parse_number<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
+/// Parses any numeric-looking literal (integer or float) into LiteralValue::Number(&'a str).
+fn parse_number_or_fixed_str<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	(
-		opt(one_of(['+', '-'])),
-		digit1,
-		peek(alt((
-			space1.value(()),
-			eof.value(()),
-			one_of([')', '(', ',', '=', '!', '>', '<']).value(()),
-		))),
+			opt(one_of(['+', '-'])),
+			digit1,
+			opt((literal("."), digit1)), // Optional fractional part
+			peek(alt(( // Ensure it's properly delimited
+					space1.value(()),
+					eof.value(()),
+					one_of([')', '(', ',', '=', '!', '>', '<', '&', '|']).value(()),
+			))),
 	)
-		.take()
-		.map(|s: &str| LiteralValue::Number(s))
-		.context(StrContext::Expected(StrContextValue::Description(
-			"numeric literal",
-		)))
-		.parse_next(input)
+	.take()
+	.map(|s: &str| LiteralValue::Number(s)) // Store as Number(&str)
+	.context(StrContext::Expected(StrContextValue::Description(
+			"numeric literal (integer or fixed-point)",
+	)))
+	.parse_next(input)
 }
 
 // Parses an unquoted "0x..." or "0X..." sequence as a string.
@@ -93,12 +98,15 @@ fn parse_unquoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue
 		.verify(|s: &&str| {
 			let word = *s;
 			!is_keyword(word)
-				|| (word.contains(|c: char| c.is_ascii_digit() || c == '+' || c == '-')
-					&& word
+					// Check if it's NOT an integer-like string
+					&& !(word
 						.chars()
 						.all(|c| c.is_ascii_digit() || c == '+' || c == '-'))
+					// Check if it's NOT a hex string
 					&& !((word.starts_with("0x") || word.starts_with("0X"))
 						&& word.chars().skip(2).all(|c| c.is_ascii_hexdigit()))
+					// Check if it's NOT a float-like string
+					&& !word.contains('.')
 		})
 		.map(|s: &str| LiteralValue::Str(s))
 		.context(StrContext::Expected(StrContextValue::Description(
@@ -140,24 +148,35 @@ fn parse_base_variable_name<'a>(input: &mut Input<'a>) -> ParserResult<&'a str> 
 	alt((
 		// Standard identifier
 		(
-				one_of(|c: char| c.is_alpha() || c == '_'),
-				take_while(0.., |c: char| c.is_alphanum() || c == '_')
-		).take(), // Use .take()
-
+			one_of(|c: char| c.is_alpha() || c == '_'),
+			take_while(0.., |c: char| c.is_alphanum() || c == '_'),
+		)
+			.take(),
 		// Purely numeric identifier
 		(
-				digit1,
-				peek(alt(( // Peek ensures it's properly delimited for an LHS base
-						literal('['), literal('.'), space1, eof,
-						literal("=="), literal("!="), literal(">="), literal("<="), literal(">"), literal("<"),
-						// one_of([')', '(']),
-				)))
-		).take() // Use .take()
-))
-.verify(|ident_slice: &&str| !is_keyword(ident_slice)) // Verify the taken slice
-.map(|s:&str|s) // if verify needs &&str
-.context(StrContext::Expected(StrContextValue::Description("variable base name (e.g., 'request', '0')")))
-.parse_next(input)
+			digit1,
+			peek(alt((
+				// Peek ensures it's properly delimited for an LHS base
+				literal('['),
+				literal('.'),
+				space1,
+				eof,
+				literal("=="),
+				literal("!="),
+				literal(">="),
+				literal("<="),
+				literal(">"),
+				literal("<"),
+			))),
+		)
+			.take(),
+	))
+	.verify(|ident_slice: &&str| !is_keyword(ident_slice))
+	.map(|s: &str| s)
+	.context(StrContext::Expected(StrContextValue::Description(
+		"variable base name (e.g., 'request', '0')",
+	)))
+	.parse_next(input)
 }
 
 fn parse_condition_lhs<'a>(input: &mut Input<'a>) -> ParserResult<ConditionLeft<'a>> {
@@ -180,16 +199,16 @@ fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	delimited(
 		space0,
 		alt((
-			parse_quoted_string,   // "'string'"
-			parse_boolean,         // "true" / "false"
-			parse_hex_string,      // "0x..."
-			parse_number,          // "123" / "-123"
-			parse_unquoted_string, // "unquoted_string"
+			parse_quoted_string,       // "'string'"
+			parse_boolean,             // "true" / "false"
+			parse_hex_string,          // "0x..."
+			parse_number_or_fixed_str, // "123" / "-123" / "123.456"
+			parse_unquoted_string,     // "unquoted_string"
 		)),
 		space0,
 	)
 	.context(StrContext::Expected(StrContextValue::Description(
-		"boolean, number, or string",
+		"boolean, number, hex string or string",
 	)))
 	.parse_next(input)
 }

@@ -6,6 +6,8 @@ use crate::{
 		LiteralValue,
 	},
 };
+use rust_decimal::Decimal;
+use std::str::FromStr;
 
 type EVMArgs = Vec<EVMMatchParamEntry>;
 
@@ -65,6 +67,8 @@ impl<'a> EVMConditionEvaluator<'a> {
 		compare_ordered_values(&left, operator, &right)
 	}
 
+	/// Compares an EVM address (string) with a literal value based on the operator.
+	/// Only supports Eq and Ne operators.
 	fn compare_address(
 		&self,
 		left: &str,
@@ -92,6 +96,8 @@ impl<'a> EVMConditionEvaluator<'a> {
 		}
 	}
 
+	/// Compares a string value with a literal value based on the operator.
+	/// Supports Eq, Ne, StartsWith, EndsWith, and Contains operators.
 	fn compare_string(
 		&self,
 		lhs_str: &str,
@@ -178,6 +184,77 @@ impl<'a> EVMConditionEvaluator<'a> {
 			}),
 		}
 	}
+
+	/// Compares a fixed-point number (Decimal) with a literal value.
+	fn compare_fixed_point(
+		&self,
+		lhs_str: &str, // LHS value as string (needs parsing)
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let left_decimal = Decimal::from_str(lhs_str).map_err(|e| {
+			EvaluationError::ParseError(format!(
+				"Failed to parse LHS value '{}' as Decimal: {}",
+				lhs_str, e
+			))
+		})?;
+
+		// RHS must now be parsed from Number(&str) or Str(&str)
+		let rhs_str = match rhs_literal {
+			LiteralValue::Number(s) => *s,
+			LiteralValue::Str(s) => *s, // If user quoted a numeric string e.g., '123.45'
+			_ => {
+				return Err(EvaluationError::TypeMismatch(format!(
+					"Expected number or string literal for Decimal comparison, found: {:?}",
+					rhs_literal
+				)));
+			}
+		};
+
+		let right_decimal = Decimal::from_str(rhs_str).map_err(|e| {
+			EvaluationError::ParseError(format!(
+				"Failed to parse RHS value '{}' as Decimal: {}",
+				rhs_str, e
+			))
+		})?;
+
+		tracing::debug!(
+			"Comparing Decimal: left={}, op={:?}, right={}",
+			left_decimal,
+			operator,
+			right_decimal
+		);
+
+		compare_ordered_values(&left_decimal, operator, &right_decimal)
+	}
+
+	/// Compares a boolean value (true/false) with a literal value.
+	/// Only supports Eq and Ne operators.
+	fn compare_boolean(
+		&self,
+		lhs_value_str: &str,
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let lhs = lhs_value_str.parse::<bool>().map_err(|_| {
+			EvaluationError::ParseError(format!("Invalid EVM bool LHS: {}", lhs_value_str))
+		})?;
+		let rhs = match rhs_literal {
+			LiteralValue::Bool(b) => *b,
+			_ => {
+				return Err(EvaluationError::TypeMismatch(
+					"Expected bool literal for EVM Bool comparison".into(),
+				))
+			}
+		};
+		match operator {
+			ComparisonOperator::Eq => Ok(lhs == rhs),
+			ComparisonOperator::Ne => Ok(lhs != rhs),
+			_ => Err(EvaluationError::UnsupportedOperator {
+				op: format!("Unsupported op {:?} for EVM Bool", operator),
+			}),
+		}
+	}
 }
 
 impl ConditionEvaluator for EVMConditionEvaluator<'_> {
@@ -196,6 +273,8 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 		operator: &ComparisonOperator,
 		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
+		let lhs_kind = lhs_kind_str.to_lowercase();
+
 		tracing::debug!(
 			"EVM Comparing: lhs_val='{}', lhs_kind='{}', op='{:?}', rhs_lit='{:?}'",
 			lhs_value_str,
@@ -204,42 +283,20 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 			rhs_literal
 		);
 
-		if NUMERIC_KINDS.contains(&lhs_kind_str) {
+		if NUMERIC_KINDS.contains(&lhs_kind.as_str()) {
 			return self.compare_u256(lhs_value_str, operator, rhs_literal);
 		}
 
 		// Check for EVM comma-separated array kind
-		if lhs_kind_str.ends_with("[]") {
-			return self.compare_array(&lhs_kind_str, lhs_value_str, operator, rhs_literal);
+		if lhs_kind.ends_with("[]") {
+			return self.compare_array(&lhs_kind, lhs_value_str, operator, rhs_literal);
 		}
 
-		match lhs_kind_str.to_lowercase().as_str() {
-			// "number" if inferred from JSON number
-			"uint32" | "uint64" | "uint256" | "uint" | "u256" | "number" => {
-				self.compare_u256(lhs_value_str, operator, rhs_literal)
-			}
+		match lhs_kind.as_str() {
+			"fixed" | "ufixed" => self.compare_fixed_point(lhs_value_str, operator, rhs_literal),
 			"address" => self.compare_address(lhs_value_str, operator, rhs_literal),
 			"string" => self.compare_string(lhs_value_str, operator, rhs_literal),
-			"bool" => {
-				let lhs = lhs_value_str.parse::<bool>().map_err(|_| {
-					EvaluationError::ParseError(format!("Invalid EVM bool LHS: {}", lhs_value_str))
-				})?;
-				let rhs = match rhs_literal {
-					LiteralValue::Bool(b) => *b,
-					_ => {
-						return Err(EvaluationError::TypeMismatch(
-							"Expected bool literal for EVM Bool comparison".into(),
-						))
-					}
-				};
-				match operator {
-					ComparisonOperator::Eq => Ok(lhs == rhs),
-					ComparisonOperator::Ne => Ok(lhs != rhs),
-					_ => Err(EvaluationError::UnsupportedOperator {
-						op: format!("Unsupported op {:?} for EVM Bool", operator),
-					}),
-				}
-			}
+			"bool" => self.compare_boolean(lhs_value_str, operator, rhs_literal),
 			_ => Err(EvaluationError::TypeMismatch(format!(
 				"Unsupported EVM parameter kind for comparison: {}",
 				lhs_kind_str
@@ -253,29 +310,19 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 				let is_address = s.starts_with("0x")
 					&& s.len() == 42
 					&& s.chars().skip(2).all(|c| c.is_ascii_hexdigit());
-				let is_bytes =
-					s.starts_with("0x") && s.chars().skip(2).all(|c| c.is_ascii_hexdigit());
 
 				if is_address {
-					"Address".to_string()
-				} else if is_bytes {
-					// Could be Bytes or a hex-encoded U256
-					if s.len() == 66 {
-						// 0x + 32 bytes (64 hex chars)
-						"Bytes32".to_string()
-					} else {
-						"Bytes".to_string()
-					}
+					"address".to_string()
 				} else {
-					"String".to_string()
+					"string".to_string()
 				}
 			}
 			// Use generic "Number" for JSON numbers since all map to U256
-			serde_json::Value::Number(_) => "Number".to_string(),
-			serde_json::Value::Bool(_) => "Bool".to_string(),
-			serde_json::Value::Array(_) => "Vec".to_string(),
-			serde_json::Value::Object(_) => "Map".to_string(),
-			serde_json::Value::Null => "Null".to_string(),
+			serde_json::Value::Number(_) => "number".to_string(),
+			serde_json::Value::Bool(_) => "bool".to_string(),
+			serde_json::Value::Array(_) => "vec".to_string(),
+			serde_json::Value::Object(_) => "map".to_string(),
+			serde_json::Value::Null => "null".to_string(),
 		}
 	}
 }
