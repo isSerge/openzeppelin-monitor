@@ -370,8 +370,7 @@ fn parse_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 
 /// Public method, which parses a string expression into an `Expression` AST
 pub fn parse(expression_str: &str) -> Result<Expression<'_>, ParseError<Input<'_>, ContextError>> {
-	// Define the parser for the entire expression
-	// This parser will parse the expression and ensure it ends with EOF
+	// Parse the expression and ensure it ends with EOF
 	let mut full_expression_parser = (parse_expression, eof).map(|(expr, _)| expr);
 
 	full_expression_parser.parse(expression_str)

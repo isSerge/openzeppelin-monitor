@@ -1,3 +1,6 @@
+//! This module provides an implementation of the `ConditionEvaluator` trait
+//! for evaluating conditions in EVM-based chains.
+
 use super::helpers::{are_same_address, string_to_u256};
 use crate::{
 	models::EVMMatchParamEntry,

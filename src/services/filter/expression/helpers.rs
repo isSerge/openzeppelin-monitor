@@ -83,6 +83,9 @@ pub fn evaluate(
 	}
 }
 
+/// Compares two values implementing the Ord trait using the specified comparison operator
+/// Returns true if the comparison is valid, false otherwise
+/// Returns an error if the operator is not supported for the given types
 pub fn compare_ordered_values<T: Ord>(
 	left: &T,
 	op: &ComparisonOperator,

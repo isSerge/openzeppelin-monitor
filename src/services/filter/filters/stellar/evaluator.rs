@@ -1,3 +1,6 @@
+//! This module provides the `StellarConditionEvaluator` struct, which implements
+//! the `ConditionEvaluator` trait for evaluating conditions in Stellar-based chains.
+
 use super::helpers;
 use crate::{
 	models::StellarMatchParamEntry,
@@ -18,6 +21,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 		Self { args }
 	}
 
+	/// Compares two boolean values (true/false) using the specified operator.
 	fn compare_bool(
 		&self,
 		lhs_str: &str,
@@ -126,6 +130,10 @@ impl<'a> StellarConditionEvaluator<'a> {
 		}
 	}
 
+	/// Compares two strings (string/address/symbol/bytes) using the specified operator.
+	/// The comparison is case-insensitive for string and address types.
+	/// For address, it normalizes both sides before comparison.
+	/// For symbol and bytes, it performs a case-insensitive comparison.
 	fn compare_string(
 		&self,
 		lhs_kind: &str, // "string", "address", "symbol", "bytes"

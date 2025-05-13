@@ -1,3 +1,9 @@
+//! This module contains the `ConditionEvaluator` trait and the `EvaluationError` enum.
+//! The `ConditionEvaluator` trait defines methods for getting base parameters, comparing values,
+//! and getting the kind of a value from a JSON value.
+//! The `ConditionEvaluator` trait is implemented by specific evaluators that provide the logic
+//! for evaluating conditions based on the context of the chain.
+
 use thiserror::Error;
 
 use crate::services::filter::expression::ast::{ComparisonOperator, LiteralValue};
@@ -18,6 +24,7 @@ pub enum EvaluationError {
 	FieldNotFound(String),
 }
 
+/// The `ConditionEvaluator` trait defines methods for evaluating conditions in filter expressions.
 pub trait ConditionEvaluator {
 	/// Gets the raw string value and kind for a base variable name
 	fn get_base_param(&self, name: &str) -> Result<(&str, &str), EvaluationError>;
