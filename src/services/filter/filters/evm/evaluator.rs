@@ -1,7 +1,7 @@
 //! This module provides an implementation of the `ConditionEvaluator` trait
 //! for evaluating conditions in EVM-based chains.
 
-use super::helpers::{are_same_address, string_to_u256};
+use super::helpers::{are_same_address, string_to_i256, string_to_u256};
 use crate::{
 	models::EVMMatchParamEntry,
 	services::filter::expression::{
@@ -14,9 +14,11 @@ use std::str::FromStr;
 
 type EVMArgs = Vec<EVMMatchParamEntry>;
 
-const NUMERIC_KINDS: &[&str] = &[
+const UNSIGNED_INTEGER_KINDS: &[&str] = &[
 	"uint8", "uint16", "uint32", "uint64", "uint128", "uint256", "number",
 ];
+
+const SIGNED_INTEGER_KINDS: &[&str] = &["int8", "int16", "int32", "int64", "int128", "int256"];
 
 pub struct EVMConditionEvaluator<'a> {
 	args: &'a EVMArgs,
@@ -62,6 +64,48 @@ impl<'a> EVMConditionEvaluator<'a> {
 
 		tracing::debug!(
 			"Comparing U256: left: {}, op: {:?}, right: {}",
+			left,
+			operator,
+			right
+		);
+
+		compare_ordered_values(&left, operator, &right)
+	}
+
+	/// Compares potential I256 LHS value with the RHS literal value
+	fn compare_i256(
+		&self,
+		left_str: &str,
+		operator: &ComparisonOperator,
+		right_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let left = string_to_i256(left_str).map_err(|error| {
+			EvaluationError::ParseError(format!(
+				"Failed to parse LHS value '{}' as I256: {}",
+				left_str, error,
+			))
+		})?;
+
+		let right_str = match right_literal {
+			LiteralValue::Number(s) => s, // e.g., "-10", "10", "0x0A" (if string_to_i256 handles hex)
+			LiteralValue::Str(s) => s,    // e.g., "'-10'", "'0x0A'"
+			_ => {
+				return Err(EvaluationError::TypeMismatch(format!(
+					"Expected number or string literal for I256 comparison, found: {:?}",
+					right_literal
+				)));
+			}
+		};
+
+		let right = string_to_i256(right_str).map_err(|error| {
+			EvaluationError::ParseError(format!(
+				"Failed to parse RHS value '{}' as I256: {}",
+				right_str, error,
+			))
+		})?;
+
+		tracing::debug!(
+			"Comparing I256: left: {}, op: {:?}, right: {}",
 			left,
 			operator,
 			right
@@ -286,7 +330,11 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 			rhs_literal
 		);
 
-		if NUMERIC_KINDS.contains(&lhs_kind.as_str()) {
+		if SIGNED_INTEGER_KINDS.contains(&lhs_kind.as_str()) {
+			return self.compare_i256(lhs_value_str, operator, rhs_literal);
+		}
+
+		if UNSIGNED_INTEGER_KINDS.contains(&lhs_kind.as_str()) {
 			return self.compare_u256(lhs_value_str, operator, rhs_literal);
 		}
 
@@ -298,7 +346,9 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 		match lhs_kind.as_str() {
 			"fixed" | "ufixed" => self.compare_fixed_point(lhs_value_str, operator, rhs_literal),
 			"address" => self.compare_address(lhs_value_str, operator, rhs_literal),
-			"string" => self.compare_string(lhs_value_str, operator, rhs_literal),
+			"string" | "bytes" | "bytes32" => {
+				self.compare_string(lhs_value_str, operator, rhs_literal)
+			}
 			"bool" => self.compare_boolean(lhs_value_str, operator, rhs_literal),
 			_ => Err(EvaluationError::TypeMismatch(format!(
 				"Unsupported EVM parameter kind for comparison: {}",
@@ -310,18 +360,37 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 	fn get_kind_from_json_value(&self, value: &serde_json::Value) -> String {
 		match value {
 			serde_json::Value::String(s) => {
-				let is_address = s.starts_with("0x")
+				let s_lower = s.to_lowercase();
+				if s_lower.starts_with("0x")
 					&& s.len() == 42
-					&& s.chars().skip(2).all(|c| c.is_ascii_hexdigit());
-
-				if is_address {
+					&& s.chars().skip(2).all(|c| c.is_ascii_hexdigit())
+				{
 					"address".to_string()
+				} else if s_lower.starts_with("0x")
+					&& s.chars().skip(2).all(|c| c.is_ascii_hexdigit())
+				{
+					if s.len() == 66 {
+						// 0x + 32 bytes (64 hex chars)
+						"bytes32".to_string()
+					} else {
+						"bytes".to_string()
+					}
+				// Check if it's a string representation of a decimal
+				} else if Decimal::from_str(s).is_ok() && s.contains('.') {
+					"fixed".to_string()
 				} else {
 					"string".to_string()
 				}
 			}
-			// Use generic "Number" for JSON numbers since all map to U256
-			serde_json::Value::Number(_) => "number".to_string(),
+			serde_json::Value::Number(n) => {
+				if n.is_f64() || n.to_string().contains('.') {
+					"fixed".to_string()
+				} else if n.is_i64() {
+					"int64".to_string()
+				} else {
+					"number".to_string()
+				}
+			}
 			serde_json::Value::Bool(_) => "bool".to_string(),
 			serde_json::Value::Array(_) => "vec".to_string(),
 			serde_json::Value::Object(_) => "map".to_string(),

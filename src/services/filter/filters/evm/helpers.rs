@@ -4,7 +4,7 @@
 //! and formatting, including address and hash conversions, signature normalization,
 //! and token value formatting.
 
-use alloy::primitives::{Address, B256, U256};
+use alloy::primitives::{Address, B256, I256, U256};
 use ethabi::{Hash, Token};
 use std::str::FromStr;
 
@@ -190,6 +190,31 @@ pub fn string_to_u256(value_str: &str) -> Result<U256, String> {
 	} else {
 		// Decimal parsing
 		U256::from_str(trimmed).map_err(|e| format!("Failed to parse decimal '{}': {}", trimmed, e))
+	}
+}
+
+/// Converts a string to an I256 value.
+pub fn string_to_i256(value_str: &str) -> Result<I256, String> {
+	let trimmed = value_str.trim();
+	if trimmed.is_empty() {
+		return Err("Input string is empty".to_string());
+	}
+
+	if let Some(hex_val_no_sign) = trimmed
+		.strip_prefix("0x")
+		.or_else(|| trimmed.strip_prefix("0X"))
+	{
+		U256::from_str_radix(hex_val_no_sign, 16)
+			.map_err(|e| format!("Failed to parse hex magnitude '{}': {}", hex_val_no_sign, e))
+			.and_then(|u_val| {
+				if u_val > U256::from(I256::MAX.as_limbs()[0]) {
+					I256::try_from(u_val).map_err(|_| "Hex value too large for I256".to_string())
+				} else {
+					Ok(I256::from_raw(u_val))
+				}
+			})
+	} else {
+		I256::from_str(trimmed).map_err(|e| format!("Failed to parse decimal '{}': {}", trimmed, e))
 	}
 }
 
