@@ -181,86 +181,6 @@ impl<'a> StellarConditionEvaluator<'a> {
 			}),
 		}
 	}
-
-	fn compare_vec(
-		&self,
-		lhs_str: &str,
-		operator: &ComparisonOperator,
-		rhs_literal: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError> {
-		let right_str = match rhs_literal {
-			LiteralValue::Str(s) => *s,
-			LiteralValue::Number(n) => *n, // Allow comparing vec elements with numbers if they parse
-			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected string or number literal for Vec comparison, found: {:?}",
-					rhs_literal
-				)))
-			}
-		};
-
-		match operator {
-			ComparisonOperator::Contains => {
-				let values: Vec<&str> = lhs_str.split(',').map(str::trim).collect();
-				Ok(values.contains(&right_str.trim()))
-			}
-			ComparisonOperator::Eq => Ok(lhs_str == right_str), // Exact string match for the whole vec
-			ComparisonOperator::Ne => Ok(lhs_str != right_str),
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!("Operator {:?} not supported for Vec type", operator),
-			}),
-		}
-	}
-
-	/// Compares two JSON strings as maps/objects.
-	fn compare_map(
-		&self,
-		lhs_str: &str,
-		operator: &ComparisonOperator,
-		rhs_literal: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError> {
-		// Parse as JSON
-		let lhs_json: serde_json::Value = serde_json::from_str(lhs_str).map_err(|e| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse LHS value as JSON map/object: {}. Value: '{}'",
-				e, lhs_str
-			))
-		})?;
-
-		match operator {
-			ComparisonOperator::Eq | ComparisonOperator::Ne => {
-				// RHS should be a string representing a JSON object
-				let rhs_str = match rhs_literal {
-					LiteralValue::Str(s) => *s,
-					_ => {
-						return Err(EvaluationError::TypeMismatch(format!(
-							"Expected string literal for map comparison, found: {:?}",
-							rhs_literal
-						)))
-					}
-				};
-
-				let rhs_json: serde_json::Value = serde_json::from_str(rhs_str).map_err(|e| {
-					EvaluationError::ParseError(format!(
-						"Failed to parse RHS value as JSON map/object: {}. Value: '{}'",
-						e, rhs_str
-					))
-				})?;
-
-				// TODO: this will only work if key order is guaranteed, double-check
-				let result = lhs_json == rhs_json;
-
-				Ok(if *operator == ComparisonOperator::Eq {
-					result
-				} else {
-					!result
-				})
-			}
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!("Operator {:?} not supported for map comparison", operator),
-			}),
-		}
-	}
 }
 
 impl ConditionEvaluator for StellarConditionEvaluator<'_> {
@@ -294,9 +214,6 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 			"u128" => self.compare_numeric::<u128>(lhs_str, operator, rhs_literal),
 			"i128" => self.compare_numeric::<i128>(lhs_str, operator, rhs_literal),
 			"u256" | "i256" => self.compare_large_int_as_string(lhs_str, operator, rhs_literal),
-			"vec" => self.compare_vec(lhs_str, operator, rhs_literal),
-			// handle "object" as potential type from JSON inference
-			"map" | "object" => self.compare_map(lhs_str, operator, rhs_literal),
 			"string" | "symbol" | "address" | "bytes" => self.compare_string(
 				lhs_kind.to_ascii_lowercase().as_str(),
 				lhs_str,
@@ -502,108 +419,6 @@ mod tests {
 				&LiteralValue::Str("gabc...") // and this too
 			)
 			.unwrap()); // This depends on normalize_address
-	}
-
-	#[test]
-	fn test_compare_vec() {
-		let args: StellarArgs = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
-
-		// Vec Contains
-		assert!(evaluator
-			.compare_vec(
-				"apple,banana,cherry",
-				&ComparisonOperator::Contains,
-				&LiteralValue::Str("banana")
-			)
-			.unwrap());
-		// Vec Eq (full string)
-		assert!(evaluator
-			.compare_vec(
-				"apple,banana",
-				&ComparisonOperator::Eq,
-				&LiteralValue::Str("apple,banana")
-			)
-			.unwrap());
-		// Vec Ne
-		assert!(evaluator
-			.compare_vec(
-				"apple,banana",
-				&ComparisonOperator::Ne,
-				&LiteralValue::Str("apple,orange")
-			)
-			.unwrap());
-		// Type Mismatch RHS
-		assert!(matches!(
-			evaluator.compare_vec(
-				"apple,banana",
-				&ComparisonOperator::Contains,
-				&LiteralValue::Bool(true) // Not Str or Number
-			),
-			Err(EvaluationError::TypeMismatch(_))
-		));
-	}
-
-	#[test]
-	fn test_compare_map() {
-		let args: StellarArgs = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
-
-		let map_json_lhs = r#"{"name":"John","age":30,"city":"New York"}"#;
-
-		// Map Eq (comparing two JSON strings)
-		assert!(evaluator
-			.compare_map(
-				map_json_lhs,
-				&ComparisonOperator::Eq,
-				&LiteralValue::Str(r#"{"age":30,"name":"John","city":"New York"}"#) // Order doesn't matter for JSON obj eq
-			)
-			.unwrap());
-
-		// Map Ne
-		assert!(evaluator
-			.compare_map(
-				map_json_lhs,
-				&ComparisonOperator::Ne,
-				&LiteralValue::Str(r#"{"name":"Jane","age":30,"city":"New York"}"#)
-			)
-			.unwrap());
-
-		// Map Contains (key)
-		assert!(evaluator
-			.compare_map(
-				map_json_lhs,
-				&ComparisonOperator::Contains, // Checks if "age" is a key
-				&LiteralValue::Str("age")
-			)
-			.unwrap());
-		assert!(!evaluator
-			.compare_map(
-				map_json_lhs,
-				&ComparisonOperator::Contains, // "country" is not a key
-				&LiteralValue::Str("country")
-			)
-			.unwrap());
-
-		// Type Mismatch for RHS if not Str
-		assert!(matches!(
-			evaluator.compare_map(
-				map_json_lhs,
-				&ComparisonOperator::Eq,
-				&LiteralValue::Number("123")
-			),
-			Err(EvaluationError::TypeMismatch(_))
-		));
-
-		// LHS not valid JSON for Contains key
-		assert!(matches!(
-			evaluator.compare_map(
-				"not a json",
-				&ComparisonOperator::Contains,
-				&LiteralValue::Str("some_key")
-			),
-			Err(EvaluationError::TypeMismatch(_))
-		));
 	}
 
 	#[test]
