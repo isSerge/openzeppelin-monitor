@@ -31,14 +31,33 @@ fn is_keyword(ident: &str) -> bool {
 /// --- Parser functions ---
 /// Parses boolean literals into `LiteralValue::Bool`
 fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
-	alt((
-		literal("true").map(|_| LiteralValue::Bool(true)),
-		literal("false").map(|_| LiteralValue::Bool(false)),
-	))
-	.context(StrContext::Expected(StrContextValue::Description(
-		"boolean literal 'true' or 'false'",
-	)))
-	.parse_next(input)
+	let parse_true = (
+		literal("true"),
+		peek(alt((
+			// Ensure "true" is followed by a delimiter or EOF
+			space1.value(()),
+			eof.value(()),
+			one_of([')', '(', ',', '=', '!', '>', '<', '&', '|', '[', '.']).value(()), // Common delimiters
+		))),
+	)
+		.map(|_| LiteralValue::Bool(true));
+
+	let parse_false = (
+		literal("false"),
+		peek(alt((
+			// Ensure "false" is followed by a delimiter or EOF
+			space1.value(()),
+			eof.value(()),
+			one_of([')', '(', ',', '=', '!', '>', '<', '&', '|', '[', '.']).value(()),
+		))),
+	)
+		.map(|_| LiteralValue::Bool(false));
+
+	alt((parse_true, parse_false))
+		.context(StrContext::Expected(StrContextValue::Description(
+			"boolean literal 'true' or 'false'",
+		)))
+		.parse_next(input)
 }
 
 /// Parses any numeric-looking literal (integer or float) into LiteralValue::Number(&'a str).
@@ -154,8 +173,16 @@ fn parse_accessor<'a>(input: &mut Input<'a>) -> ParserResult<Accessor<'a>> {
 			take_while(0.., |c: char| c.is_alphanum() || c == '_'),
 		)
 			.take(),
+		// Ensure it's properly delimited
+		peek(alt((
+			space1.value(()),       // space
+			eof.value(()),          // end of input
+			literal("[").value(()), // start of index accessor
+			literal(".").value(()), // start of another key accessor
+			one_of(['=', '!', '>', '<', ')', '(']).value(()),
+		))),
 	)
-		.map(|(_, key_slice): (_, &str)| Accessor::Key(key_slice))
+		.map(|(_, key_slice, _): (_, &str, _)| Accessor::Key(key_slice))
 		.context(StrContext::Expected(StrContextValue::Description(
 			"object key accessor like '.key'",
 		)));
@@ -374,4 +401,508 @@ pub fn parse(expression_str: &str) -> Result<Expression<'_>, ParseError<Input<'_
 	let mut full_expression_parser = (parse_expression, eof).map(|(expr, _)| expr);
 
 	full_expression_parser.parse(expression_str)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::services::filter::expression::ast::{ComparisonOperator, LiteralValue};
+
+	// helpers
+	fn assert_parses_ok<'a, O, P>(
+		mut parser: P,
+		input: &'a str,
+		expected_output: O,
+		expected_remaining: &str,
+	) where
+		P: FnMut(&mut Input<'a>) -> ParserResult<O>,
+		O: PartialEq + std::fmt::Debug,
+	{
+		let mut mutable_input = input;
+		match parser.parse_next(&mut mutable_input) {
+			Ok(output) => {
+				assert_eq!(
+					output, expected_output,
+					"Output mismatch for input: '{}'",
+					input
+				);
+				assert_eq!(
+					mutable_input, expected_remaining,
+					"Remaining input mismatch for input: '{}'",
+					input
+				);
+			}
+			Err(e) => panic!("Parser failed for input '{}': {:?}", input, e),
+		}
+	}
+
+	fn assert_parse_fails<'a, O, P>(mut parser: P, input: &'a str)
+	where
+		P: FnMut(&mut Input<'a>) -> ParserResult<O>,
+		O: PartialEq + std::fmt::Debug,
+	{
+		let mut mutable_input = input;
+		assert!(
+			parser.parse_next(&mut mutable_input).is_err(),
+			"Parser should have failed for input: '{}'",
+			input
+		);
+	}
+
+	#[test]
+	fn test_parse_boolean() {
+		// Success cases
+		assert_parses_ok(parse_boolean, "true", LiteralValue::Bool(true), "");
+		assert_parses_ok(parse_boolean, "false", LiteralValue::Bool(false), "");
+		assert_parses_ok(parse_boolean, "true ", LiteralValue::Bool(true), " "); // Consumes only "true"
+
+		// Failures
+		assert_parse_fails(parse_boolean, "TRUE"); // Case-sensitive
+		assert_parse_fails(parse_boolean, "tru");
+		assert_parse_fails(parse_boolean, "  true"); // Does not consume leading space
+	}
+
+	#[test]
+	fn test_parse_number_or_fixed_str() {
+		// Success cases
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"123",
+			LiteralValue::Number("123"),
+			"",
+		);
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"-456",
+			LiteralValue::Number("-456"),
+			"",
+		);
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"0.5",
+			LiteralValue::Number("0.5"),
+			"",
+		);
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"123.456",
+			LiteralValue::Number("123.456"),
+			"",
+		);
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"-0.789",
+			LiteralValue::Number("-0.789"),
+			"",
+		);
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"123 ",
+			LiteralValue::Number("123"),
+			" ",
+		); // Peek space
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"123)",
+			LiteralValue::Number("123"),
+			")",
+		); // Peek delimiter
+		assert_parses_ok(
+			parse_number_or_fixed_str,
+			"123.45)",
+			LiteralValue::Number("123.45"),
+			")",
+		);
+
+		// Failures
+		assert_parse_fails(parse_number_or_fixed_str, "abc");
+		assert_parse_fails(parse_number_or_fixed_str, "123a"); // Not delimited
+		assert_parse_fails(parse_number_or_fixed_str, "1.2.3"); // Invalid number
+		assert_parse_fails(parse_number_or_fixed_str, ".5"); // Requires digit before .
+		assert_parse_fails(parse_number_or_fixed_str, "5."); // Requires digit after .
+	}
+
+	#[test]
+	fn test_parse_hex_string() {
+		// Success cases
+		assert_parses_ok(parse_hex_string, "0x1a2B", LiteralValue::Str("0x1a2B"), "");
+		assert_parses_ok(parse_hex_string, "0XFF", LiteralValue::Str("0XFF"), "");
+		assert_parses_ok(
+			parse_hex_string,
+			"0xabcdef0123456789",
+			LiteralValue::Str("0xabcdef0123456789"),
+			"",
+		);
+		assert_parses_ok(parse_hex_string, "0x1 ", LiteralValue::Str("0x1"), " ");
+		assert_parses_ok(parse_hex_string, "0xa)", LiteralValue::Str("0xa"), ")");
+
+		// Failures
+		assert_parse_fails(parse_hex_string, "0x"); // No digits
+		assert_parse_fails(parse_hex_string, "0xG"); // Invalid hex digit
+		assert_parse_fails(parse_hex_string, "123"); // Not a hex string
+		assert_parse_fails(parse_hex_string, "0x123z"); // Not delimited properly
+	}
+
+	#[test]
+	fn test_parse_quoted_string() {
+		// Success cases
+		assert_parses_ok(
+			parse_quoted_string,
+			"'hello'",
+			LiteralValue::Str("hello"),
+			"",
+		);
+		// Empty string
+		assert_parses_ok(parse_quoted_string, "''", LiteralValue::Str(""), "");
+		assert_parses_ok(
+			parse_quoted_string,
+			"'hello world'",
+			LiteralValue::Str("hello world"),
+			"",
+		);
+		assert_parses_ok(
+			parse_quoted_string,
+			"'foo\\'bar'",
+			LiteralValue::Str("foo\\'bar"),
+			"",
+		);
+		assert_parses_ok(
+			parse_quoted_string,
+			"'foo\\\\bar'",
+			LiteralValue::Str("foo\\\\bar"),
+			"",
+		);
+		assert_parses_ok(parse_quoted_string, "'a\\''", LiteralValue::Str("a\\'"), "");
+		// Just an escaped quote
+		assert_parses_ok(parse_quoted_string, "'\\''", LiteralValue::Str("\\'"), "");
+
+		// Failures
+		assert_parse_fails(parse_quoted_string, "'hello"); // Missing closing quote
+		assert_parse_fails(parse_quoted_string, "hello'"); // Missing opening quote
+		assert_parse_fails(parse_quoted_string, "'hello\\"); // Ends with backslash (incomplete escape)
+	}
+
+	#[test]
+	fn test_parse_unquoted_string() {
+		// Success cases
+		assert_parses_ok(
+			parse_unquoted_string,
+			"foobar",
+			LiteralValue::Str("foobar"),
+			"",
+		);
+		assert_parses_ok(
+			parse_unquoted_string,
+			"foo_bar",
+			LiteralValue::Str("foo_bar"),
+			"",
+		);
+		assert_parses_ok(
+			parse_unquoted_string,
+			"foo-bar",
+			LiteralValue::Str("foo-bar"),
+			"",
+		);
+		assert_parses_ok(parse_unquoted_string, "a123", LiteralValue::Str("a123"), "");
+		assert_parses_ok(
+			parse_unquoted_string,
+			"unquoted ",
+			LiteralValue::Str("unquoted"),
+			" ",
+		);
+
+		// Failures
+		assert_parse_fails(parse_unquoted_string, "true"); // Keyword
+		assert_parse_fails(parse_unquoted_string, "AND"); // Keyword (case insensitive for keywords)
+		assert_parse_fails(parse_unquoted_string, "123"); // Should be parsed as number
+		assert_parse_fails(parse_unquoted_string, "-45"); // Should be parsed as number
+		assert_parse_fails(parse_unquoted_string, "0xFA"); // Should be parsed as hex string
+		assert_parse_fails(parse_unquoted_string, "123.45"); // Should be parsed as number (float-like)
+		assert_parse_fails(parse_unquoted_string, ""); // Needs 1+ char
+	}
+
+	#[test]
+	fn test_is_keyword() {
+		// Success cases
+		assert!(is_keyword("true"));
+		assert!(is_keyword("FALSE"));
+		assert!(is_keyword("AnD"));
+		assert!(is_keyword("cOnTaiNs"));
+		// Failures
+		assert!(!is_keyword("trueish"));
+		assert!(!is_keyword("variable"));
+	}
+
+	#[test]
+	fn test_parse_accessor() {
+		// Success cases
+		assert_parses_ok(parse_accessor, "[123]", Accessor::Index(123), "");
+		assert_parses_ok(parse_accessor, ".keyName", Accessor::Key("keyName"), "");
+		assert_parses_ok(
+			parse_accessor,
+			"._key_Name0",
+			Accessor::Key("_key_Name0"),
+			"",
+		);
+		assert_parses_ok(parse_accessor, "[0].next", Accessor::Index(0), ".next");
+
+		// Failures
+		assert_parse_fails(parse_accessor, "keyName"); // Missing .
+		assert_parse_fails(parse_accessor, "[abc]"); // Index not a number
+		assert_parse_fails(parse_accessor, "[]"); // Empty index
+		assert_parse_fails(parse_accessor, ".1key"); // Key cannot start with digit
+		assert_parse_fails(parse_accessor, ".key-name"); // Hyphen not allowed in key
+	}
+
+	#[test]
+	fn test_parse_base_variable_name() {
+		assert_parses_ok(parse_base_variable_name, "request", "request", "");
+		assert_parses_ok(parse_base_variable_name, "_privateVar", "_privateVar", "");
+		assert_parses_ok(parse_base_variable_name, "var123", "var123", "");
+		assert_parses_ok(parse_base_variable_name, "response ", "response", " ");
+		assert_parses_ok(parse_base_variable_name, "0", "0", ""); // Numeric LHS base
+		assert_parses_ok(parse_base_variable_name, "123[", "123", "["); // Numeric LHS base, peek '['
+		assert_parses_ok(parse_base_variable_name, "45.field", "45", ".field"); // Numeric LHS base, peek '.'
+																		  // Peek should ensure '123' is taken if followed by space then op
+		assert_parses_ok(parse_base_variable_name, "123 ==", "123", " ==");
+
+		assert_parse_fails(parse_base_variable_name, "true"); // Keyword
+		assert_parse_fails(parse_base_variable_name, "AND"); // Keyword
+		assert_parse_fails(parse_base_variable_name, "123true"); // Invalid identifier
+		assert_parse_fails(parse_base_variable_name, "123_"); // underscore after numeric not part of it
+	}
+
+	#[test]
+	fn test_parse_condition_lhs() {
+		assert_parses_ok(parse_condition_lhs, "var", ConditionLeft::Simple("var"), "");
+		assert_parses_ok(
+			parse_condition_lhs,
+			"var.key",
+			ConditionLeft::Path(VariablePath {
+				base: "var",
+				accessors: vec![Accessor::Key("key")],
+			}),
+			"",
+		);
+		assert_parses_ok(
+			parse_condition_lhs,
+			"arr[0]",
+			ConditionLeft::Path(VariablePath {
+				base: "arr",
+				accessors: vec![Accessor::Index(0)],
+			}),
+			"",
+		);
+		assert_parses_ok(
+			parse_condition_lhs,
+			"obj.arr[1].field",
+			ConditionLeft::Path(VariablePath {
+				base: "obj",
+				accessors: vec![
+					Accessor::Key("arr"),
+					Accessor::Index(1),
+					Accessor::Key("field"),
+				],
+			}),
+			"",
+		);
+		assert_parses_ok(
+			parse_condition_lhs,
+			"0.field",
+			ConditionLeft::Path(VariablePath {
+				base: "0",
+				accessors: vec![Accessor::Key("field")],
+			}),
+			"",
+		);
+	}
+
+	#[test]
+	fn test_parse_value_alt_order() {
+		// Order: quoted_string, boolean, hex_string, number_or_fixed, unquoted_string
+		assert_parses_ok(parse_value, " 'hello' ", LiteralValue::Str("hello"), "");
+		assert_parses_ok(parse_value, " true ", LiteralValue::Bool(true), "");
+		assert_parses_ok(parse_value, " 0xAB ", LiteralValue::Str("0xAB"), "");
+		assert_parses_ok(parse_value, " 123.45 ", LiteralValue::Number("123.45"), "");
+		assert_parses_ok(parse_value, " 123 ", LiteralValue::Number("123"), "");
+		assert_parses_ok(
+			parse_value,
+			" unquoted_val ",
+			LiteralValue::Str("unquoted_val"),
+			"",
+		);
+		assert_parses_ok(parse_value, " true_val ", LiteralValue::Str("true_val"), ""); // 'true' is prefix of 'true_val', boolean is tried, fails, then unquoted.
+		assert_parses_ok(parse_value, " 0xVal ", LiteralValue::Str("0xVal"), ""); // '0x' is prefix, hex is tried, fails on 'V', then unquoted.
+	}
+
+	#[test]
+	fn test_parse_comparison_operator() {
+		assert_parses_ok(parse_comparison_operator, "==", ComparisonOperator::Eq, "");
+		assert_parses_ok(
+			parse_comparison_operator,
+			" contains ",
+			ComparisonOperator::Contains,
+			"",
+		);
+		assert_parses_ok(
+			parse_comparison_operator,
+			"STARTS_WITH",
+			ComparisonOperator::StartsWith,
+			"",
+		);
+	}
+
+	#[test]
+	fn test_parse_condition() {
+		let expr = "var == 123";
+		let expected = Expression::Condition(Condition {
+			left: ConditionLeft::Simple("var"),
+			operator: ComparisonOperator::Eq,
+			right: LiteralValue::Number("123"),
+		});
+		assert_parses_ok(parse_condition, expr, expected, "");
+
+		let expr_str = "name contains 'test'";
+		let expected_str = Expression::Condition(Condition {
+			left: ConditionLeft::Simple("name"),
+			operator: ComparisonOperator::Contains,
+			right: LiteralValue::Str("test"),
+		});
+		assert_parses_ok(parse_condition, expr_str, expected_str, "");
+
+		let expr_path = "obj.count > 0.5";
+		let expected_path = Expression::Condition(Condition {
+			left: ConditionLeft::Path(VariablePath {
+				base: "obj",
+				accessors: vec![Accessor::Key("count")],
+			}),
+			operator: ComparisonOperator::Gt,
+			right: LiteralValue::Number("0.5"),
+		});
+		assert_parses_ok(parse_condition, expr_path, expected_path, "");
+	}
+
+	#[test]
+	fn test_parse_term_parentheses() {
+		let expr = "(var == 123)";
+		let inner_cond = Condition {
+			left: ConditionLeft::Simple("var"),
+			operator: ComparisonOperator::Eq,
+			right: LiteralValue::Number("123"),
+		};
+		let expected = Expression::Condition(inner_cond.clone()); // The term itself is the condition
+		assert_parses_ok(parse_term, expr, expected, "");
+
+		let expr_nested = "( var1 > 10 AND var2 < 'abc' )";
+		let expected_nested = Expression::Logical {
+			left: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("var1"),
+				operator: ComparisonOperator::Gt,
+				right: LiteralValue::Number("10"),
+			})),
+			operator: LogicalOperator::And,
+			right: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("var2"),
+				operator: ComparisonOperator::Lt,
+				right: LiteralValue::Str("abc"),
+			})),
+		};
+		// parse_term calls parse_expression for parentheses, parse_expression calls parse_or_expression...
+		assert_parses_ok(parse_term, expr_nested, expected_nested, "");
+	}
+
+	#[test]
+	fn test_parse_logical_expressions() {
+		let expr = "a == 1 AND b < 2.0";
+		let expected = Expression::Logical {
+			left: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("a"),
+				operator: ComparisonOperator::Eq,
+				right: LiteralValue::Number("1"),
+			})),
+			operator: LogicalOperator::And,
+			right: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("b"),
+				operator: ComparisonOperator::Lt,
+				right: LiteralValue::Number("2.0"),
+			})),
+		};
+		// Test parse_and_expression directly or parse_expression for full precedence
+		assert_parses_ok(parse_expression, expr, expected.clone(), "");
+		// Also test with parse(), which adds eof
+		assert_eq!(parse(expr).unwrap(), expected);
+
+		let expr_or = "a == 1 OR b < 'text'";
+		let expected_or = Expression::Logical {
+			left: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("a"),
+				operator: ComparisonOperator::Eq,
+				right: LiteralValue::Number("1"),
+			})),
+			operator: LogicalOperator::Or,
+			right: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("b"),
+				operator: ComparisonOperator::Lt,
+				right: LiteralValue::Str("text"),
+			})),
+		};
+		assert_eq!(parse(expr_or).unwrap(), expected_or);
+
+		// Precedence: AND over OR
+		let expr_mixed = "a == 1 OR b < 2 AND c > 3";
+		let expected_mixed = Expression::Logical {
+			left: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("a"),
+				operator: ComparisonOperator::Eq,
+				right: LiteralValue::Number("1"),
+			})),
+			operator: LogicalOperator::Or,
+			right: Box::new(Expression::Logical {
+				left: Box::new(Expression::Condition(Condition {
+					left: ConditionLeft::Simple("b"),
+					operator: ComparisonOperator::Lt,
+					right: LiteralValue::Number("2"),
+				})),
+				operator: LogicalOperator::And,
+				right: Box::new(Expression::Condition(Condition {
+					left: ConditionLeft::Simple("c"),
+					operator: ComparisonOperator::Gt,
+					right: LiteralValue::Number("3"),
+				})),
+			}),
+		};
+		assert_eq!(parse(expr_mixed).unwrap(), expected_mixed);
+
+		// Parentheses overriding precedence
+		let expr_parens = "(a == 1 OR b < 2) AND c > 3";
+		let expected_parens = Expression::Logical {
+			left: Box::new(Expression::Logical {
+				left: Box::new(Expression::Condition(Condition {
+					left: ConditionLeft::Simple("a"),
+					operator: ComparisonOperator::Eq,
+					right: LiteralValue::Number("1"),
+				})),
+				operator: LogicalOperator::Or,
+				right: Box::new(Expression::Condition(Condition {
+					left: ConditionLeft::Simple("b"),
+					operator: ComparisonOperator::Lt,
+					right: LiteralValue::Number("2"),
+				})),
+			}),
+			operator: LogicalOperator::And,
+			right: Box::new(Expression::Condition(Condition {
+				left: ConditionLeft::Simple("c"),
+				operator: ComparisonOperator::Gt,
+				right: LiteralValue::Number("3"),
+			})),
+		};
+		assert_eq!(parse(expr_parens).unwrap(), expected_parens);
+	}
+
+	#[test]
+	fn test_full_parse_with_eof() {
+		assert!(parse("var == 123").is_ok());
+		assert!(parse("var == 123 AND extra_stuff_not_parsed").is_err()); // Fails eof
+		assert!(parse("(a == 1 OR b < 2)AND c > 3").is_ok()); // No space around AND
+	}
 }
