@@ -240,13 +240,16 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 mod tests {
 	use super::*;
 
-	//////////////////////////////////////////////////////////////////////////////
-	// Test cases for compare_values method:
-	//////////////////////////////////////////////////////////////////////////////
+	// Helper to create a dummy StellarConditionEvaluator (args don't matter for these unit tests)
+	fn create_evaluator() -> StellarConditionEvaluator<'static> {
+		static EMPTY_ARGS: StellarArgs = Vec::new();
+		StellarConditionEvaluator::new(&EMPTY_ARGS)
+	}
+
+	/// --- Test cases for compare_bool method ---
 	#[test]
-	fn test_compare_bool() {
-		let args: StellarArgs = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
+	fn test_compare_bool_valid() {
+		let evaluator = create_evaluator();
 
 		assert!(evaluator
 			.compare_bool("true", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
@@ -254,6 +257,23 @@ mod tests {
 		assert!(!evaluator
 			.compare_bool("true", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
 			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_bool_invalid() {
+		let evaluator = create_evaluator();
+
+		assert!(!evaluator
+			.compare_bool("true", &ComparisonOperator::Ne, &LiteralValue::Bool(true))
+			.unwrap());
+		assert!(evaluator
+			.compare_bool("true", &ComparisonOperator::Ne, &LiteralValue::Bool(false))
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_bool_error() {
+		let evaluator = create_evaluator();
 
 		// Test TypeMismatch for RHS
 		let type_mismatch_result = evaluator.compare_bool(
@@ -283,24 +303,108 @@ mod tests {
 			&ComparisonOperator::Gt, // Gt is not supported for bool
 			&LiteralValue::Bool(false),
 		);
-		assert!(
-			matches!(
-				unsupported_op_result,
-				Err(EvaluationError::UnsupportedOperator { .. })
-			),
-			"Expected UnsupportedOperator, got {:?}",
-			unsupported_op_result
-		);
+		assert!(matches!(
+			unsupported_op_result,
+			Err(EvaluationError::UnsupportedOperator { .. })
+		));
 	}
 
 	#[test]
-	fn test_compare_numeric() {
-		let args: StellarArgs = vec![];
+	fn test_compare_bool_case_sensitivity() {
+		let args = vec![];
 		let evaluator = StellarConditionEvaluator::new(&args);
+
+		// Test TRUE (uppercase)
+		assert!(evaluator
+			.compare_bool("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
+			.is_err());
+
+		// Test False (mixed case)
+		assert!(evaluator
+			.compare_bool("False", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
+			.is_err());
+
+		// Test TRUE == TRUE (both uppercase)
+		assert!(evaluator
+			.compare_bool("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
+			.is_err());
+	}
+
+	/// --- Test cases for compare_numeric method ---
+	#[test]
+	fn test_compare_numeric_valid() {
+		let evaluator = create_evaluator();
 
 		assert!(evaluator
 			.compare_numeric::<u64>("100", &ComparisonOperator::Gt, &LiteralValue::Number("50"))
 			.unwrap());
+
+		assert!(evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Lt, &LiteralValue::Number("150"))
+			.unwrap());
+
+		assert!(evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Eq, &LiteralValue::Number("100"))
+			.unwrap());
+
+		assert!(evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Ne, &LiteralValue::Number("50"))
+			.unwrap());
+
+		assert!(evaluator
+			.compare_numeric::<u64>(
+				"100",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("100")
+			)
+			.unwrap());
+
+		assert!(evaluator
+			.compare_numeric::<u64>(
+				"100",
+				&ComparisonOperator::Lte,
+				&LiteralValue::Number("150")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_numeric_invalid() {
+		let evaluator = create_evaluator();
+
+		assert!(!evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Gt, &LiteralValue::Number("150"))
+			.unwrap());
+
+		assert!(!evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Lt, &LiteralValue::Number("50"))
+			.unwrap());
+
+		assert!(!evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Eq, &LiteralValue::Number("50"))
+			.unwrap());
+
+		assert!(!evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Ne, &LiteralValue::Number("100"))
+			.unwrap());
+
+		assert!(!evaluator
+			.compare_numeric::<u64>(
+				"100",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("150")
+			)
+			.unwrap());
+
+		assert!(!evaluator
+			.compare_numeric::<u64>("100", &ComparisonOperator::Lte, &LiteralValue::Number("50"))
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_numeric_error() {
+		let evaluator = create_evaluator();
+
 		// Type Mismatch
 		assert!(matches!(
 			evaluator.compare_numeric::<u64>(
@@ -310,6 +414,7 @@ mod tests {
 			),
 			Err(EvaluationError::TypeMismatch(_))
 		));
+
 		// Parse Error LHS
 		assert!(matches!(
 			evaluator.compare_numeric::<u64>(
@@ -319,6 +424,7 @@ mod tests {
 			),
 			Err(EvaluationError::ParseError(_))
 		));
+
 		// Parse Error RHS
 		assert!(matches!(
 			evaluator.compare_numeric::<u64>(
@@ -328,12 +434,22 @@ mod tests {
 			),
 			Err(EvaluationError::ParseError(_))
 		));
+
+		// Unsupported Operator
+		assert!(matches!(
+			evaluator.compare_numeric::<u64>(
+				"100",
+				&ComparisonOperator::Contains,
+				&LiteralValue::Number("50")
+			),
+			Err(EvaluationError::UnsupportedOperator { .. })
+		));
 	}
 
+	/// --- Test cases for compare_large_int_as_string method ---
 	#[test]
 	fn test_compare_i256() {
-		let args: StellarArgs = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
+		let evaluator = create_evaluator();
 
 		// Eq
 		assert!(evaluator
@@ -395,10 +511,10 @@ mod tests {
 		));
 	}
 
+	/// --- Test cases for compare_string method ---
 	#[test]
-	fn test_compare_string() {
-		let args: StellarArgs = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
+	fn test_compare_string_valid() {
+		let evaluator = create_evaluator();
 
 		// String Eq
 		assert!(evaluator
@@ -409,6 +525,37 @@ mod tests {
 				&LiteralValue::Str("hello")
 			)
 			.unwrap());
+
+		// String Ne
+		assert!(evaluator
+			.compare_string(
+				"string",
+				"hello",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("world")
+			)
+			.unwrap());
+
+		// String StartsWith
+		assert!(evaluator
+			.compare_string(
+				"string",
+				"hello world",
+				&ComparisonOperator::StartsWith,
+				&LiteralValue::Str("hello")
+			)
+			.unwrap());
+
+		// String EndsWith
+		assert!(evaluator
+			.compare_string(
+				"string",
+				"hello world",
+				&ComparisonOperator::EndsWith,
+				&LiteralValue::Str("world")
+			)
+			.unwrap());
+
 		// String Contains
 		assert!(evaluator
 			.compare_string(
@@ -418,35 +565,259 @@ mod tests {
 				&LiteralValue::Str("world")
 			)
 			.unwrap());
+
 		// Address Eq (normalized)
 		assert!(evaluator
 			.compare_string(
 				"address",
 				"GABC...", // Assume normalize_address makes it GABC...
 				&ComparisonOperator::Eq,
-				&LiteralValue::Str("gabc...") // and this too
+				&LiteralValue::Str("gabc...")
 			)
 			.unwrap()); // This depends on normalize_address
+
+		// Address Ne (normalized)
+		assert!(evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("something...")
+			)
+			.unwrap());
+
+		// Address StartsWith (normalized)
+		assert!(evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::StartsWith,
+				&LiteralValue::Str("GAB")
+			)
+			.unwrap());
+
+		// Address EndsWith (normalized)
+		assert!(evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::EndsWith,
+				&LiteralValue::Str("C...")
+			)
+			.unwrap());
+
+		// Address Contains (normalized)
+		assert!(evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("AB")
+			)
+			.unwrap());
 	}
 
 	#[test]
-	fn test_compare_bool_case_sensitivity() {
-		let args = vec![];
-		let evaluator = StellarConditionEvaluator::new(&args);
+	fn test_compare_string_invalid() {
+		let evaluator = create_evaluator();
 
-		// Test TRUE (uppercase)
-		assert!(evaluator
-			.compare_bool("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
-			.is_err());
+		// String Eq
+		assert!(!evaluator
+			.compare_string(
+				"string",
+				"hello",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("world")
+			)
+			.unwrap());
 
-		// Test False (mixed case)
-		assert!(evaluator
-			.compare_bool("False", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
-			.is_err());
+		// String Ne
+		assert!(!evaluator
+			.compare_string(
+				"string",
+				"hello",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("hello")
+			)
+			.unwrap());
 
-		// Test TRUE == TRUE (both uppercase)
+		// String StartsWith
+		assert!(!evaluator
+			.compare_string(
+				"string",
+				"hello world",
+				&ComparisonOperator::StartsWith,
+				&LiteralValue::Str("world")
+			)
+			.unwrap());
+
+		// String EndsWith
+		assert!(!evaluator
+			.compare_string(
+				"string",
+				"hello world",
+				&ComparisonOperator::EndsWith,
+				&LiteralValue::Str("hello")
+			)
+			.unwrap());
+
+		// String Contains
+		assert!(!evaluator
+			.compare_string(
+				"string",
+				"hello world",
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("foo")
+			)
+			.unwrap());
+
+		// Address Eq (normalized)
+		assert!(!evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("something...")
+			)
+			.unwrap());
+
+		// Address Ne (normalized)
+		assert!(!evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("GABC...")
+			)
+			.unwrap());
+
+		// Address StartsWith (normalized)
+		assert!(!evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::StartsWith,
+				&LiteralValue::Str("XYZ")
+			)
+			.unwrap());
+
+		// Address EndsWith (normalized)
+		assert!(!evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::EndsWith,
+				&LiteralValue::Str("XYZ")
+			)
+			.unwrap());
+
+		// Address Contains (normalized)
+		assert!(!evaluator
+			.compare_string(
+				"address",
+				"GABC...",
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("XYZ")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_string_error() {
+		let evaluator = create_evaluator();
+
+		// Type Mismatch
+		assert!(matches!(
+			evaluator.compare_string(
+				"string",
+				"hello",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Bool(true)
+			),
+			Err(EvaluationError::TypeMismatch(_))
+		));
+
+		// Unsupported Operator
+		assert!(matches!(
+			evaluator.compare_string(
+				"string",
+				"hello",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Str("world")
+			),
+			Err(EvaluationError::UnsupportedOperator { .. })
+		));
+	}
+
+	/// --- Test cases for compare_final_values method ---
+	#[test]
+	fn test_compare_final_values_routing() {
+		let evaluator = create_evaluator();
+
+		// Test routing to compare_bool
 		assert!(evaluator
-			.compare_bool("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
-			.is_err());
+			.compare_final_values(
+				"bool",
+				"true",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Bool(true)
+			)
+			.unwrap());
+
+		// Test routing to compare_numeric
+		assert!(evaluator
+			.compare_final_values(
+				"u64",
+				"100",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number("50")
+			)
+			.unwrap());
+
+		// Test routing to compare_large_int_as_string
+		assert!(evaluator
+			.compare_final_values(
+				"i256",
+				"12345678901234567890",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("12345678901234567890")
+			)
+			.unwrap());
+
+		// Test routing to compare_string
+		assert!(evaluator
+			.compare_final_values(
+				"string",
+				"hello",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("hello")
+			)
+			.unwrap());
+
+		// Test routing to compare_string with address
+		assert!(evaluator
+			.compare_final_values(
+				"address",
+				"GABC...",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("gabc...")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_final_values_error() {
+		let evaluator = create_evaluator();
+
+		// Test TypeMismatch
+		assert!(matches!(
+			evaluator.compare_final_values(
+				"bool",
+				"true",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("123")
+			),
+			Err(EvaluationError::TypeMismatch(_))
+		));
 	}
 }
