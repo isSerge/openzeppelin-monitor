@@ -6,7 +6,7 @@ pub enum LiteralValue<'a> {
 	Str(&'a str),
 	// Store as str, conversion to specific type is done within chain context
 	// Holds both integers and fixed-point numbers
-	// e.g., "123", "123.456", "0x123"
+	// e.g., "123", "123.456", "0x123" or hexadecimal
 	Number(&'a str),
 }
 

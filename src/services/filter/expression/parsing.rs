@@ -28,6 +28,9 @@ fn is_keyword(ident: &str) -> bool {
 	)
 }
 
+/// Common delimiters that can follow a literal value
+const COMMON_DELIMITERS: [char; 10] = [')', '(', ',', '=', '!', '>', '<', '&', '|', ']'];
+
 /// --- Parser functions ---
 /// Parses boolean literals into `LiteralValue::Bool`
 fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
@@ -37,7 +40,6 @@ fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 			// Ensure "true" is followed by a delimiter or EOF
 			space1.value(()),
 			eof.value(()),
-			one_of([')', '(', ',', '=', '!', '>', '<', '&', '|', '[', '.']).value(()), // Common delimiters
 		))),
 	)
 		.map(|_| LiteralValue::Bool(true));
@@ -48,7 +50,7 @@ fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 			// Ensure "false" is followed by a delimiter or EOF
 			space1.value(()),
 			eof.value(()),
-			one_of([')', '(', ',', '=', '!', '>', '<', '&', '|', '[', '.']).value(()),
+			one_of(COMMON_DELIMITERS).value(()),
 		))),
 	)
 		.map(|_| LiteralValue::Bool(false));
@@ -69,7 +71,7 @@ fn parse_number_or_fixed_str<'a>(input: &mut Input<'a>) -> ParserResult<LiteralV
 			peek(alt(( // Ensure it's properly delimited
 					space1.value(()),
 					eof.value(()),
-					one_of([')', '(', ',', '=', '!', '>', '<', '&', '|']).value(()),
+					one_of(COMMON_DELIMITERS).value(()),
 			))),
 	)
 	.take()
@@ -88,7 +90,7 @@ fn parse_hex_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>>
 		peek(alt((
 			space1.value(()),
 			eof.value(()),
-			one_of([')', '(', ',', '=', '!', '>', '<', '&', '|']).value(()),
+			one_of(COMMON_DELIMITERS).value(()),
 		))),
 	)
 		.take()
