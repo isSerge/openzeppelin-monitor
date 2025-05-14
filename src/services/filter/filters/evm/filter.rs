@@ -438,7 +438,7 @@ impl<T> EVMBlockFilter<T> {
 			Ok(result) => result,
 			Err(e) => {
 				tracing::warn!("Failed to evaluate expression: {}", e);
-				return false;
+				false
 			}
 		}
 	}
