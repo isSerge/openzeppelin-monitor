@@ -69,7 +69,7 @@ Custom filter scripts allow you to apply additional conditions to matches detect
       "monitor": {
         "addresses": [
           {
-            "abi": null,
+            "contract_spec": null,
             "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
           }
         ],
@@ -120,6 +120,23 @@ Custom filter scripts allow you to apply additional conditions to matches detect
         "transactionIndex": "0x1fc",
         "type": "0x2"
       },
+      "logs": [
+         {
+            "address": "0xd1f2586790a5bd6da1e443441df53af6ec213d83",
+            "topics": [
+                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                "0x00000000000000000000000060af8cf92e5aa9ead4a592d657cd6debecfbc616",
+                "0x000000000000000000000000d1f2586790a5bd6da1e443441df53af6ec213d83"
+            ],
+            "data": "0x00000000000000000000000000000000000000000000106015728793d21f77ac",
+            "blockNumber": "0x1451aca",
+            "transactionHash": "0xa39d1b9b3edda74414bd6ffaf6596f8ea12cf0012fd9a930f71ed69df6ff34d0",
+            "transactionIndex": "0x0",
+            "blockHash": "0x9432868b7fc57e85f0435ca3047f6a76add86f804b3c1af85647520061e30f80",
+            "logIndex": "0x2",
+            "removed": false
+          },
+      ],
       "transaction": {
         "accessList": [],
         "blockHash": "0x...",
@@ -157,14 +174,14 @@ Custom filter scripts allow you to apply additional conditions to matches detect
         "addresses": [
           {
             "address": "GCXYK...",
-            "abi": null
+            "contract_spec": null
           }
         ],
         "match_conditions": {
           "functions": [
             {
               "signature": "swap(Address,U32,U32,U128,U128)",
-              "expression": "4 > 1000000000"
+              "expression": "out_min > 1000000000"
             }
           ],
           "events": [],
@@ -217,7 +234,7 @@ Custom filter scripts allow you to apply additional conditions to matches detect
         "functions": [
           {
             "signature": "swap(Address,U32,U32,U128,U128)",
-            "expression": "4 > 1000000000"
+            "expression": "out_min > 1000000000"
           }
         ],
         "events": [],
@@ -317,11 +334,109 @@ main() {
 main
 ----
 
-This example script filters EVM transactions based on their block number:
+=== Example Filter Script (JavaScript)
+
+[source,bash]
+----
+#!/bin/bash
+
+try {
+    let inputData = '';
+    // Read from stdin
+    process.stdin.on('data', chunk => {
+        inputData += chunk;
+    });
+
+    process.stdin.on('end', () => {
+        const data = JSON.parse(inputData);
+        const monitorMatch = data.monitor_match;
+        const args = data.args;
+
+        // Extract block_number
+        let blockNumber = null;
+        if (monitorMatch.EVM) {
+            const hexBlock = monitorMatch.EVM.transaction?.blockNumber;
+            if (hexBlock) {
+                // Convert hex string to integer
+                blockNumber = parseInt(hexBlock, 16);
+            }
+        }
+
+        if (blockNumber === null) {
+            console.log('false');
+            return;
+        }
+
+        const result = blockNumber % 2 === 0;
+        console.log(`Block number ${blockNumber} is ${result ? 'even' : 'odd'}`);
+        console.log(result.toString());
+    });
+} catch (e) {
+    console.log(`Error processing input: ${e}`);
+    console.log('false');
+}
+
+----
+
+=== Example Filter Script (Python)
+
+[source,bash]
+----
+#!/bin/bash
+
+import sys
+import json
+
+def main():
+    try:
+        # Read input from stdin
+        input_data = sys.stdin.read()
+        if not input_data:
+            print("No input JSON provided", flush=True)
+            return False
+
+        # Parse input JSON
+        try:
+            data = json.loads(input_data)
+            monitor_match = data['monitor_match']
+            args = data['args']
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON input: {e}", flush=True)
+            return False
+
+        # Extract block_number
+        block_number = None
+        if "EVM" in monitor_match:
+            hex_block = monitor_match['EVM']['transaction'].get('blockNumber')
+            if hex_block:
+                # Convert hex string to integer
+                block_number = int(hex_block, 16)
+
+        if block_number is None:
+            print("Block number is None")
+            return False
+
+        result = block_number % 2 == 0
+        print(f"Block number {block_number} is {'even' if result else 'odd'}", flush=True)
+        return result
+
+    except Exception as e:
+        print(f"Error processing input: {e}", flush=True)
+        return False
+
+if __name__ == "__main__":
+    result = main()
+    # Print the final boolean result
+    print(str(result).lower(), flush=True)
+
+----
+
+This examples script filters EVM transactions based on their block number:
 
 * Returns `true` (filter out) for transactions in even-numbered blocks
 * Returns `false` (allow) for transactions in odd-numbered blocks
 * Accepts a `--verbose` flag for detailed logging
+* Explore other examples in the link:https://github.com/OpenZeppelin/openzeppelin-monitor/tree/main/examples/config/filters[`examples/config/filters` directory].
 
 === Integration
 
@@ -412,12 +527,84 @@ main() {
 main
 ----
 
-This example demonstrates how to:
+=== Example Notification Script (JavaScript)
+
+[source,bash]
+----
+#!/bin/bash
+
+try {
+    let inputData = '';
+    // Read from stdin
+    process.stdin.on('data', chunk => {
+        inputData += chunk;
+    });
+
+    process.stdin.on('end', () => {
+        // Parse input JSON
+        const data = JSON.parse(inputData);
+        const monitorMatch = data.monitor_match;
+        const args = data.args;
+
+        // Log args if they exist
+        if (args && args.length > 0) {
+            console.log(`Args: ${JSON.stringify(args)}`);
+        }
+
+        // Validate monitor match data
+        if (!monitorMatch) {
+            console.log("No monitor match data provided");
+            return;
+        }
+    });
+} catch (e) {
+    console.log(`Error processing input: ${e}`);
+}
+
+----
+
+=== Example Notification Script (Python)
+
+[source,bash]
+----
+#!/bin/bash
+
+import sys
+import json
+
+def main():
+    try:
+        # Read input from stdin
+        input_data = sys.stdin.read()
+        if not input_data:
+            print("No input JSON provided", flush=True)
+
+        # Parse input JSON
+        try:
+            data = json.loads(input_data)
+            monitor_match = data['monitor_match']
+            args = data['args']
+            if args:
+                print(f"Args: {args}")
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON input: {e}", flush=True)
+
+
+    except Exception as e:
+        print(f"Error processing input: {e}", flush=True)
+
+if __name__ == "__main__":
+    main()
+
+----
+
+This examples demonstrates how to:
 
 * Process the input JSON data
 * Handle verbose mode for debugging
 * Return error messages via `stderr`
 * Set appropriate exit codes
+* Explore other examples in the link:https://github.com/OpenZeppelin/openzeppelin-monitor/tree/main/examples/config/triggers/scripts[`examples/config/triggers/scripts` directory].
 
 === Integration
 

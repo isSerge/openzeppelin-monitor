@@ -1,10 +1,11 @@
 use mockito::{Mock, Server};
 use openzeppelin_monitor::{
 	models::{
-		BlockChainType, BlockType, EVMBlock, Network, StellarBlock, StellarLedgerInfo,
-		StellarTransaction, StellarTransactionInfo,
+		BlockChainType, BlockType, EVMBlock, EVMReceiptLog, EVMTransactionReceipt,
+		Network, StellarBlock, StellarLedgerInfo, StellarTransaction, StellarTransactionInfo,
+		TransactionType,
 	},
-	utils::tests::builders::network::NetworkBuilder,
+	utils::tests::{builders::network::NetworkBuilder, evm::{receipt::ReceiptBuilder, transaction::TransactionBuilder}},
 };
 use serde_json::json;
 
@@ -115,8 +116,24 @@ pub fn create_test_block(chain: BlockChainType, block_number: u64) -> BlockType 
 	}
 }
 
-pub fn create_test_stellar_transaction() -> StellarTransaction {
-	StellarTransaction::from(StellarTransactionInfo {
-		..Default::default()
-	})
+pub fn create_test_transaction(chain: BlockChainType) -> TransactionType {
+	match chain {
+		BlockChainType::EVM => {
+			TransactionType::EVM(TransactionBuilder::new().build())
+		}
+		BlockChainType::Stellar => {
+			TransactionType::Stellar(StellarTransaction::from(StellarTransactionInfo {
+				..Default::default()
+			}))
+		}
+		_ => panic!("Unsupported chain"),
+	}
+}
+
+pub fn create_test_evm_transaction_receipt() -> EVMTransactionReceipt {
+	ReceiptBuilder::new().build()
+}
+
+pub fn create_test_evm_logs() -> Vec<EVMReceiptLog> {
+	ReceiptBuilder::new().build().logs.clone()
 }

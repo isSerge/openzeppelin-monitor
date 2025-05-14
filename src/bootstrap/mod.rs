@@ -21,8 +21,8 @@ use tokio::sync::{watch, Mutex};
 
 use crate::{
 	models::{
-		BlockChainType, BlockType, Monitor, MonitorMatch, Network, ProcessedBlock, ScriptLanguage,
-		TriggerConditions,
+		BlockChainType, BlockType, ContractSpec, Monitor, MonitorMatch, Network, ProcessedBlock,
+		ScriptLanguage, TriggerConditions,
 	},
 	repositories::{
 		MonitorRepositoryTrait, MonitorService, NetworkRepositoryTrait, NetworkService,
@@ -30,7 +30,7 @@ use crate::{
 	},
 	services::{
 		blockchain::{BlockChainClient, BlockFilterFactory, ClientPoolTrait},
-		filter::{handle_match, FilterService},
+		filter::{evm_helpers, handle_match, stellar_helpers, FilterService},
 		notification::NotificationService,
 		trigger::{
 			ScriptError, ScriptExecutorFactory, TriggerError, TriggerExecutionService,
@@ -142,6 +142,7 @@ pub fn create_block_handler<P: ClientPoolTrait + 'static>(
 	filter_service: Arc<FilterService>,
 	active_monitors: Vec<Monitor>,
 	client_pools: Arc<P>,
+	contract_specs: Vec<(String, ContractSpec)>,
 ) -> Arc<impl Fn(BlockType, Network) -> BoxFuture<'static, ProcessedBlock> + Send + Sync> {
 	Arc::new(
 		move |block: BlockType, network: Network| -> BoxFuture<'static, ProcessedBlock> {
@@ -149,6 +150,7 @@ pub fn create_block_handler<P: ClientPoolTrait + 'static>(
 			let active_monitors = active_monitors.clone();
 			let client_pools = client_pools.clone();
 			let shutdown_tx = shutdown_tx.clone();
+			let contract_specs = contract_specs.clone();
 			Box::pin(async move {
 				let applicable_monitors = filter_network_monitors(&active_monitors, &network.slug);
 
@@ -169,6 +171,7 @@ pub fn create_block_handler<P: ClientPoolTrait + 'static>(
 									&network,
 									&block,
 									&applicable_monitors,
+									Some(&contract_specs),
 									&filter_service,
 									&mut shutdown_rx,
 								)
@@ -184,6 +187,7 @@ pub fn create_block_handler<P: ClientPoolTrait + 'static>(
 										&network,
 										&block,
 										&applicable_monitors,
+										Some(&contract_specs),
 										&filter_service,
 										&mut shutdown_rx,
 									)
@@ -219,6 +223,7 @@ pub async fn process_block<T>(
 	network: &Network,
 	block: &BlockType,
 	applicable_monitors: &[Monitor],
+	contract_specs: Option<&[(String, ContractSpec)]>,
 	filter_service: &FilterService,
 	shutdown_rx: &mut watch::Receiver<bool>,
 ) -> Option<Vec<MonitorMatch>>
@@ -226,7 +231,7 @@ where
 	T: BlockChainClient + BlockFilterFactory<T>,
 {
 	tokio::select! {
-		result = filter_service.filter_block(client, network, block, applicable_monitors) => {
+		result = filter_service.filter_block(client, network, block, applicable_monitors, contract_specs) => {
 			result.ok()
 		}
 		_ = shutdown_rx.changed() => {
@@ -234,6 +239,126 @@ where
 			None
 		}
 	}
+}
+
+/// Get contract specs for all applicable monitors
+///
+/// # Arguments
+/// * `client_pool` - The client pool to use to get the contract specs
+/// * `network_monitors` - The monitors to get the contract specs for
+///
+/// # Returns
+/// Returns a vector of contract specs
+pub async fn get_contract_specs<P: ClientPoolTrait + 'static>(
+	client_pool: &Arc<P>,
+	network_monitors: &[(Network, Vec<Monitor>)],
+) -> Vec<(String, ContractSpec)> {
+	let mut all_specs = Vec::new();
+
+	for (network, monitors) in network_monitors {
+		for monitor in monitors {
+			let specs = match network.network_type {
+				BlockChainType::Stellar => {
+					let mut contract_specs = Vec::new();
+					let mut addresses_without_specs = Vec::new();
+					// First collect addresses that have contract specs configured in the monitor
+					for monitored_addr in &monitor.addresses {
+						if let Some(spec) = &monitored_addr.contract_spec {
+							let parsed_spec = match spec {
+								ContractSpec::Stellar(spec) => spec,
+								_ => {
+									tracing::warn!(
+										"Skipping non-Stellar contract spec for address {}",
+										monitored_addr.address
+									);
+									continue;
+								}
+							};
+
+							contract_specs.push((
+								stellar_helpers::normalize_address(&monitored_addr.address),
+								ContractSpec::Stellar(parsed_spec.clone()),
+							))
+						} else {
+							addresses_without_specs.push(monitored_addr.address.clone());
+						}
+					}
+
+					// Fetch remaining specs from chain
+					if !addresses_without_specs.is_empty() {
+						// Get the client once
+						let client: Arc<P::StellarClient> =
+							match client_pool.get_stellar_client(network).await {
+								Ok(client) => client,
+								Err(_) => {
+									tracing::warn!("Failed to get stellar client");
+									continue;
+								}
+							};
+
+						let chain_specs = futures::future::join_all(
+							addresses_without_specs.iter().map(|address| {
+								let client = client.clone();
+								async move {
+									let spec = client.get_contract_spec(address).await;
+									(address.clone(), spec)
+								}
+							}),
+						)
+						.await
+						.into_iter()
+						.filter_map(|(addr, spec)| match spec {
+							Ok(s) => Some((addr, s)),
+							Err(e) => {
+								tracing::warn!(
+									"Failed to fetch contract spec for address {}: {:?}",
+									addr,
+									e
+								);
+								None
+							}
+						})
+						.collect::<Vec<_>>();
+
+						contract_specs.extend(chain_specs);
+					}
+					contract_specs
+				}
+				BlockChainType::EVM => {
+					let mut contract_specs = Vec::new();
+					// First collect addresses that have contract specs configured in the monitor
+					for monitored_addr in &monitor.addresses {
+						if let Some(spec) = &monitored_addr.contract_spec {
+							let parsed_spec = match spec {
+								ContractSpec::EVM(spec) => spec,
+								_ => {
+									tracing::warn!(
+										"Skipping non-EVM contract spec for address {}",
+										monitored_addr.address
+									);
+									continue;
+								}
+							};
+
+							contract_specs.push((
+								format!(
+									"0x{}",
+									evm_helpers::normalize_address(&monitored_addr.address)
+								),
+								ContractSpec::EVM(parsed_spec.clone()),
+							))
+						}
+					}
+					contract_specs
+				}
+				_ => {
+					vec![]
+				}
+			};
+			all_specs.extend(specs);
+		}
+	}
+	all_specs
 }
 
 /// Creates a trigger handler function that processes trigger events from the block processing
@@ -396,12 +521,15 @@ mod tests {
 	use super::*;
 	use crate::{
 		models::{
-			EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, ScriptLanguage, StellarBlock,
-			StellarMonitorMatch, StellarTransaction, StellarTransactionInfo, TriggerConditions,
+			EVMMonitorMatch, EVMReceiptLog, EVMTransaction, EVMTransactionReceipt, MatchConditions,
+			Monitor, MonitorMatch, ScriptLanguage, StellarBlock, StellarMonitorMatch,
+			StellarTransaction, StellarTransactionInfo, TriggerConditions,
 		},
-		utils::tests::builders::evm::{
-			monitor::MonitorBuilder, receipt::ReceiptBuilder, transaction::TransactionBuilder,
-		},
+		utils::tests::{builders::evm::monitor::MonitorBuilder, evm::receipt::ReceiptBuilder},
+	};
+	use alloy::{
+		consensus::{transaction::Recovered, Signed, TxEnvelope},
+		primitives::{Address, Bytes, TxKind, B256, U256},
 	};
 	use std::io::Write;
 	use tempfile::NamedTempFile;
@@ -430,6 +558,42 @@ mod tests {
 		builder.build()
 	}
 
+	fn create_test_evm_transaction_receipt() -> EVMTransactionReceipt {
+		ReceiptBuilder::new().build()
+	}
+
+	fn create_test_evm_logs() -> Vec<EVMReceiptLog> {
+		ReceiptBuilder::new().build().logs.clone()
+	}
+
+	fn create_test_evm_transaction() -> EVMTransaction {
+		let tx = alloy::consensus::TxLegacy {
+			chain_id: None,
+			nonce: 0,
+			gas_price: 0,
+			gas_limit: 0,
+			to: TxKind::Call(Address::ZERO),
+			value: U256::ZERO,
+			input: Bytes::default(),
+		};
+
+		let signature =
+			alloy::signers::Signature::from_scalars_and_parity(B256::ZERO, B256::ZERO, false);
+
+		let hash = B256::ZERO;
+
+		EVMTransaction::from(alloy::rpc::types::Transaction {
+			inner: Recovered::new_unchecked(
+				TxEnvelope::Legacy(Signed::new_unchecked(tx, signature, hash)),
+				Address::ZERO,
+			),
+			block_hash: None,
+			block_number: None,
+			transaction_index: None,
+			effective_gas_price: None,
+		})
+	}
+
 	fn create_test_stellar_transaction() -> StellarTransaction {
 		StellarTransaction::from({
 			StellarTransactionInfo {
@@ -449,8 +613,9 @@ mod tests {
 		match blockchain_type {
 			BlockChainType::EVM => MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 				monitor: create_test_monitor("test", vec![], false, script_path),
-				transaction: TransactionBuilder::new().build(),
-				receipt: ReceiptBuilder::new().build(),
+				transaction: create_test_evm_transaction(),
+				receipt: Some(create_test_evm_transaction_receipt()),
+				logs: Some(create_test_evm_logs()),
 				network_slug: "ethereum_mainnet".to_string(),
 				matched_on: MatchConditions {
 					functions: vec![],
@@ -483,8 +648,9 @@ mod tests {
 		match blockchain_type {
 			BlockChainType::EVM => MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 				monitor,
-				transaction: TransactionBuilder::new().build(),
-				receipt: ReceiptBuilder::new().build(),
+				transaction: create_test_evm_transaction(),
+				receipt: Some(create_test_evm_transaction_receipt()),
+				logs: Some(create_test_evm_logs()),
 				network_slug: "ethereum_mainnet".to_string(),
 				matched_on: MatchConditions {
 					functions: vec![],

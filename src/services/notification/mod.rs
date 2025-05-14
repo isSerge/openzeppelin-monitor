@@ -261,7 +261,10 @@ mod tests {
 			FunctionCondition, MatchConditions, Monitor, MonitorMatch, ScriptLanguage,
 			TransactionCondition, TriggerType,
 		},
-		utils::tests::{builders::{evm::monitor::MonitorBuilder, trigger::TriggerBuilder}, evm::transaction::TransactionBuilder},
+		utils::tests::{
+			builders::{evm::monitor::MonitorBuilder, trigger::TriggerBuilder},
+			evm::{receipt::ReceiptBuilder, transaction::TransactionBuilder},
+		},
 	};
 	use std::collections::HashMap;
 
@@ -269,7 +272,7 @@ mod tests {
 		event_conditions: Vec<EventCondition>,
 		function_conditions: Vec<FunctionCondition>,
 		transaction_conditions: Vec<TransactionCondition>,
-		addresses: Vec<AddressWithABI>,
+		addresses: Vec<AddressWithSpec>,
 	) -> Monitor {
 		let mut builder = MonitorBuilder::new()
 			.name("test")
@@ -298,7 +301,8 @@ mod tests {
 		MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 			monitor: create_test_monitor(vec![], vec![], vec![], vec![]),
 			transaction: TransactionBuilder::new().build(),
-			receipt: EVMTransactionReceipt::default(),
+			receipt: Some(ReceiptBuilder::new().build()),
+			logs: Some(vec![]),
 			network_slug: "evm_mainnet".to_string(),
 			matched_on: MatchConditions {
 				functions: vec![],

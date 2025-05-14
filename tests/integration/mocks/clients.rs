@@ -13,7 +13,8 @@ use std::{marker::PhantomData, sync::Arc};
 
 use openzeppelin_monitor::{
 	models::{
-		BlockType, EVMReceiptLog, EVMTransactionReceipt, Network, StellarEvent, StellarTransaction,
+		BlockType, ContractSpec, EVMReceiptLog, EVMTransactionReceipt, Network, StellarEvent,
+		StellarTransaction,
 	},
 	services::{
 		blockchain::{
@@ -59,6 +60,7 @@ mock! {
 			&self,
 			from_block: u64,
 			to_block: u64,
+			addresses: Option<Vec<String>>,
 		) -> Result<Vec<EVMReceiptLog>,  anyhow::Error>;
 	}
 
@@ -86,6 +88,10 @@ mock! {
 			start_block: u64,
 			end_block: Option<u64>,
 		) -> Result<Vec<BlockType>, anyhow::Error>;
+		async fn get_contract_spec(
+			&self,
+			contract_id: &str,
+		) -> Result<ContractSpec, anyhow::Error>;
 	}
 
 	#[async_trait]
@@ -101,6 +107,8 @@ mock! {
 			start_sequence: u32,
 			end_sequence: Option<u32>,
 		) -> Result<Vec<StellarEvent>, anyhow::Error>;
+
+
 	}
 
 	impl<T: Send + Sync + Clone + 'static> Clone for StellarClientTrait<T> {
