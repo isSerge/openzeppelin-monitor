@@ -40,6 +40,7 @@ fn parse_boolean<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 			// Ensure "true" is followed by a delimiter or EOF
 			space1.value(()),
 			eof.value(()),
+			one_of(COMMON_DELIMITERS).value(()),
 		))),
 	)
 		.map(|_| LiteralValue::Bool(true));
@@ -305,8 +306,6 @@ fn parse_term<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	delimited(
 		space0,
 		alt((
-			// Parse a condition
-			parse_condition,
 			// Parse a parenthesized expression
 			delimited(
 				(literal("("), space0),
@@ -315,6 +314,8 @@ fn parse_term<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 					"closing parenthesis ')'",
 				))),
 			),
+			// Parse a condition
+			parse_condition,
 		)),
 		space0,
 	)
@@ -358,7 +359,6 @@ fn parse_and_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a
 /// Parses the OR operator and its components
 fn parse_or_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>> {
 	let left = parse_and_expression.parse_next(input)?;
-
 	let or_operator_parser = delimited(
 		space0,
 		literal(Caseless("OR")).value(LogicalOperator::Or),
@@ -367,18 +367,15 @@ fn parse_or_expression<'a>(input: &mut Input<'a>) -> ParserResult<Expression<'a>
 	.context(StrContext::Expected(StrContextValue::Description(
 		"logical operator OR",
 	)));
-
 	let trailing_parser = (or_operator_parser, parse_and_expression);
-
 	let folded_or_parser = repeat(0.., trailing_parser).fold(
-		move || left.clone(), // Clone the left side for initial value
+		move || left.clone(),
 		|acc, (op, right)| Expression::Logical {
 			left: Box::new(acc),
 			operator: op,
 			right: Box::new(right),
 		},
 	);
-
 	folded_or_parser
 		.context(StrContext::Expected(StrContextValue::Description(
 			"OR expression",
