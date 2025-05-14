@@ -11,8 +11,7 @@ use alloy::primitives::U64;
 use anyhow::Context;
 use async_trait::async_trait;
 use ethabi::Contract;
-use serde_json::Value;
-use std::{marker::PhantomData, str::FromStr};
+use std::marker::PhantomData;
 use tracing::instrument;
 
 use crate::{
@@ -2287,9 +2286,9 @@ mod tests {
 		]);
 		let args_false_false = Some(vec![
 			create_test_param("value", "50", "uint256"), // 'value > 100' is false
-			create_test_param("name", "Bob", "string"),   // 'name == "Alice"' is false
+			create_test_param("name", "Bob", "string"),  // 'name == "Alice"' is false
 		]);
-	
+
 		// True AND True
 		assert!(filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_true_true));
 		// True AND False
@@ -2299,7 +2298,7 @@ mod tests {
 		// False AND False
 		assert!(!filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_false_false));
 	}
-	
+
 	#[test]
 	fn test_evaluate_expression_logical_or_operator() {
 		let filter = create_test_filter();
@@ -2319,7 +2318,7 @@ mod tests {
 			create_test_param("value", "50", "uint256"),
 			create_test_param("name", "Bob", "string"),
 		]);
-	
+
 		// True OR True
 		assert!(filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_true_true));
 		// True OR False
@@ -2336,36 +2335,44 @@ mod tests {
 
 		// Case 1: (T AND T) OR F  => T (due to AND precedence over OR)
 		let args1 = Some(vec![
-			create_test_param("val1", "10", "uint256"),  // T for val1 > 5
-			create_test_param("str1", "hello", "string"),// T for str1 == 'hello'
+			create_test_param("val1", "10", "uint256"), // T for val1 > 5
+			create_test_param("str1", "hello", "string"), // T for str1 == 'hello'
 			create_test_param("bool1", "false", "bool"), // F for bool1 == true
 		]);
 		assert!(filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args1));
 
 		// Case 2: T AND (T OR F) => T (parentheses first)
-		assert!(filter.evaluate_expression("val1 > 5 AND (str1 == 'hello' OR bool1 == true)", &args1));
+		assert!(
+			filter.evaluate_expression("val1 > 5 AND (str1 == 'hello' OR bool1 == true)", &args1)
+		);
 
 		// Case 3: (T AND F) OR T => T
 		let args2 = Some(vec![
-			create_test_param("val1", "10", "uint256"),  // T
-			create_test_param("str1", "world", "string"),// F
-			create_test_param("bool1", "true", "bool"),  // T
+			create_test_param("val1", "10", "uint256"),   // T
+			create_test_param("str1", "world", "string"), // F
+			create_test_param("bool1", "true", "bool"),   // T
 		]);
 		assert!(filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args2));
 
 		// Case 4: (T OR F) AND T => T
-		assert!(filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args2));
-		
+		assert!(
+			filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args2)
+		);
+
 		// Case 5: (F AND F) OR F => F
 		let args3 = Some(vec![
 			create_test_param("val1", "1", "uint256"),    // F
 			create_test_param("str1", "world", "string"), // F
 			create_test_param("bool1", "false", "bool"),  // F
 		]);
-		assert!(!filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args3));
+		assert!(
+			!filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args3)
+		);
 
 		// Case 6: (F OR F) AND F => F
-		assert!(!filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args3));
+		assert!(
+			!filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args3)
+		);
 
 		// Case 7: T AND F OR F -> (T AND F) OR F -> F OR F -> F
 		let args_t_f_f = Some(vec![
@@ -2374,7 +2381,7 @@ mod tests {
 			create_test_param("c", "false", "bool"), // c == true (F)
 		]);
 		assert!(!filter.evaluate_expression("a > 0 AND b == 'bar' OR c == true", &args_t_f_f));
-		
+
 		// Case 8: (T OR F) AND F -> T AND F -> F
 		assert!(!filter.evaluate_expression("(a > 0 OR b == 'bar') AND c == true", &args_t_f_f));
 

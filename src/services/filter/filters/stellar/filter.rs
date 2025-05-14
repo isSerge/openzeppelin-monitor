@@ -2628,14 +2628,12 @@ mod tests {
 	fn test_evaluate_expression_event_vector() {
 		let filter = create_test_filter();
 
-		let args = Some(vec![
-			StellarMatchParamEntry {
-				name: "0".to_string(),
-				value: r#"["100", "200", "300", "test"]"#.to_string(),
-				kind: "array".to_string(),
-				indexed: false,
-			},
-		]);
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "0".to_string(),
+			value: r#"["100", "200", "300", "test"]"#.to_string(),
+			kind: "array".to_string(),
+			indexed: false,
+		}]);
 
 		assert!(filter.evaluate_expression("0[0] == '100'", &args));
 		assert!(!filter.evaluate_expression("0[0] == '200'", &args));
@@ -2646,14 +2644,12 @@ mod tests {
 	fn test_evaluate_expression_event_key_access() {
 		let filter = create_test_filter();
 
-		let args = Some(vec![
-			StellarMatchParamEntry {
-				name: "0".to_string(),
-				value: r#"{"0": "value", "1": "100"}"#.to_string(),
-				kind: "Map".to_string(),
-				indexed: false,
-			},
-		]);
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "0".to_string(),
+			value: r#"{"0": "value", "1": "100"}"#.to_string(),
+			kind: "Map".to_string(),
+			indexed: false,
+		}]);
 
 		assert!(filter.evaluate_expression("0.0 == 'value'", &args));
 		assert!(!filter.evaluate_expression("0.1 == '200'", &args));
