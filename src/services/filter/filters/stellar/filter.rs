@@ -1870,6 +1870,14 @@ mod tests {
 		// Test simple numeric comparison
 		assert!(filter.evaluate_expression("amount > 50", &args));
 		assert!(!filter.evaluate_expression("amount < 50", &args));
+		assert!(filter.evaluate_expression("amount == 100", &args));
+		assert!(!filter.evaluate_expression("amount != 100", &args));
+		assert!(filter.evaluate_expression("amount >= 100", &args));
+		assert!(!filter.evaluate_expression("amount <= 50", &args));
+		assert!(filter.evaluate_expression("amount == 100", &args));
+		assert!(!filter.evaluate_expression("amount == 50", &args));
+		assert!(filter.evaluate_expression("amount != 50", &args));
+		assert!(!filter.evaluate_expression("amount != 100", &args));
 
 		// Test boolean comparison
 		assert!(filter.evaluate_expression("status == true", &args));
@@ -1880,27 +1888,461 @@ mod tests {
 	}
 
 	#[test]
-	fn test_evaluate_expression_array_indexing() {
+	fn test_evaluate_expression_string_comparisons() {
 		let filter = create_test_filter();
-
-		// Test setup with array parameter
 		let args = Some(vec![StellarMatchParamEntry {
-			name: "0".to_string(),
-			value: "10,20,30".to_string(),
-			kind: "Vec".to_string(),
+			name: "name".to_string(),
+			value: "Alice".to_string(),
+			kind: "string".to_string(),
 			indexed: false,
 		}]);
 
-		// Test valid array access
-		assert!(filter.evaluate_expression("arguments[0][1] == 20", &args));
+		// Test true conditions
+		assert!(filter.evaluate_expression("name == 'Alice'", &args));
+		assert!(filter.evaluate_expression("name != 'Bob'", &args));
+		assert!(filter.evaluate_expression("name contains 'ice'", &args));
+		assert!(filter.evaluate_expression("name starts_with 'ali'", &args));
+		assert!(filter.evaluate_expression("name ends_with 'ice'", &args));
 
-		// Test out of bounds index
-		assert!(!filter.evaluate_expression("arguments[0][5] == 10", &args));
-
-		// Test invalid array format
-		assert!(!filter.evaluate_expression("arguments[0] == 10", &args));
+		// Test false conditions
+		assert!(!filter.evaluate_expression("name == 'Bob'", &args));
+		assert!(!filter.evaluate_expression("name != 'Alice'", &args));
+		assert!(!filter.evaluate_expression("name contains 'Bob'", &args));
+		assert!(!filter.evaluate_expression("name starts_with 'Bob'", &args));
+		assert!(!filter.evaluate_expression("name ends_with 'Bob'", &args));
 	}
 
+	#[test]
+	fn test_evaluate_expression_basic_field_access() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "object".to_string(),
+			value: r#"{"key1": "value", "key2": "100"}"#.to_string(),
+			kind: "object".to_string(),
+			indexed: false,
+		}]);
+
+		// Test true conditions
+		assert!(filter.evaluate_expression("object.key1 == 'value'", &args));
+		assert!(filter.evaluate_expression("object.key2 != '200'", &args));
+
+		// Test false conditions
+		assert!(!filter.evaluate_expression("object.key1 == 'wrong'", &args));
+		assert!(!filter.evaluate_expression("object.key2 != '100'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_nested_field_access() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "nested_object".to_string(),
+			value: r#"{"outer": {"inner": "value"}}"#.to_string(),
+			kind: "object".to_string(),
+			indexed: false,
+		}]);
+
+		// Test true conditions
+		assert!(filter.evaluate_expression("nested_object.outer.inner == 'value'", &args));
+		assert!(filter.evaluate_expression("nested_object.outer.inner != 'wrong'", &args));
+
+		// Test false conditions
+		assert!(!filter.evaluate_expression("nested_object.outer.inner == 'wrong'", &args));
+		assert!(!filter.evaluate_expression("nested_object.outer.inner != 'value'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_array_indexing() {
+		let filter = create_test_filter();
+		let args = Some(vec![
+			StellarMatchParamEntry {
+				name: "array_str".to_string(),
+				value: r#"["100", "200", "300", "test"]"#.to_string(),
+				kind: "array".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "array_num".to_string(),
+				value: r#"[100, 200, 300]"#.to_string(),
+				kind: "array".to_string(),
+				indexed: false,
+			},
+		]);
+
+		// Test true conditions
+		assert!(filter.evaluate_expression("array_str[0] == '100'", &args));
+		assert!(filter.evaluate_expression("array_str[1] != '100'", &args));
+		assert!(filter.evaluate_expression("array_num[0] == 100", &args));
+		assert!(filter.evaluate_expression("array_num[1] != 100", &args));
+
+		// Test false conditions
+		assert!(!filter.evaluate_expression("array_str[3] == '100'", &args));
+		assert!(!filter.evaluate_expression("array_str[0] != '100'", &args));
+		assert!(!filter.evaluate_expression("array_num[3] == 100", &args));
+		assert!(!filter.evaluate_expression("array_num[0] != 100", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_object_in_array() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "objects".to_string(),
+			value: r#"[{"name": "Alice"}, {"name": "Bob"}]"#.to_string(),
+			kind: "array".to_string(),
+			indexed: false,
+		}]);
+
+		// Test object in array
+		assert!(filter.evaluate_expression("objects[0].name == 'Alice'", &args));
+		assert!(filter.evaluate_expression("objects[1].name == 'Bob'", &args));
+
+		// Test out-of-bounds access
+		assert!(!filter.evaluate_expression("objects[2].name == 'Charlie'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_logical_and_operator() {
+		let filter = create_test_filter();
+		let args_true_true = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "150".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Alice".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+		let args_true_false = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "150".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Bob".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+		let args_false_true = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "50".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Alice".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+		let args_false_false = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "50".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Bob".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+
+		// True AND True
+		assert!(filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_true_true));
+		// True AND False
+		assert!(!filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_true_false));
+		// False AND True
+		assert!(!filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_false_true));
+		// False AND False
+		assert!(!filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_false_false));
+	}
+
+	#[test]
+	fn test_evaluate_expression_logical_or_operator() {
+		let filter = create_test_filter();
+		let args_true_true = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "150".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Alice".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+		let args_true_false = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "150".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Bob".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+		let args_false_true = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "50".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Alice".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+		let args_false_false = Some(vec![
+			StellarMatchParamEntry {
+				name: "value".to_string(),
+				value: "50".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "name".to_string(),
+				value: "Bob".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+		]);
+
+		// True OR True
+		assert!(filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_true_true));
+		// True OR False
+		assert!(filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_true_false));
+		// False OR True
+		assert!(filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_false_true));
+		// False OR False
+		assert!(!filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_false_false));
+	}
+
+	#[test]
+	fn test_evaluate_expression_logical_combinations_and_precedence() {
+		let filter = create_test_filter();
+
+		// Case 1: (T AND T) OR F  => T (due to AND precedence over OR)
+		let args1 = Some(vec![
+			StellarMatchParamEntry {
+				name: "val1".to_string(),
+				value: "10".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "str1".to_string(),
+				value: "hello".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "bool1".to_string(),
+				value: "true".to_string(),
+				kind: "bool".to_string(),
+				indexed: false,
+			},
+		]);
+		assert!(filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args1));
+
+		// Case 2: T AND (T OR F) => T (parentheses first)
+		assert!(
+			filter.evaluate_expression("val1 > 5 AND (str1 == 'hello' OR bool1 == true)", &args1)
+		);
+
+		// Case 3: (T AND F) OR T => T
+		let args2 = Some(vec![
+			StellarMatchParamEntry {
+				name: "val1".to_string(),
+				value: "10".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "str1".to_string(),
+				value: "world".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "bool1".to_string(),
+				value: "true".to_string(),
+				kind: "bool".to_string(),
+				indexed: false,
+			},
+		]);
+		assert!(filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args2));
+
+		// Case 4: (T OR F) AND T => T
+		assert!(
+			filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args2)
+		);
+
+		// Case 5: (F AND F) OR F => F
+		let args3 = Some(vec![
+			StellarMatchParamEntry {
+				name: "val1".to_string(),
+				value: "1".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "str1".to_string(),
+				value: "world".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "bool1".to_string(),
+				value: "false".to_string(),
+				kind: "bool".to_string(),
+				indexed: false,
+			},
+		]);
+		assert!(
+			!filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args3)
+		);
+
+		// Case 6: (F OR F) AND F => F
+		assert!(
+			!filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args3)
+		);
+
+		// Case 7: T AND F OR F -> (T AND F) OR F -> F OR F -> F
+		let args_t_f_f = Some(vec![
+			StellarMatchParamEntry {
+				name: "a".to_string(),
+				value: "10".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "b".to_string(),
+				value: "foo".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "c".to_string(),
+				value: "false".to_string(),
+				kind: "bool".to_string(),
+				indexed: false,
+			},
+		]);
+		assert!(!filter.evaluate_expression("a > 0 AND b == 'bar' OR c == true", &args_t_f_f));
+
+		// Case 8: (T OR F) AND F -> T AND F -> F
+		assert!(!filter.evaluate_expression("(a > 0 OR b == 'bar') AND c == true", &args_t_f_f));
+
+		// Case 9: F AND T OR T -> (F AND T) OR T -> F OR T -> T
+		let args_f_t_t = Some(vec![
+			StellarMatchParamEntry {
+				name: "a".to_string(),
+				value: "-5".to_string(),
+				kind: "i64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "b".to_string(),
+				value: "bar".to_string(),
+				kind: "string".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "c".to_string(),
+				value: "true".to_string(),
+				kind: "bool".to_string(),
+				indexed: false,
+			},
+		]);
+		assert!(filter.evaluate_expression("a > 0 AND b == 'bar' OR c == true", &args_f_t_t));
+
+		// Case 10: (F OR T) AND T -> T AND T -> T
+		assert!(filter.evaluate_expression("(a > 0 OR b == 'bar') AND c == true", &args_f_t_t));
+	}
+
+	#[test]
+	fn test_evaluate_expression_event() {
+		let filter = create_test_filter();
+
+		let args = Some(vec![
+			StellarMatchParamEntry {
+				name: "0".to_string(),
+				value: "100".to_string(),
+				kind: "u64".to_string(),
+				indexed: false,
+			},
+			StellarMatchParamEntry {
+				name: "1".to_string(),
+				value: "true".to_string(),
+				kind: "bool".to_string(),
+				indexed: false,
+			},
+		]);
+
+		assert!(filter.evaluate_expression("0 == 100", &args));
+		assert!(!filter.evaluate_expression("0 == 200", &args));
+		assert!(filter.evaluate_expression("1 == true", &args));
+		assert!(!filter.evaluate_expression("1 == false", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_event_vector() {
+		let filter = create_test_filter();
+
+		let args = Some(vec![
+			StellarMatchParamEntry {
+				name: "0".to_string(),
+				value: r#"["100", "200", "300", "test"]"#.to_string(),
+				kind: "array".to_string(),
+				indexed: false,
+			},
+		]);
+
+		assert!(filter.evaluate_expression("0[0] == '100'", &args));
+		assert!(!filter.evaluate_expression("0[0] == '200'", &args));
+	}
+
+	#[test]
+	#[ignore = "This test is ignored because parser does not support this syntax yet"]
+	fn test_evaluate_expression_event_key_access() {
+		let filter = create_test_filter();
+
+		let args = Some(vec![
+			StellarMatchParamEntry {
+				name: "0".to_string(),
+				value: r#"{"0": "value", "1": "100"}"#.to_string(),
+				kind: "Map".to_string(),
+				indexed: false,
+			},
+		]);
+
+		assert!(filter.evaluate_expression("0.0 == 'value'", &args));
+		assert!(!filter.evaluate_expression("0.1 == '200'", &args));
+	}
+
+	// TODO: add more edge cases and test for errors when evaluate_expression is returning Result
 	#[test]
 	fn test_evaluate_expression_edge_cases() {
 		let filter = create_test_filter();
