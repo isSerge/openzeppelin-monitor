@@ -241,16 +241,12 @@ mod tests {
 	use super::*;
 	use crate::{
 		models::{
-			AddressWithABI, EVMMonitorMatch, EVMTransaction, EVMTransactionReceipt, EventCondition,
-			FunctionCondition, MatchConditions, Monitor, MonitorMatch, TransactionCondition,
+			AddressWithABI, EVMMonitorMatch, EventCondition, FunctionCondition, MatchConditions,
+			Monitor, MonitorMatch, TransactionCondition,
 		},
-		utils::tests::evm::monitor::MonitorBuilder,
-	};
-	use alloy::{
-		consensus::{
-			transaction::Recovered, Receipt, ReceiptEnvelope, ReceiptWithBloom, Signed, TxEnvelope,
+		utils::tests::evm::{
+			monitor::MonitorBuilder, receipt::ReceiptBuilder, transaction::TransactionBuilder,
 		},
-		primitives::{Address, Bytes, TxKind, B256, U256},
 	};
 	use std::{fs, path::Path, time::Instant};
 
@@ -289,59 +285,11 @@ mod tests {
 		builder.build()
 	}
 
-	fn create_test_evm_transaction_receipt() -> EVMTransactionReceipt {
-		EVMTransactionReceipt::from(alloy::rpc::types::TransactionReceipt {
-			inner: ReceiptEnvelope::Legacy(ReceiptWithBloom {
-				receipt: Receipt::default(),
-				logs_bloom: Default::default(),
-			}),
-			transaction_hash: B256::ZERO,
-			transaction_index: Some(0),
-			block_hash: Some(B256::ZERO),
-			block_number: Some(0),
-			gas_used: 0,
-			effective_gas_price: 0,
-			blob_gas_used: None,
-			blob_gas_price: None,
-			from: Address::ZERO,
-			to: Some(Address::ZERO),
-			contract_address: None,
-		})
-	}
-
-	fn create_test_evm_transaction() -> EVMTransaction {
-		let tx = alloy::consensus::TxLegacy {
-			chain_id: None,
-			nonce: 0,
-			gas_price: 0,
-			gas_limit: 0,
-			to: TxKind::Call(Address::ZERO),
-			value: U256::ZERO,
-			input: Bytes::default(),
-		};
-
-		let signature =
-			alloy::signers::Signature::from_scalars_and_parity(B256::ZERO, B256::ZERO, false);
-
-		let hash = B256::ZERO;
-
-		EVMTransaction::from(alloy::rpc::types::Transaction {
-			inner: Recovered::new_unchecked(
-				TxEnvelope::Legacy(Signed::new_unchecked(tx, signature, hash)),
-				Address::ZERO,
-			),
-			block_hash: None,
-			block_number: None,
-			transaction_index: None,
-			effective_gas_price: None,
-		})
-	}
-
 	fn create_mock_monitor_match() -> MonitorMatch {
 		MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 			monitor: create_test_monitor(vec![], vec![], vec![], vec![]),
-			transaction: create_test_evm_transaction(),
-			receipt: create_test_evm_transaction_receipt(),
+			transaction: TransactionBuilder::new().build(),
+			receipt: ReceiptBuilder::new().build(),
 			network_slug: "evm_mainnet".to_string(),
 			matched_on: MatchConditions {
 				functions: vec![],
