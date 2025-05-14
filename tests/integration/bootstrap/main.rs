@@ -4,7 +4,7 @@ use crate::integration::{
 		setup_trigger_service,
 	},
 	mocks::{
-		create_test_block, create_test_network, create_test_transaction, MockClientPool,
+		create_test_block, create_test_network, create_test_stellar_transaction, MockClientPool,
 		MockEVMTransportClient, MockEvmClientTrait, MockMonitorRepository, MockNetworkRepository,
 		MockStellarClientTrait, MockTriggerExecutionService, MockTriggerRepository,
 	},
@@ -14,14 +14,17 @@ use openzeppelin_monitor::{
 	models::{
 		BlockChainType, EVMMonitorMatch, EVMTransactionReceipt, MatchConditions, Monitor,
 		MonitorMatch, ProcessedBlock, ScriptLanguage, SecretString, SecretValue, StellarBlock,
-		StellarMonitorMatch, TransactionType, Trigger, TriggerConditions,
+		StellarMonitorMatch, Trigger, TriggerConditions,
 	},
 	services::{
 		filter::FilterService,
 		notification::NotificationService,
 		trigger::{TriggerExecutionService, TriggerExecutionServiceTrait},
 	},
-	utils::tests::{evm::monitor::MonitorBuilder, trigger::TriggerBuilder},
+	utils::tests::{
+		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+		trigger::TriggerBuilder,
+	},
 };
 
 use serde_json::json;
@@ -54,10 +57,7 @@ fn create_test_monitor_match(chain: BlockChainType) -> MonitorMatch {
 	match chain {
 		BlockChainType::EVM => MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 			monitor: create_test_monitor("test", vec!["ethereum_mainnet"], false, vec![]),
-			transaction: match create_test_transaction(chain) {
-				TransactionType::EVM(tx) => tx,
-				_ => panic!("Expected EVM transaction"),
-			},
+			transaction: TransactionBuilder::new().build(),
 			network_slug: "ethereum_mainnet".to_string(),
 			receipt: EVMTransactionReceipt::default(),
 			matched_on: MatchConditions::default(),
@@ -65,10 +65,7 @@ fn create_test_monitor_match(chain: BlockChainType) -> MonitorMatch {
 		})),
 		BlockChainType::Stellar => MonitorMatch::Stellar(Box::new(StellarMonitorMatch {
 			monitor: create_test_monitor("test", vec!["stellar_mainnet"], false, vec![]),
-			transaction: match create_test_transaction(chain) {
-				TransactionType::Stellar(tx) => tx,
-				_ => panic!("Expected Stellar transaction"),
-			},
+			transaction: create_test_stellar_transaction(),
 			network_slug: "stellar_mainnet".to_string(),
 			ledger: StellarBlock::default(),
 			matched_on: MatchConditions::default(),
@@ -436,10 +433,7 @@ print(True)  # Always return true for test
 		network_slug: "ethereum_mainnet".to_string(),
 		processing_results: vec![MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 			monitor,
-			transaction: match create_test_transaction(BlockChainType::EVM) {
-				TransactionType::EVM(tx) => tx,
-				_ => panic!("Expected EVM transaction"),
-			},
+			transaction: TransactionBuilder::new().build(),
 			receipt: EVMTransactionReceipt::default(),
 			network_slug: "ethereum_mainnet".to_string(),
 			matched_on: MatchConditions::default(),

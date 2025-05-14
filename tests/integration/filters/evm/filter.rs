@@ -3,12 +3,6 @@
 //! Tests the monitoring functionality for EVM-compatible blockchains,
 //! including event and transaction filtering.
 
-use alloy::{
-	consensus::{
-		transaction::Recovered, Receipt, ReceiptEnvelope, ReceiptWithBloom, Signed, TxEnvelope,
-	},
-	primitives::{Bytes, TxKind, U256},
-};
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -20,7 +14,7 @@ use openzeppelin_monitor::{
 	services::{
 		blockchain::EvmClient,
 		filter::{handle_match, FilterError, FilterService},
-	},
+	}, utils::tests::evm::{receipt::ReceiptBuilder, transaction::TransactionBuilder},
 };
 
 use crate::integration::{
@@ -663,10 +657,8 @@ async fn test_handle_match_with_key_collision() -> Result<(), Box<FilterError>> 
 		.returning(|_, _, _, _| Ok(()));
 
 	// Create a monitor match with an argument named "signature"
-	use alloy::primitives::{Address, B256};
 	use openzeppelin_monitor::models::{
-		EVMMatchArguments, EVMMatchParamEntry, EVMMatchParamsMap, EVMMonitorMatch, EVMTransaction,
-		EVMTransactionReceipt, FunctionCondition, MatchConditions,
+		EVMMatchArguments, EVMMatchParamEntry, EVMMatchParamsMap, EVMMonitorMatch, FunctionCondition, MatchConditions,
 	};
 
 	// Create test monitor with a function that has an argument called "signature"
@@ -676,59 +668,11 @@ async fn test_handle_match_with_key_collision() -> Result<(), Box<FilterError>> 
 		expression: None,
 	}];
 
-	fn create_test_evm_transaction_receipt() -> EVMTransactionReceipt {
-		EVMTransactionReceipt::from(alloy::rpc::types::TransactionReceipt {
-			inner: ReceiptEnvelope::Legacy(ReceiptWithBloom {
-				receipt: Receipt::default(),
-				logs_bloom: Default::default(),
-			}),
-			transaction_hash: B256::ZERO,
-			transaction_index: Some(0),
-			block_hash: Some(B256::ZERO),
-			block_number: Some(0),
-			gas_used: 0,
-			effective_gas_price: 0,
-			blob_gas_used: None,
-			blob_gas_price: None,
-			from: Address::ZERO,
-			to: Some(Address::ZERO),
-			contract_address: None,
-		})
-	}
-
-	fn create_test_evm_transaction() -> EVMTransaction {
-		let tx = alloy::consensus::TxLegacy {
-			chain_id: None,
-			nonce: 0,
-			gas_price: 0,
-			gas_limit: 0,
-			to: TxKind::Call(Address::ZERO),
-			value: U256::ZERO,
-			input: Bytes::default(),
-		};
-
-		let signature =
-			alloy::signers::Signature::from_scalars_and_parity(B256::ZERO, B256::ZERO, false);
-
-		let hash = B256::ZERO;
-
-		EVMTransaction::from(alloy::rpc::types::Transaction {
-			inner: Recovered::new_unchecked(
-				TxEnvelope::Legacy(Signed::new_unchecked(tx, signature, hash)),
-				Address::ZERO,
-			),
-			block_hash: None,
-			block_number: None,
-			transaction_index: None,
-			effective_gas_price: None,
-		})
-	}
-
 	// Create a match object
 	let evm_match = EVMMonitorMatch {
 		monitor,
-		transaction: create_test_evm_transaction(),
-		receipt: create_test_evm_transaction_receipt(),
+		transaction: TransactionBuilder::new().build(),
+		receipt: ReceiptBuilder::new().build(),
 		network_slug: "ethereum_mainnet".to_string(),
 		matched_on: MatchConditions {
 			functions: vec![FunctionCondition {

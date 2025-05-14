@@ -1,15 +1,14 @@
 use openzeppelin_monitor::{
-	models::{
-		BlockChainType, EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, TransactionType,
-	},
+	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch},
 	services::notification::{DiscordNotifier, NotificationService, Notifier},
-	utils::tests::{evm::monitor::MonitorBuilder, trigger::TriggerBuilder},
+	utils::tests::{
+		evm::{monitor::MonitorBuilder, receipt::ReceiptBuilder, transaction::TransactionBuilder},
+		trigger::TriggerBuilder,
+	},
 };
 
 use serde_json::json;
 use std::collections::HashMap;
-
-use crate::integration::mocks::{create_test_evm_transaction_receipt, create_test_transaction};
 
 fn create_test_monitor(name: &str) -> Monitor {
 	MonitorBuilder::new()
@@ -21,15 +20,12 @@ fn create_test_monitor(name: &str) -> Monitor {
 }
 
 fn create_test_evm_match(monitor: Monitor) -> MonitorMatch {
-	let transaction = match create_test_transaction(BlockChainType::EVM) {
-		TransactionType::EVM(transaction) => transaction,
-		_ => panic!("Failed to create test transaction"),
-	};
+	let transaction = TransactionBuilder::new().build();
 
 	MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 		monitor,
 		transaction,
-		receipt: create_test_evm_transaction_receipt(),
+		receipt: ReceiptBuilder::new().build(),
 		network_slug: "ethereum_mainnet".to_string(),
 		matched_on: MatchConditions::default(),
 		matched_on_args: None,
