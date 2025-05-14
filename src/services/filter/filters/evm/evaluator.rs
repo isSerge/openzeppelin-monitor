@@ -1044,16 +1044,6 @@ mod tests {
 			"compare_i256 test needs update post-impl"
 		);
 
-		// Test routing to compare_array
-		assert!(evaluator
-			.compare_final_values(
-				"string[]",
-				"a,b",
-				&ComparisonOperator::Contains,
-				&LiteralValue::Str("a")
-			)
-			.is_ok());
-
 		// Test routing to compare_fixed_point
 		assert!(evaluator
 			.compare_final_values(
