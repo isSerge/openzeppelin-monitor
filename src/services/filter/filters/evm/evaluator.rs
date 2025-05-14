@@ -183,55 +183,6 @@ impl<'a> EVMConditionEvaluator<'a> {
 		}
 	}
 
-	/// Compares an EVM array (represented as a comma-separated string)
-	/// with a literal value based on the operator.
-	/// Supports Eq, Ne (for the whole string) and Contains (for elements).
-	fn compare_array(
-		&self,
-		lhs_kind: &str, // "uint8[]" or "string[]"
-		lhs_str: &str,
-		operator: &ComparisonOperator,
-		rhs_literal: &LiteralValue<'_>,
-	) -> Result<bool, EvaluationError> {
-		tracing::debug!(
-			"Comparing array: lhs_kind='{}', lhs_str='{}', operator={:?}, rhs_literal={:?}",
-			lhs_kind,
-			lhs_str,
-			operator,
-			rhs_literal
-		);
-
-		let rhs_str = match rhs_literal {
-			LiteralValue::Str(s) => *s,
-			LiteralValue::Number(n) => *n,
-			LiteralValue::Bool(b) => {
-				if *b {
-					"true"
-				} else {
-					"false"
-				}
-			}
-		};
-
-		match operator {
-			ComparisonOperator::Eq => Ok(lhs_str == rhs_str),
-			ComparisonOperator::Ne => Ok(lhs_str != rhs_str),
-			ComparisonOperator::Contains => {
-				// Split the LHS comma-separated string into elements
-				// Trim whitespace from each element for both LHS and RHS
-				let lhs_elements: Vec<&str> = lhs_str.split(',').map(str::trim).collect();
-				let trimmed_rhs_str = rhs_str.trim();
-				Ok(lhs_elements.iter().any(|&el| el == trimmed_rhs_str))
-			}
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!(
-					"Operator {:?} not supported for EVM array (kind: {})",
-					operator, lhs_kind
-				),
-			}),
-		}
-	}
-
 	/// Compares a fixed-point number (Decimal) with a literal value.
 	fn compare_fixed_point(
 		&self,
@@ -338,11 +289,6 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 			return self.compare_u256(lhs_value_str, operator, rhs_literal);
 		}
 
-		// Check for EVM comma-separated array kind
-		if lhs_kind.ends_with("[]") {
-			return self.compare_array(&lhs_kind, lhs_value_str, operator, rhs_literal);
-		}
-
 		match lhs_kind.as_str() {
 			"fixed" | "ufixed" => self.compare_fixed_point(lhs_value_str, operator, rhs_literal),
 			"address" => self.compare_address(lhs_value_str, operator, rhs_literal),
@@ -397,7 +343,7 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 				}
 			}
 			serde_json::Value::Bool(_) => "bool".to_string(),
-			serde_json::Value::Array(_) => "vec".to_string(),
+			serde_json::Value::Array(_) => "array".to_string(),
 			serde_json::Value::Object(_) => "map".to_string(),
 			serde_json::Value::Null => "null".to_string(),
 		}
@@ -421,110 +367,74 @@ mod tests {
 	fn test_compare_u256_valid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			evaluator
-				.compare_u256("123", &ComparisonOperator::Eq, &LiteralValue::Number("123"))
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_u256("123", &ComparisonOperator::Eq, &LiteralValue::Number("123"))
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_u256("123", &ComparisonOperator::Ne, &LiteralValue::Number("456"))
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_u256("123", &ComparisonOperator::Ne, &LiteralValue::Number("456"))
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_u256("123", &ComparisonOperator::Gt, &LiteralValue::Number("100"))
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_u256("123", &ComparisonOperator::Gt, &LiteralValue::Number("100"))
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_u256(
-					"123",
-					&ComparisonOperator::Gte,
-					&LiteralValue::Number("123")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_u256(
+				"123",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("123")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_u256("123", &ComparisonOperator::Lt, &LiteralValue::Number("200"))
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_u256("123", &ComparisonOperator::Lt, &LiteralValue::Number("200"))
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_u256(
-					"123",
-					&ComparisonOperator::Lte,
-					&LiteralValue::Number("123")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_u256(
+				"123",
+				&ComparisonOperator::Lte,
+				&LiteralValue::Number("123")
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_compare_u256_invalid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			!evaluator
-				.compare_u256("123", &ComparisonOperator::Eq, &LiteralValue::Number("456"))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_u256("123", &ComparisonOperator::Eq, &LiteralValue::Number("456"))
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_u256("123", &ComparisonOperator::Ne, &LiteralValue::Number("123"))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_u256("123", &ComparisonOperator::Ne, &LiteralValue::Number("123"))
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_u256("123", &ComparisonOperator::Gt, &LiteralValue::Number("200"))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_u256("123", &ComparisonOperator::Gt, &LiteralValue::Number("200"))
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_u256(
-					"123",
-					&ComparisonOperator::Gte,
-					&LiteralValue::Number("200")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_u256(
+				"123",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("200")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_u256("123", &ComparisonOperator::Lt, &LiteralValue::Number("100"))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_u256("123", &ComparisonOperator::Lt, &LiteralValue::Number("100"))
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_u256(
-					"123",
-					&ComparisonOperator::Lte,
-					&LiteralValue::Number("100")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_u256(
+				"123",
+				&ComparisonOperator::Lte,
+				&LiteralValue::Number("100")
+			)
+			.unwrap());
 	}
 
 	#[test]
@@ -573,129 +483,93 @@ mod tests {
 	fn test_compare_i256_valid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			evaluator
-				.compare_i256("123", &ComparisonOperator::Eq, &LiteralValue::Number("123"))
-				.unwrap(),
-			"Should evaluate to true"
-		);
-		assert!(
-			evaluator
-				.compare_i256(
-					"123",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Number("-456")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_i256("123", &ComparisonOperator::Eq, &LiteralValue::Number("123"))
+			.unwrap());
+		assert!(evaluator
+			.compare_i256(
+				"123",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Number("-456")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_i256(
-					"123",
-					&ComparisonOperator::Gt,
-					&LiteralValue::Number("-100")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_i256(
+				"123",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number("-100")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_i256(
-					"123",
-					&ComparisonOperator::Gte,
-					&LiteralValue::Number("123")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_i256(
+				"123",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("123")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_i256(
-					"-123",
-					&ComparisonOperator::Lt,
-					&LiteralValue::Number("200")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_i256(
+				"-123",
+				&ComparisonOperator::Lt,
+				&LiteralValue::Number("200")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_i256(
-					"-123",
-					&ComparisonOperator::Lte,
-					&LiteralValue::Number("-123")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_i256(
+				"-123",
+				&ComparisonOperator::Lte,
+				&LiteralValue::Number("-123")
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_compare_i256_invalid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			!evaluator
-				.compare_i256(
-					"123",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Number("-456")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_i256(
+				"123",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("-456")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_i256("123", &ComparisonOperator::Ne, &LiteralValue::Number("123"))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_i256("123", &ComparisonOperator::Ne, &LiteralValue::Number("123"))
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_i256("123", &ComparisonOperator::Gt, &LiteralValue::Number("200"))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_i256("123", &ComparisonOperator::Gt, &LiteralValue::Number("200"))
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_i256(
-					"123",
-					&ComparisonOperator::Gte,
-					&LiteralValue::Number("200")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_i256(
+				"123",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("200")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_i256(
-					"-123",
-					&ComparisonOperator::Lt,
-					&LiteralValue::Number("-200")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_i256(
+				"-123",
+				&ComparisonOperator::Lt,
+				&LiteralValue::Number("-200")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_i256(
-					"-123",
-					&ComparisonOperator::Lte,
-					&LiteralValue::Number("-200")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_i256(
+				"-123",
+				&ComparisonOperator::Lte,
+				&LiteralValue::Number("-200")
+			)
+			.unwrap());
 	}
 
 	#[test]
@@ -744,54 +618,42 @@ mod tests {
 	fn test_compare_address_valid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			evaluator
-				.compare_address(
-					"0x1234567890123456789012345678901234567890",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Str("0x1234567890123456789012345678901234567890")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_address(
+				"0x1234567890123456789012345678901234567890",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("0x1234567890123456789012345678901234567890")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_address(
-					"0x1234567890123456789012345678901234567890",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Str("0x0987654321098765432109876543210987654321")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_address(
+				"0x1234567890123456789012345678901234567890",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("0x0987654321098765432109876543210987654321")
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_compare_address_invalid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			!evaluator
-				.compare_address(
-					"0x1234567890123456789012345678901234567890",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Str("0x0987654321098765432109876543210987654321")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_address(
+				"0x1234567890123456789012345678901234567890",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("0x0987654321098765432109876543210987654321")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_address(
-					"0x1234567890123456789012345678901234567890",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Str("0x1234567890123456789012345678901234567890")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_address(
+				"0x1234567890123456789012345678901234567890",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("0x1234567890123456789012345678901234567890")
+			)
+			.unwrap());
 	}
 
 	#[test]
@@ -824,120 +686,90 @@ mod tests {
 	fn test_compare_string_valid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Str("test_value_1")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("test_value_1")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Str("test_value_2")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("test_value_2")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::StartsWith,
-					&LiteralValue::Str("test")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::StartsWith,
+				&LiteralValue::Str("test")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::EndsWith,
-					&LiteralValue::Str("value_1")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::EndsWith,
+				&LiteralValue::Str("value_1")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::Contains,
-					&LiteralValue::Str("value")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("value")
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_compare_string_invalid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			!evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Str("test_value_2")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("test_value_2")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Str("test_value_1")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("test_value_1")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::StartsWith,
-					&LiteralValue::Str("value")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::StartsWith,
+				&LiteralValue::Str("value")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::EndsWith,
-					&LiteralValue::Str("test")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::EndsWith,
+				&LiteralValue::Str("test")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_string(
-					"test_value_1",
-					&ComparisonOperator::Contains,
-					&LiteralValue::Str("test_value_2")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_string(
+				"test_value_1",
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("test_value_2")
+			)
+			.unwrap());
 	}
 
 	#[test]
@@ -965,246 +797,111 @@ mod tests {
 		));
 	}
 
-	/// --- Test cases for compare_array ---
-	#[test]
-	fn test_compare_array_valid() {
-		let evaluator = create_evaluator();
-
-		assert!(
-			evaluator
-				.compare_array(
-					"fixed[]",
-					"1.5,2.5,-3.5",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Str("1.5,2.5,-3.5")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
-
-		assert!(
-			evaluator
-				.compare_array(
-					"fixed[]",
-					"1.5,2.5,-3.5",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Str("2.5,3.5,4.5")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
-
-		assert!(
-			evaluator
-				.compare_array(
-					"fixed[]",
-					"1.5,2.5,-3.5",
-					&ComparisonOperator::Contains,
-					&LiteralValue::Str("2.5")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
-	}
-
-	#[test]
-	fn test_compare_array_invalid() {
-		let evaluator = create_evaluator();
-
-		assert!(
-			!evaluator
-				.compare_array(
-					"fixed[]",
-					"1.5,2.5,-3.5",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Str("2.5,3.5,4.5")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
-
-		assert!(
-			!evaluator
-				.compare_array(
-					"fixed[]",
-					"1.5,2.5,-3.5",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Str("1.5,2.5,-3.5")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
-
-		assert!(
-			!evaluator
-				.compare_array(
-					"fixed[]",
-					"1.5,2.5,-3.5",
-					&ComparisonOperator::Contains,
-					&LiteralValue::Str("4.5")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
-	}
-
-	#[test]
-	fn test_compare_array_error() {
-		let evaluator = create_evaluator();
-
-		// Unsupported operator
-		assert!(matches!(
-			evaluator.compare_array(
-				"uint8[]",
-				"1,2,3",
-				&ComparisonOperator::Gt,
-				&LiteralValue::Str("4,5,6")
-			),
-			Err(EvaluationError::UnsupportedOperator { op: _ })
-		));
-	}
-
 	/// --- Test cases for compare_fixed_point ---
 	#[test]
 	fn test_compare_fixed_point_valid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Number("123.456")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("123.456")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Number("456.789")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Number("456.789")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Gt,
-					&LiteralValue::Number("100.0")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number("100.0")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Gte,
-					&LiteralValue::Number("123.456")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("123.456")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Lt,
-					&LiteralValue::Number("200.0")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Lt,
+				&LiteralValue::Number("200.0")
+			)
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Lte,
-					&LiteralValue::Number("123.456")
-				)
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Lte,
+				&LiteralValue::Number("123.456")
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_compare_fixed_point_invalid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			!evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Eq,
-					&LiteralValue::Number("456.789")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("456.789")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Ne,
-					&LiteralValue::Number("123.456")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Number("123.456")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Gt,
-					&LiteralValue::Number("200.0")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number("200.0")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Gte,
-					&LiteralValue::Number("200.0")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Gte,
+				&LiteralValue::Number("200.0")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Lt,
-					&LiteralValue::Number("100.0")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Lt,
+				&LiteralValue::Number("100.0")
+			)
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_fixed_point(
-					"123.456",
-					&ComparisonOperator::Lte,
-					&LiteralValue::Number("100.0")
-				)
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_fixed_point(
+				"123.456",
+				&ComparisonOperator::Lte,
+				&LiteralValue::Number("100.0")
+			)
+			.unwrap());
 	}
 
 	#[test]
@@ -1257,38 +954,26 @@ mod tests {
 	fn test_compare_boolean_valid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			evaluator
-				.compare_boolean("true", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_boolean("true", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
+			.unwrap());
 
-		assert!(
-			evaluator
-				.compare_boolean("false", &ComparisonOperator::Ne, &LiteralValue::Bool(true))
-				.unwrap(),
-			"Should evaluate to true"
-		);
+		assert!(evaluator
+			.compare_boolean("false", &ComparisonOperator::Ne, &LiteralValue::Bool(true))
+			.unwrap());
 	}
 
 	#[test]
 	fn test_compare_boolean_invalid() {
 		let evaluator = create_evaluator();
 
-		assert!(
-			!evaluator
-				.compare_boolean("true", &ComparisonOperator::Ne, &LiteralValue::Bool(true))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_boolean("true", &ComparisonOperator::Ne, &LiteralValue::Bool(true))
+			.unwrap());
 
-		assert!(
-			!evaluator
-				.compare_boolean("false", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
-				.unwrap(),
-			"Should evaluate to false"
-		);
+		assert!(!evaluator
+			.compare_boolean("false", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
+			.unwrap());
 	}
 
 	#[test]
@@ -1464,7 +1149,7 @@ mod tests {
 			"fixed"
 		); // String that is a decimal
 		assert_eq!(evaluator.get_kind_from_json_value(&json!(true)), "bool");
-		assert_eq!(evaluator.get_kind_from_json_value(&json!([1, 2])), "vec");
+		assert_eq!(evaluator.get_kind_from_json_value(&json!([1, 2])), "array");
 		assert_eq!(evaluator.get_kind_from_json_value(&json!({"a":1})), "map");
 		assert_eq!(evaluator.get_kind_from_json_value(&json!(null)), "null");
 	}
