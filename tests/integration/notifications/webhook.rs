@@ -9,9 +9,7 @@ use openzeppelin_monitor::{
 use serde_json::json;
 use std::collections::HashMap;
 
-use crate::integration::mocks::{
-	create_test_evm_logs, create_test_evm_transaction_receipt,
-};
+use crate::integration::mocks::{create_test_evm_logs, create_test_evm_transaction_receipt};
 
 fn create_test_monitor(name: &str) -> Monitor {
 	MonitorBuilder::new()

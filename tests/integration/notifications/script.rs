@@ -1,15 +1,14 @@
 use openzeppelin_monitor::{
-	models::{
-		EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, ScriptLanguage
-	},
+	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, ScriptLanguage},
 	services::notification::NotificationService,
-	utils::tests::{evm::{monitor::MonitorBuilder, receipt::ReceiptBuilder, transaction::TransactionBuilder}, trigger::TriggerBuilder},
+	utils::tests::{
+		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+		trigger::TriggerBuilder,
+	},
 };
 use std::collections::HashMap;
 
-use crate::integration::mocks::{
-	create_test_evm_logs, create_test_evm_transaction_receipt, create_test_transaction,
-};
+use crate::integration::mocks::{create_test_evm_logs, create_test_evm_transaction_receipt};
 
 fn create_test_monitor(name: &str) -> Monitor {
 	MonitorBuilder::new()
@@ -22,7 +21,6 @@ fn create_test_monitor(name: &str) -> Monitor {
 
 fn create_test_evm_match(monitor: Monitor) -> MonitorMatch {
 	let transaction = TransactionBuilder::new().build();
-	let receipt = ReceiptBuilder::new().build();
 
 	MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 		monitor,

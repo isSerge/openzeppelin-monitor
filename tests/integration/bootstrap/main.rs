@@ -4,7 +4,7 @@ use crate::integration::{
 		setup_trigger_service,
 	},
 	mocks::{
-		create_test_block, create_test_network, create_test_stellar_transaction, MockClientPool,
+		create_test_block, create_test_network, create_test_transaction, MockClientPool,
 		MockEVMTransportClient, MockEvmClientTrait, MockMonitorRepository, MockNetworkRepository,
 		MockStellarClientTrait, MockStellarTransportClient, MockTriggerExecutionService,
 		MockTriggerRepository,
@@ -76,7 +76,10 @@ fn create_test_monitor_match(chain: BlockChainType) -> MonitorMatch {
 		})),
 		BlockChainType::Stellar => MonitorMatch::Stellar(Box::new(StellarMonitorMatch {
 			monitor: create_test_monitor("test", vec!["stellar_mainnet"], false, vec![]),
-			transaction: create_test_stellar_transaction(),
+			transaction: match create_test_transaction(chain) {
+				TransactionType::Stellar(tx) => tx,
+				_ => panic!("Expected Stellar transaction"),
+			},
 			network_slug: "stellar_mainnet".to_string(),
 			ledger: StellarBlock::default(),
 			matched_on: MatchConditions::default(),

@@ -11,7 +11,7 @@ use openzeppelin_monitor::{
 		FunctionCondition, MatchConditions, Monitor, MonitorMatch, StellarBlock,
 		StellarContractSpec, StellarEvent, StellarMatchArguments, StellarMatchParamEntry,
 		StellarMatchParamsMap, StellarMonitorMatch, StellarTransaction, StellarTransactionInfo,
-		TransactionCondition, TransactionStatus,
+		TransactionCondition, TransactionStatus, TransactionType,
 	},
 	services::filter::{handle_match, FilterError, FilterService},
 };
@@ -19,7 +19,7 @@ use openzeppelin_monitor::{
 use crate::integration::{
 	filters::common::{load_test_data, read_and_parse_json, setup_trigger_execution_service},
 	mocks::{
-		create_test_block, create_test_stellar_transaction, MockStellarClientTrait,
+		create_test_block, create_test_transaction, MockStellarClientTrait,
 		MockStellarTransportClient,
 	},
 };
@@ -963,6 +963,13 @@ async fn test_handle_match_with_key_collision() -> Result<(), Box<FilterError>> 
 		signature: "riskyFunction(String signature, I128 amount)".to_string(),
 		expression: None,
 	}];
+
+	fn create_test_stellar_transaction() -> StellarTransaction {
+		match create_test_transaction(BlockChainType::Stellar) {
+			TransactionType::Stellar(transaction) => transaction,
+			_ => panic!("Expected Stellar transaction"),
+		}
+	}
 
 	fn create_test_stellar_block() -> StellarBlock {
 		match create_test_block(BlockChainType::Stellar, 1) {

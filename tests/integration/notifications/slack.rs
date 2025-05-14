@@ -2,16 +2,14 @@ use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, ScriptLanguage},
 	services::notification::{NotificationService, Notifier, SlackNotifier},
 	utils::tests::{
-		evm::{monitor::MonitorBuilder, receipt::ReceiptBuilder, transaction::TransactionBuilder},
+		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
 		trigger::TriggerBuilder,
 	},
 };
 use serde_json::json;
 use std::collections::HashMap;
 
-use crate::integration::mocks::{
-	create_test_evm_logs, create_test_evm_transaction_receipt, create_test_transaction,
-};
+use crate::integration::mocks::{create_test_evm_logs, create_test_evm_transaction_receipt};
 
 fn create_test_monitor(name: &str) -> Monitor {
 	MonitorBuilder::new()

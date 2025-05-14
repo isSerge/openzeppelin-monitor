@@ -257,13 +257,13 @@ mod tests {
 	use super::*;
 	use crate::{
 		models::{
-			AddressWithABI, EVMMonitorMatch, EVMTransactionReceipt, EventCondition,
+			AddressWithSpec, EVMMonitorMatch, EVMTransactionReceipt, EventCondition,
 			FunctionCondition, MatchConditions, Monitor, MonitorMatch, ScriptLanguage,
 			TransactionCondition, TriggerType,
 		},
 		utils::tests::{
 			builders::{evm::monitor::MonitorBuilder, trigger::TriggerBuilder},
-			evm::{receipt::ReceiptBuilder, transaction::TransactionBuilder},
+			evm::transaction::TransactionBuilder,
 		},
 	};
 	use std::collections::HashMap;
@@ -301,7 +301,7 @@ mod tests {
 		MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 			monitor: create_test_monitor(vec![], vec![], vec![], vec![]),
 			transaction: TransactionBuilder::new().build(),
-			receipt: Some(ReceiptBuilder::new().build()),
+			receipt: Some(EVMTransactionReceipt::default()),
 			logs: Some(vec![]),
 			network_slug: "evm_mainnet".to_string(),
 			matched_on: MatchConditions {

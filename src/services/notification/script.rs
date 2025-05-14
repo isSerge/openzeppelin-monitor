@@ -72,11 +72,10 @@ impl ScriptExecutor for ScriptNotifier {
 mod tests {
 	use super::*;
 	use crate::{
-		models::{
-			EVMMonitorMatch, EVMTransactionReceipt, MatchConditions, Monitor,
-			MonitorMatch,
+		models::{EVMMonitorMatch, EVMTransactionReceipt, MatchConditions, Monitor, MonitorMatch},
+		utils::tests::{
+			builders::evm::monitor::MonitorBuilder, evm::transaction::TransactionBuilder,
 		},
-		utils::tests::{builders::evm::monitor::MonitorBuilder, evm::transaction::TransactionBuilder},
 	};
 	use std::time::Instant;
 
