@@ -29,7 +29,43 @@ use crate::{
 			StellarBlockFilter,
 		},
 	},
+	utils::logging::error::ErrorContext,
 };
+
+/// Stellar RPC method constants
+const RPC_METHOD_GET_TRANSACTIONS: &str = "getTransactions";
+const RPC_METHOD_GET_EVENTS: &str = "getEvents";
+const RPC_METHOD_GET_LATEST_LEDGER: &str = "getLatestLedger";
+const RPC_METHOD_GET_LEDGERS: &str = "getLedgers";
+const RPC_METHOD_GET_LEDGER_ENTRIES: &str = "getLedgerEntries";
+
+/// Stellar client error type
+#[derive(Debug, thiserror::Error)]
+pub enum StellarClientError {
+	#[error("Data for '{ledger_info}' is before recorded history (HTTP {http_status}). Horizon Type: '{horizon_type}', Title: '{title}'. Detail: '{detail}'")]
+	BeforeHistory {
+		title: String,         // From Horizon JSON: "title"
+		detail: String,        // From Horizon JSON: "detail"
+		horizon_type: String,  // From Horizon JSON: "type"
+		ledger_info: String,   // Client-side context about the request
+		context: ErrorContext, // Internal tracing context
+		http_status: u16,      // HTTP status code (should be 410)
+	},
+	#[error("Stellar RPC request failed")]
+	RpcError {
+		#[source]
+		source: anyhow::Error,
+		method_name: &'static str,
+	},
+	#[error("Failed to parse Stellar RPC response")]
+	ResponseParseError {
+		#[source]
+		source: serde_json::Error,
+		method_name: &'static str,
+	},
+	#[error("Invalid input: {0}")]
+	InvalidInput(String),
+}
 
 /// Client implementation for the Stellar blockchain
 ///
@@ -109,11 +145,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 		// Validate input parameters
 		if let Some(end_sequence) = end_sequence {
 			if start_sequence > end_sequence {
-				return Err(anyhow::anyhow!(
+				let input_error = StellarClientError::InvalidInput(format!(
 					"start_sequence {} cannot be greater than end_sequence {}",
-					start_sequence,
-					end_sequence
+					start_sequence, end_sequence
 				));
+				return Err(anyhow::anyhow!(input_error));
 			}
 		}
 
@@ -143,38 +179,56 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 				})
 			};
 
-			let response = self
+			let http_response = self
 				.http_client
-				.send_raw_request("getTransactions", Some(params))
-				.await
-				.with_context(|| {
-					format!(
-						"Failed to fetch transactions for ledger range {}-{}",
-						start_sequence, target_sequence
-					)
-				})?;
+				.send_raw_request(RPC_METHOD_GET_TRANSACTIONS, Some(params))
+				.await;
 
-			let ledger_transactions: Vec<StellarTransactionInfo> =
-				serde_json::from_value(response["result"]["transactions"].clone())
-					.with_context(|| "Failed to parse transaction response")?;
+			match http_response {
+				Ok(response_body) => {
+					let raw_transactions = response_body
+						.get("result")
+						.and_then(|r| r.get("transactions"))
+						.ok_or_else(|| {
+							StellarClientError::ResponseParseError {
+								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
+								method_name: RPC_METHOD_GET_TRANSACTIONS,
+							}
+						})?;
 
-			if ledger_transactions.is_empty() {
-				break;
-			}
+					let ledger_transactions: Vec<StellarTransactionInfo> =
+						serde_json::from_value(raw_transactions.clone()).map_err(|e| {
+							StellarClientError::ResponseParseError {
+								source: e,
+								method_name: RPC_METHOD_GET_TRANSACTIONS,
+							}
+						})?;
 
-			for transaction in ledger_transactions {
-				let sequence = transaction.ledger;
-				if sequence > target_sequence {
-					return Ok(transactions);
+					if ledger_transactions.is_empty() {
+						break;
+					}
+
+					for transaction in ledger_transactions {
+						if transaction.ledger > target_sequence {
+							return Ok(transactions);
+						}
+						transactions.push(StellarTransaction::from(transaction));
+					}
+
+					// Increment the number of iterations to ensure we break the loop in case there is no cursor
+					current_iteration += 1;
+					cursor = response_body["result"]["cursor"]
+						.as_str()
+						.map(|s| s.to_string());
+					if cursor.is_none() {
+						break;
+					}
 				}
-				transactions.push(StellarTransaction::from(transaction));
-			}
-
-			// Increment the number of iterations to ensure we break the loop in case there is no cursor
-			current_iteration += 1;
-			cursor = response["result"]["cursor"].as_str().map(|s| s.to_string());
-			if cursor.is_none() {
-				break;
+				// TODO: consider returning structured errors from the transport layer
+				Err(anyhow_transport_err) => {
+					// Parse transport error
+					// TODO: implement error parsing logic
+				}
 			}
 		}
 		Ok(transactions)
@@ -194,11 +248,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 		// Validate input parameters
 		if let Some(end_sequence) = end_sequence {
 			if start_sequence > end_sequence {
-				return Err(anyhow::anyhow!(
+				let input_error = StellarClientError::InvalidInput(format!(
 					"start_sequence {} cannot be greater than end_sequence {}",
-					start_sequence,
-					end_sequence
+					start_sequence, end_sequence
 				));
+				return Err(anyhow::anyhow!(input_error));
 			}
 		}
 
@@ -234,38 +288,56 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 				})
 			};
 
-			let response = self
+			let http_response = self
 				.http_client
-				.send_raw_request("getEvents", Some(params))
-				.await
-				.with_context(|| {
-					format!(
-						"Failed to fetch events for ledger range {}-{}",
-						start_sequence, target_sequence
-					)
-				})?;
+				.send_raw_request(RPC_METHOD_GET_EVENTS, Some(params))
+				.await;
 
-			let ledger_events: Vec<StellarEvent> =
-				serde_json::from_value(response["result"]["events"].clone())
-					.with_context(|| "Failed to parse event response")?;
+			match http_response {
+				Ok(response_body) => {
+					let raw_events = response_body
+						.get("result")
+						.and_then(|r| r.get("events"))
+						.ok_or_else(|| {
+							StellarClientError::ResponseParseError {
+								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
+								method_name: RPC_METHOD_GET_EVENTS,
+							}
+						})?;
 
-			if ledger_events.is_empty() {
-				break;
-			}
+					let ledger_events: Vec<StellarEvent> =
+						serde_json::from_value(raw_events.clone()).map_err(|e| {
+							StellarClientError::ResponseParseError {
+								source: e,
+								method_name: RPC_METHOD_GET_EVENTS,
+							}
+						})?;
 
-			for event in ledger_events {
-				let sequence = event.ledger;
-				if sequence > target_sequence {
-					return Ok(events);
+					if ledger_events.is_empty() {
+						break;
+					}
+
+					for event in ledger_events {
+						if event.ledger > target_sequence {
+							return Ok(events);
+						}
+						events.push(event);
+					}
+
+					// Increment the number of iterations to ensure we break the loop in case there is no cursor
+					current_iteration += 1;
+					cursor = response_body["result"]["cursor"]
+						.as_str()
+						.map(|s| s.to_string());
+					if cursor.is_none() {
+						break;
+					}
 				}
-				events.push(event);
-			}
-			// Increment the number of iterations to ensure we break the loop in case there is no cursor
-			current_iteration += 1;
-			cursor = response["result"]["cursor"].as_str().map(|s| s.to_string());
-
-			if cursor.is_none() {
-				break;
+				// TODO: consider returning structured errors from the transport layer
+				Err(anyhow_transport_err) => {
+					// Parse transport error
+					// TODO: implement error parsing logic
+				}
 			}
 		}
 		Ok(events)
@@ -289,7 +361,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 	async fn get_latest_block_number(&self) -> Result<u64, anyhow::Error> {
 		let response = self
 			.http_client
-			.send_raw_request::<serde_json::Value>("getLatestLedger", None)
+			.send_raw_request::<serde_json::Value>(RPC_METHOD_GET_LATEST_LEDGER, None)
 			.await
 			.with_context(|| "Failed to get latest ledger")?;
 
@@ -306,8 +378,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 	/// If end_block is None, only the start_block will be retrieved
 	///
 	/// # Errors
-	/// - Returns `BlockChainError::RequestError` if start_block > end_block
-	/// - Returns `BlockChainError::BlockNotFound` if a block cannot be retrieved
+	/// - Returns `anyhow::Error`
 	#[instrument(skip(self), fields(start_block, end_block))]
 	async fn get_blocks(
 		&self,
@@ -320,11 +391,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 		// Validate input parameters
 		if let Some(end_block) = end_block {
 			if start_block > end_block {
-				return Err(anyhow::anyhow!(
+				let input_error = StellarClientError::InvalidInput(format!(
 					"start_block {} cannot be greater than end_block {}",
-					start_block,
-					end_block
+					start_block, end_block
 				));
+				return Err(anyhow::anyhow!(input_error));
 			}
 		}
 
@@ -352,44 +423,60 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 				})
 			};
 
-			let response = self
+			let http_response = self
 				.http_client
-				.send_raw_request("getLedgers", Some(params))
-				.await
-				.with_context(|| {
-					format!(
-						"Failed to fetch ledgers for range {}-{}",
-						start_block, target_block
-					)
-				})?;
+				.send_raw_request(RPC_METHOD_GET_LEDGERS, Some(params))
+				.await;
 
-			let ledgers: Vec<StellarBlock> =
-				serde_json::from_value(response["result"]["ledgers"].clone())
-					.with_context(|| "Failed to parse ledger response")?;
+			match http_response {
+				Ok(response_body) => {
+					let raw_ledgers = response_body
+						.get("result")
+						.and_then(|r| r.get("ledgers"))
+						.ok_or_else(|| {
+							StellarClientError::ResponseParseError {
+								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
+								method_name: RPC_METHOD_GET_LEDGERS,
+							}
+						})?;
 
-			if ledgers.is_empty() {
-				break;
-			}
+					let ledgers: Vec<StellarBlock> = serde_json::from_value(raw_ledgers.clone())
+						.map_err(|e| StellarClientError::ResponseParseError {
+							source: e,
+							method_name: RPC_METHOD_GET_LEDGERS,
+						})?;
 
-			for ledger in ledgers {
-				let sequence = ledger.sequence;
-				if (sequence as u64) > target_block {
-					return Ok(blocks);
+					if ledgers.is_empty() {
+						break;
+					}
+
+					for ledger in ledgers {
+						if (ledger.sequence as u64) > target_block {
+							return Ok(blocks);
+						}
+						blocks.push(BlockType::Stellar(Box::new(ledger)));
+					}
+
+					// Increment the number of iterations to ensure we break the loop in case there is no cursor
+					current_iteration += 1;
+					cursor = response_body["result"]["cursor"]
+						.as_str()
+						.map(|s| s.to_string());
+
+					// If the cursor is the same as the start block, we have reached the end of the range
+					if cursor == Some(start_block.to_string()) {
+						break;
+					}
+
+					if cursor.is_none() {
+						break;
+					}
 				}
-				blocks.push(BlockType::Stellar(Box::new(ledger)));
-			}
-
-			// Increment the number of iterations to ensure we break the loop in case there is no cursor
-			current_iteration += 1;
-			cursor = response["result"]["cursor"].as_str().map(|s| s.to_string());
-
-			// If the cursor is the same as the start block, we have reached the end of the range
-			if cursor == Some(start_block.to_string()) {
-				break;
-			}
-
-			if cursor.is_none() {
-				break;
+				// TODO: consider returning structured errors from the transport layer
+				Err(anyhow_transport_err) => {
+					// Parse transport error
+					// TODO: implement error parsing logic
+				}
 			}
 		}
 		Ok(blocks)
@@ -424,7 +511,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 
 		let response = self
 			.http_client
-			.send_raw_request("getLedgerEntries", Some(params))
+			.send_raw_request(RPC_METHOD_GET_LEDGER_ENTRIES, Some(params))
 			.await
 			.with_context(|| format!("Failed to get contract wasm code for {}", contract_id))?;
 
@@ -454,7 +541,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 
 		let response = self
 			.http_client
-			.send_raw_request("getLedgerEntries", Some(params))
+			.send_raw_request(RPC_METHOD_GET_LEDGER_ENTRIES, Some(params))
 			.await
 			.with_context(|| format!("Failed to get contract wasm code for {}", contract_id))?;
 
