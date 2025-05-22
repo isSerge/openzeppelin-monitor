@@ -303,6 +303,135 @@ mod tests {
 	}
 
 	#[test]
+	fn test_string_to_u256() {
+		// --- Helpers ---
+		fn u256_hex_val(hex_str: &str) -> U256 {
+			U256::from_str_radix(hex_str.strip_prefix("0x").unwrap_or(hex_str), 16).unwrap()
+		}
+
+		// --- Constants for testing ---
+		const U256_MAX_STR: &str =
+			"115792089237316195423570985008687907853269984665640564039457584007913129639935";
+		const U256_MAX_HEX_STR: &str =
+			"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+		const U256_OVERFLOW_STR: &str =
+			"115792089237316195423570985008687907853269984665640564039457584007913129639936";
+		const U256_HEX_OVERFLOW_STR: &str =
+			"0x10000000000000000000000000000000000000000000000000000000000000000";
+		const ZERO_STR: &str = "0";
+		const SMALL_NUM_STR: &str = "123";
+		const SMALL_NUM_HEX_STR: &str = "0x7b"; // 123 in hex
+
+		// --- Valid numbers cases ---
+		assert_eq!(string_to_u256(ZERO_STR), Ok(U256::ZERO));
+		assert_eq!(
+			string_to_u256(SMALL_NUM_STR),
+			Ok(U256::from_str(SMALL_NUM_STR).unwrap())
+		);
+		assert_eq!(string_to_u256(U256_MAX_STR), Ok(U256::MAX));
+
+		// --- Valid hex cases ---
+		assert_eq!(string_to_u256("0x0"), Ok(U256::ZERO));
+		assert_eq!(string_to_u256("0X0"), Ok(U256::ZERO)); // Case insensitive
+		assert_eq!(
+			string_to_u256(SMALL_NUM_HEX_STR),
+			Ok(u256_hex_val(SMALL_NUM_HEX_STR))
+		);
+		assert_eq!(string_to_u256(U256_MAX_HEX_STR), Ok(U256::MAX));
+
+		// --- Invalid cases ---
+		assert_eq!(string_to_u256(""), Err("Input string is empty".to_string()));
+		assert_eq!(
+			string_to_u256("   "),
+			Err("Input string is empty".to_string())
+		);
+		assert_eq!(
+			string_to_u256("0x"),
+			Err("Hex string '0x' is missing value digits".to_string())
+		);
+		assert_eq!(
+			string_to_u256("abc"),
+			Err("Failed to parse decimal 'abc': digit 10 is out of range for base 10".to_string())
+		);
+		assert_eq!(
+			string_to_u256("-123"),
+			Err("Failed to parse decimal '-123': invalid digit: -".to_string())
+		);
+		assert_eq!(
+			string_to_u256(U256_OVERFLOW_STR),
+			Err("Failed to parse decimal '115792089237316195423570985008687907853269984665640564039457584007913129639936': the value is too large to fit the target type".to_string())
+		);
+		assert_eq!(
+			string_to_u256(U256_HEX_OVERFLOW_STR),
+			Err("Failed to parse hex '10000000000000000000000000000000000000000000000000000000000000000': the value is too large to fit the target type".to_string())
+		);
+	}
+
+	#[test]
+	fn test_string_to_i256() {
+		// --- Constants for testing ---
+		const I256_MAX_STR: &str =
+			"57896044618658097711785492504343953926634992332820282019728792003956564819967";
+		const I256_MAX_HEX_STR: &str =
+			"0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+		const I256_MIN_STR: &str =
+			"-57896044618658097711785492504343953926634992332820282019728792003956564819968";
+		const I256_MIN_HEX_STR: &str =
+			"0x8000000000000000000000000000000000000000000000000000000000000000";
+		const I256_POS_OVERFLOW_STR: &str =
+			"57896044618658097711785492504343953926634992332820282019728792003956564819968";
+		const I256_NEG_OVERFLOW_STR: &str =
+			"-57896044618658097711785492504343953926634992332820282019728792003956564819969";
+		const I256_HEX_OVERFLOW_STR: &str =
+			"0x10000000000000000000000000000000000000000000000000000000000000000";
+
+		// --- Valid numbers cases ---
+		assert_eq!(string_to_i256("0"), Ok(I256::ZERO));
+		assert_eq!(string_to_i256("123"), Ok(I256::from_str("123").unwrap()));
+		assert_eq!(string_to_i256(I256_MAX_STR), Ok(I256::MAX));
+		assert_eq!(string_to_i256(I256_MIN_STR), Ok(I256::MIN));
+		assert_eq!(string_to_i256("-123"), Ok(I256::from_str("-123").unwrap()));
+		assert_eq!(string_to_i256("-0"), Ok(I256::ZERO));
+
+		// --- Valid hex cases ---
+		assert_eq!(string_to_i256("0x0"), Ok(I256::ZERO));
+		assert_eq!(string_to_i256("0X0"), Ok(I256::ZERO)); // Case insensitive
+		assert_eq!(string_to_i256(I256_MAX_HEX_STR), Ok(I256::MAX));
+		assert_eq!(string_to_i256(I256_MIN_HEX_STR), Ok(I256::MIN));
+
+		// --- Invalid cases ---
+		assert_eq!(string_to_i256(""), Err("Input string is empty".to_string()));
+		assert_eq!(
+			string_to_i256("   "),
+			Err("Input string is empty".to_string())
+		);
+		assert_eq!(
+			string_to_i256("0x"),
+			Err("Hex string '0x' is missing value digits".to_string())
+		);
+		assert_eq!(
+			string_to_i256("abc"),
+			Err("Failed to parse decimal 'abc': digit 10 is out of range for base 10".to_string())
+		);
+		assert_eq!(
+			string_to_i256("-abc"),
+			Err("Failed to parse decimal '-abc': invalid digit: -".to_string())
+		);
+		assert_eq!(
+			string_to_i256(I256_POS_OVERFLOW_STR),
+			Err("Failed to parse decimal '57896044618658097711785492504343953926634992332820282019728792003956564819968': the value is too large to fit the target type".to_string())
+		);
+		assert_eq!(
+			string_to_i256(I256_NEG_OVERFLOW_STR),
+			Err("Failed to parse decimal '-57896044618658097711785492504343953926634992332820282019728792003956564819969': the value is too large to fit the target type".to_string())
+		);
+		assert_eq!(
+			string_to_i256(I256_HEX_OVERFLOW_STR),
+			Err("Failed to parse hex '10000000000000000000000000000000000000000000000000000000000000000': the value is too large to fit the target type".to_string())
+		);
+	}
+
+	#[test]
 	fn test_are_same_address() {
 		assert!(are_same_address(
 			"0x0123456789abcdef0123456789abcdef01234567",

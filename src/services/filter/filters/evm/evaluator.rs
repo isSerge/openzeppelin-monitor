@@ -362,6 +362,7 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 mod tests {
 	use super::*;
 	use crate::services::filter::expression::LiteralValue;
+	use alloy::primitives::U256;
 	use serde_json::json;
 
 	// Helper to create a dummy EVMConditionEvaluator (args don't matter for these unit tests)
@@ -404,6 +405,22 @@ mod tests {
 				"123",
 				&ComparisonOperator::Lte,
 				&LiteralValue::Number("123")
+			)
+			.unwrap());
+
+		assert!(evaluator
+			.compare_u256(
+				U256::MAX.to_string().as_str(),
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number(&U256::MAX.to_string())
+			)
+			.unwrap());
+
+		assert!(evaluator
+			.compare_u256(
+				U256::MAX.to_string().as_str(),
+				&ComparisonOperator::Gt,
+				&LiteralValue::Number(&U256::ZERO.to_string())
 			)
 			.unwrap());
 	}
