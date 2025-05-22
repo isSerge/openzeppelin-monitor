@@ -1,7 +1,7 @@
 //! This module defines the abstract syntax tree (AST) for the filter expressions.
 //! Parsing module will convert the input string into this AST structure.
 //! This AST is then traversed and interpreted by the evaluation module (via helpers::evaluate) to determine the result of the filter expression.
-//! 
+//!
 //! The AST is designed to be a direct representation of the parsed filter expression, capturing it's structure, operators and literal values.
 //! Lifetime annotations (`'a`) are used to ensure that the references to string literals are valid for the duration of the expression evaluation.
 
@@ -15,7 +15,7 @@ pub enum LiteralValue<'a> {
 	/// e.g., "abc", 'abc', '0x123ABC'
 	Str(&'a str),
 	/// A numeric literal value. e.g., "123", "-123.456", "0x123" or hexadecimal
-	/// Store as string slice to preserve original form until evaluation phase. 
+	/// Store as string slice to preserve original form until evaluation phase.
 	/// Conversion to specific type is done within chain context during evaluation.
 	Number(&'a str),
 }
@@ -68,7 +68,6 @@ pub struct VariablePath<'a> {
 	pub base: &'a str,
 	pub accessors: Vec<Accessor<'a>>,
 }
-
 
 /// Represents the left side of a condition (LHS) in a filter expression.
 /// The left side can either be a simple variable name or a path to a variable.
