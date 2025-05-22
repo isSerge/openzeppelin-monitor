@@ -81,6 +81,54 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 	pub fn new_with_transport(http_client: T) -> Self {
 		Self { http_client }
 	}
+
+	pub fn handle_transport_error(
+		&self,
+		err: anyhow::Error,
+		ledger_info: String,
+		method_name: &'static str,
+	) -> StellarClientError {
+		let (status_code, body_text) = parse_status_and_body_from_anyhow(&err);
+		let parsed_body_json: serde_json::Value =
+			serde_json::from_str(&body_text.unwrap_or_default()).unwrap_or_default();
+
+		let is_before_history_error = status_code.map_or(false, |code| code == 410)
+			&& parsed_body_json
+				.get("type")
+				.and_then(serde_json::Value::as_str)
+				.map_or(false, |t| t.contains("before_history"));
+
+		if is_before_history_error {
+			let context = ErrorContext::new("BeforeHistory", None, None);
+
+			return StellarClientError::BeforeHistory {
+				ledger_info,
+				http_status: 410,
+				horizon_type: parsed_body_json
+					.get("type")
+					.and_then(serde_json::Value::as_str)
+					.unwrap_or("")
+					.to_string(),
+				title: parsed_body_json
+					.get("title")
+					.and_then(serde_json::Value::as_str)
+					.unwrap_or("")
+					.to_string(),
+				detail: parsed_body_json
+					.get("detail")
+					.and_then(serde_json::Value::as_str)
+					.unwrap_or("")
+					.to_string(),
+				context,
+			};
+		}
+
+		// Return a generic RPC error if not a before history error
+		StellarClientError::RpcError {
+			method_name,
+			source: err,
+		}
+	}
 }
 
 impl StellarClient<StellarTransportClient> {
@@ -149,7 +197,8 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 					"start_sequence {} cannot be greater than end_sequence {}",
 					start_sequence, end_sequence
 				));
-				return Err(anyhow::anyhow!(input_error));
+				return Err(anyhow::anyhow!(input_error))
+					.context("Invalid input parameters for Stellar RPC");
 			}
 		}
 
@@ -190,18 +239,22 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						.get("result")
 						.and_then(|r| r.get("transactions"))
 						.ok_or_else(|| {
-							StellarClientError::ResponseParseError {
+							let sce_parse_error = StellarClientError::ResponseParseError {
 								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
 								method_name: RPC_METHOD_GET_TRANSACTIONS,
-							}
+							};
+							anyhow::anyhow!(sce_parse_error)
+								.context("Failed to parse transactions from response")
 						})?;
 
 					let ledger_transactions: Vec<StellarTransactionInfo> =
 						serde_json::from_value(raw_transactions.clone()).map_err(|e| {
-							StellarClientError::ResponseParseError {
+							let sce_parse_error = StellarClientError::ResponseParseError {
 								source: e,
 								method_name: RPC_METHOD_GET_TRANSACTIONS,
-							}
+							};
+							anyhow::anyhow!(sce_parse_error)
+								.context("Failed to parse transactions from response")
 						})?;
 
 					if ledger_transactions.is_empty() {
@@ -227,7 +280,17 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 				// TODO: consider returning structured errors from the transport layer
 				Err(anyhow_transport_err) => {
 					// Parse transport error
-					// TODO: implement error parsing logic
+					let ledger_info = format!(
+						"start_sequence: {}, end_sequence: {:?}",
+						start_sequence, end_sequence
+					);
+					let stellar_client_error = self.handle_transport_error(
+						anyhow_transport_err,
+						ledger_info,
+						RPC_METHOD_GET_TRANSACTIONS,
+					);
+					return Err(anyhow::anyhow!(stellar_client_error))
+						.context("Failed to get transactions from Stellar RPC");
 				}
 			}
 		}
@@ -252,7 +315,8 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 					"start_sequence {} cannot be greater than end_sequence {}",
 					start_sequence, end_sequence
 				));
-				return Err(anyhow::anyhow!(input_error));
+				return Err(anyhow::anyhow!(input_error))
+					.context("Invalid input parameters for Stellar RPC");
 			}
 		}
 
@@ -299,18 +363,22 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						.get("result")
 						.and_then(|r| r.get("events"))
 						.ok_or_else(|| {
-							StellarClientError::ResponseParseError {
+							let sce_parse_error = StellarClientError::ResponseParseError {
 								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
 								method_name: RPC_METHOD_GET_EVENTS,
-							}
+							};
+							anyhow::anyhow!(sce_parse_error)
+								.context("Failed to parse events from response")
 						})?;
 
 					let ledger_events: Vec<StellarEvent> =
 						serde_json::from_value(raw_events.clone()).map_err(|e| {
-							StellarClientError::ResponseParseError {
+							let sce_parse_error = StellarClientError::ResponseParseError {
 								source: e,
 								method_name: RPC_METHOD_GET_EVENTS,
-							}
+							};
+							anyhow::anyhow!(sce_parse_error)
+								.context("Failed to parse events from response")
 						})?;
 
 					if ledger_events.is_empty() {
@@ -333,10 +401,19 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						break;
 					}
 				}
-				// TODO: consider returning structured errors from the transport layer
 				Err(anyhow_transport_err) => {
 					// Parse transport error
-					// TODO: implement error parsing logic
+					let ledger_info = format!(
+						"start_sequence: {}, end_sequence: {:?}",
+						start_sequence, end_sequence
+					);
+					let stellar_client_error = self.handle_transport_error(
+						anyhow_transport_err,
+						ledger_info,
+						RPC_METHOD_GET_EVENTS,
+					);
+					return Err(anyhow::anyhow!(stellar_client_error))
+						.context("Failed to get events from Stellar RPC");
 				}
 			}
 		}
@@ -395,7 +472,8 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 					"start_block {} cannot be greater than end_block {}",
 					start_block, end_block
 				));
-				return Err(anyhow::anyhow!(input_error));
+				return Err(anyhow::anyhow!(input_error))
+					.context("Invalid input parameters for Stellar RPC");
 			}
 		}
 
@@ -434,16 +512,22 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 						.get("result")
 						.and_then(|r| r.get("ledgers"))
 						.ok_or_else(|| {
-							StellarClientError::ResponseParseError {
+							let sce_parse_error = StellarClientError::ResponseParseError {
 								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
 								method_name: RPC_METHOD_GET_LEDGERS,
-							}
+							};
+							anyhow::anyhow!(sce_parse_error)
+								.context("Failed to parse ledgers from response")
 						})?;
 
 					let ledgers: Vec<StellarBlock> = serde_json::from_value(raw_ledgers.clone())
-						.map_err(|e| StellarClientError::ResponseParseError {
-							source: e,
-							method_name: RPC_METHOD_GET_LEDGERS,
+						.map_err(|e| {
+							let sce_parse_error = StellarClientError::ResponseParseError {
+								source: e,
+								method_name: RPC_METHOD_GET_LEDGERS,
+							};
+							anyhow::anyhow!(sce_parse_error)
+								.context("Failed to parse ledgers from response")
 						})?;
 
 					if ledgers.is_empty() {
@@ -472,10 +556,17 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 						break;
 					}
 				}
-				// TODO: consider returning structured errors from the transport layer
 				Err(anyhow_transport_err) => {
 					// Parse transport error
-					// TODO: implement error parsing logic
+					let ledger_info =
+						format!("start_block: {}, end_block: {:?}", start_block, end_block);
+					let stellar_client_error = self.handle_transport_error(
+						anyhow_transport_err,
+						ledger_info,
+						RPC_METHOD_GET_LEDGERS,
+					);
+					return Err(anyhow::anyhow!(stellar_client_error))
+						.context("Failed to get ledgers from Stellar RPC");
 				}
 			}
 		}
@@ -562,4 +653,19 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 			contract_spec,
 		)))
 	}
+}
+
+// TODO: Remove once structured errors are implemented in the transport layer
+/// Helper function to parse status and body from an `anyhow::Error`
+fn parse_status_and_body_from_anyhow(err: &anyhow::Error) -> (Option<u16>, Option<String>) {
+	let err_string = err.to_string();
+	if let Some(http_error_part) = err_string.split("HTTP error ").nth(1) {
+		let parts: Vec<&str> = http_error_part.splitn(2, ':').collect();
+		if parts.len() == 2 {
+			let status_code = parts[0].trim().parse::<u16>().ok();
+			let body = parts[1].trim().to_string();
+			return (status_code, Some(body));
+		}
+	}
+	(None, None)
 }
