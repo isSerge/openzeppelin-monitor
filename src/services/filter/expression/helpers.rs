@@ -2,7 +2,8 @@
 
 use super::{
 	ast::{Accessor, ComparisonOperator, ConditionLeft, Expression, LogicalOperator},
-	evaluation::{ConditionEvaluator, EvaluationError},
+	error::EvaluationError,
+	evaluation::ConditionEvaluator,
 };
 
 /// Traverses the Expression AST and uses ConditionEvaluator to evaluate conditions
@@ -98,9 +99,15 @@ pub fn compare_ordered_values<T: Ord>(
 		ComparisonOperator::Gte => Ok(left >= right),
 		ComparisonOperator::Lt => Ok(left < right),
 		ComparisonOperator::Lte => Ok(left <= right),
-		_ => Err(EvaluationError::UnsupportedOperator {
-			op: format!("Unsupported operator for ordered types: {:?}", op),
-		}),
+		_ => {
+			let msg = format!(
+				"Unsupported operator '{:?}' for types: {:?} and {:?}",
+				op,
+				std::any::type_name::<T>(),
+				std::any::type_name::<T>()
+			);
+			Err(EvaluationError::unsupported_operator(msg, None, None))
+		}
 	}
 }
 
@@ -142,10 +149,11 @@ fn parse_base_value(
 	full_expr: &ConditionLeft<'_>,
 ) -> Result<serde_json::Value, EvaluationError> {
 	serde_json::from_str(base_value_str).map_err(|e| {
-			EvaluationError::ParseError(format!(
-					"Failed to parse value of base variable '{}' (kind: '{}', value: '{}') as JSON for path traversal. Error: {}. Full LHS: {:?}",
-					base_name, base_kind_str, base_value_str, e, full_expr
-			))
+		let msg = format!(
+			"Failed to parse value of base variable '{}' (kind: '{}', value: '{}') as JSON for path traversal. Full LHS: {:?}",
+			base_name, base_kind_str, base_value_str, full_expr,
+		);
+		EvaluationError::parse_error(msg, Some(e.into()), None)
 	})
 }
 
@@ -174,32 +182,29 @@ fn access_json_value(
 	match accessor {
 		Accessor::Index(idx) => {
 			let arr = current_json.as_array().ok_or_else(|| {
-				EvaluationError::TypeMismatch(format!(
-					"Array access on non-array at '{}'",
-					path_segment
-				))
+				let msg = format!("Array access on non-array at '{}'", path_segment);
+				EvaluationError::type_mismatch(msg, None, None)
 			})?;
 
 			arr.get(*idx).cloned().ok_or_else(|| {
-				EvaluationError::IndexOutOfBounds(format!(
-					"Index {} OOB at '{}'",
-					idx, path_segment
-				))
+				let msg = format!(
+					"Index {} out of bounds for array of length {} at '{}'",
+					idx,
+					arr.len(),
+					path_segment
+				);
+				EvaluationError::index_out_of_bounds(msg, None, None)
 			})
 		}
 		Accessor::Key(key) => {
 			let obj = current_json.as_object().ok_or_else(|| {
-				EvaluationError::TypeMismatch(format!(
-					"Key access on non-object at '{}'",
-					path_segment
-				))
+				let msg = format!("Key access on non-object at '{}'", path_segment);
+				EvaluationError::type_mismatch(msg, None, None)
 			})?;
 
 			obj.get(*key).cloned().ok_or_else(|| {
-				EvaluationError::FieldNotFound(format!(
-					"Key '{}' not found at '{}'",
-					key, path_segment
-				))
+				let msg = format!("Key '{}' not found at '{}'", key, path_segment);
+				EvaluationError::field_not_found(msg, None, None)
 			})
 		}
 	}
@@ -215,32 +220,32 @@ mod tests {
 	#[test]
 	fn test_compare_ordered_values_integers() {
 		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Eq, &5),
-			Ok(true)
+			compare_ordered_values(&5, &ComparisonOperator::Eq, &5).unwrap(),
+			true
 		);
 		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Eq, &10),
-			Ok(false)
+			compare_ordered_values(&5, &ComparisonOperator::Eq, &10).unwrap(),
+			false
 		);
 		assert_eq!(
-			compare_ordered_values(&10, &ComparisonOperator::Gt, &5),
-			Ok(true)
+			compare_ordered_values(&10, &ComparisonOperator::Gt, &5).unwrap(),
+			true
 		);
 		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Lt, &10),
-			Ok(true)
+			compare_ordered_values(&5, &ComparisonOperator::Lt, &10).unwrap(),
+			true
 		);
 		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Gte, &5),
-			Ok(true)
+			compare_ordered_values(&5, &ComparisonOperator::Gte, &5).unwrap(),
+			true
 		);
 		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Lte, &5),
-			Ok(true)
+			compare_ordered_values(&5, &ComparisonOperator::Lte, &5).unwrap(),
+			true
 		);
 		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Ne, &10),
-			Ok(true)
+			compare_ordered_values(&5, &ComparisonOperator::Ne, &10).unwrap(),
+			true
 		);
 	}
 
@@ -249,7 +254,7 @@ mod tests {
 		let result = compare_ordered_values(&5, &ComparisonOperator::Contains, &5);
 		assert!(matches!(
 			result,
-			Err(EvaluationError::UnsupportedOperator { .. })
+			Err(EvaluationError::UnsupportedOperator(_))
 		));
 	}
 

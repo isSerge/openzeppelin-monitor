@@ -29,19 +29,18 @@ impl<'a> StellarConditionEvaluator<'a> {
 		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		let Ok(left) = lhs_str.parse::<bool>() else {
-			return Err(EvaluationError::ParseError(format!(
-				"Failed to parse bool parameter value: {}",
-				lhs_str
-			)));
+			let msg = format!("Failed to parse bool parameter value: {}", lhs_str);
+			return Err(EvaluationError::parse_error(msg, None, None));
 		};
 
 		let right = match rhs_literal {
 			LiteralValue::Bool(b) => *b,
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected bool literal for comparison, found: {:?}",
 					rhs_literal
-				)))
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
@@ -50,9 +49,13 @@ impl<'a> StellarConditionEvaluator<'a> {
 		match operator {
 			ComparisonOperator::Eq => Ok(left == right),
 			ComparisonOperator::Ne => Ok(left != right),
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!("Unsupported operator: {:?}", operator),
-			}),
+			_ => {
+				let msg = format!(
+					"Unsupported operator {:?} for Stellar bool comparison",
+					operator
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
 		}
 	}
 
@@ -67,28 +70,28 @@ impl<'a> StellarConditionEvaluator<'a> {
 		<T as std::str::FromStr>::Err: std::fmt::Debug,
 	{
 		let left = lhs_str.parse::<T>().map_err(|_| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse numeric parameter value: {}",
-				lhs_str
-			))
+			let msg = format!("Failed to parse numeric parameter value: {}", lhs_str);
+			EvaluationError::parse_error(msg, None, None)
 		})?;
 
 		let rhs_str = match rhs_literal {
 			LiteralValue::Number(s) => s,
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected number literal for {} comparison",
 					std::any::type_name::<T>()
-				)))
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
 		let right = rhs_str.parse::<T>().map_err(|_| {
-			EvaluationError::ParseError(format!(
+			let msg = format!(
 				"Failed to parse comparison value '{}' as {}",
 				rhs_str,
 				std::any::type_name::<T>()
-			))
+			);
+			EvaluationError::parse_error(msg, None, None)
 		})?;
 
 		compare_ordered_values(&left, operator, &right)
@@ -105,10 +108,11 @@ impl<'a> StellarConditionEvaluator<'a> {
 			LiteralValue::Number(s) => s,
 			LiteralValue::Str(s) => s,
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected number or string literal for i256 comparison, found: {:?}",
 					rhs_literal
-				)))
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
@@ -121,12 +125,13 @@ impl<'a> StellarConditionEvaluator<'a> {
 		match operator {
 			ComparisonOperator::Eq => Ok(lhs_str == *right),
 			ComparisonOperator::Ne => Ok(lhs_str != *right),
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!(
+			_ => {
+				let msg = format!(
 					"Operator {:?} not supported for i256 string comparison",
 					operator
-				),
-			}),
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
 		}
 	}
 
@@ -144,10 +149,11 @@ impl<'a> StellarConditionEvaluator<'a> {
 		let right_str = match rhs_literal {
 			LiteralValue::Str(s) => *s,
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected string literal for {} comparison, found: {:?}",
 					lhs_kind, rhs_literal
-				)))
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
@@ -181,12 +187,13 @@ impl<'a> StellarConditionEvaluator<'a> {
 			ComparisonOperator::StartsWith => Ok(left_normalized.starts_with(&right_normalized)),
 			ComparisonOperator::EndsWith => Ok(left_normalized.ends_with(&right_normalized)),
 			ComparisonOperator::Contains => Ok(left_normalized.contains(&right_normalized)),
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!(
+			_ => {
+				let msg = format!(
 					"Operator {:?} not supported for type {}",
 					operator, lhs_kind
-				),
-			}),
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
 		}
 	}
 }
@@ -197,7 +204,10 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 			.iter()
 			.find(|entry| entry.name == name)
 			.map(|entry| (entry.value.as_str(), entry.kind.as_str()))
-			.ok_or_else(|| EvaluationError::VariableNotFound(name.to_string()))
+			.ok_or_else(|| {
+				let msg = format!("Base parameter not found: {}", name);
+				EvaluationError::variable_not_found(msg, None, None)
+			})
 	}
 
 	fn get_kind_from_json_value(&self, value: &serde_json::Value) -> String {
@@ -228,10 +238,10 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 				operator,
 				rhs_literal,
 			),
-			unknown_type => Err(EvaluationError::TypeMismatch(format!(
-				"Unknown parameter type: {}",
-				unknown_type
-			))),
+			unknown_type => {
+				let msg = format!("Unknown parameter type: {}", unknown_type);
+				Err(EvaluationError::type_mismatch(msg, None, None))
+			}
 		}
 	}
 }

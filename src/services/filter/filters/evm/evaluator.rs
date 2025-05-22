@@ -38,28 +38,25 @@ impl<'a> EVMConditionEvaluator<'a> {
 		right_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		let left = string_to_u256(left_str).map_err(|error| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse LHS value '{}' as U256: {}",
-				left_str, error,
-			))
+			let msg = format!("Failed to parse LHS value '{}' as U256", left_str,);
+			EvaluationError::parse_error(msg, Some(error.into()), None)
 		})?;
 
 		let right_str = match right_literal {
 			LiteralValue::Number(s) => s,
 			LiteralValue::Str(s) => s,
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected number or string literal for U256 comparison with found: {:?}",
 					right_literal
-				)));
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
 		let right = string_to_u256(right_str).map_err(|error| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse RHS value '{}' as U256: {}",
-				right_str, error,
-			))
+			let msg = format!("Failed to parse RHS value '{}' as U256", right_str,);
+			EvaluationError::parse_error(msg, Some(error.into()), None)
 		})?;
 
 		tracing::debug!(
@@ -80,28 +77,25 @@ impl<'a> EVMConditionEvaluator<'a> {
 		right_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		let left = string_to_i256(left_str).map_err(|error| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse LHS value '{}' as I256: {}",
-				left_str, error,
-			))
+			let msg = format!("Failed to parse LHS value '{}' as I256", left_str,);
+			EvaluationError::parse_error(msg, Some(error.into()), None)
 		})?;
 
 		let right_str = match right_literal {
 			LiteralValue::Number(s) => s, // e.g., "-10", "10", "0x0A" (if string_to_i256 handles hex)
 			LiteralValue::Str(s) => s,    // e.g., "'-10'", "'0x0A'"
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected number or string literal for I256 comparison, found: {:?}",
 					right_literal
-				)));
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
 		let right = string_to_i256(right_str).map_err(|error| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse RHS value '{}' as I256: {}",
-				right_str, error,
-			))
+			let msg = format!("Failed to parse RHS value '{}' as I256", right_str,);
+			EvaluationError::parse_error(msg, Some(error.into()), None)
 		})?;
 
 		tracing::debug!(
@@ -125,10 +119,11 @@ impl<'a> EVMConditionEvaluator<'a> {
 		let right = match right_literal {
 			LiteralValue::Str(str) => *str,
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected string literal for address comparison, found: {:?}",
 					right_literal
-				)));
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
@@ -137,9 +132,10 @@ impl<'a> EVMConditionEvaluator<'a> {
 		match operator {
 			ComparisonOperator::Eq => Ok(are_same_address(left, right)),
 			ComparisonOperator::Ne => Ok(!are_same_address(left, right)),
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!("Unsupported operator for address type: {:?}", operator),
-			}),
+			_ => {
+				let msg = format!("Unsupported operator for address type: {:?}", operator);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
 		}
 	}
 
@@ -157,10 +153,11 @@ impl<'a> EVMConditionEvaluator<'a> {
 		let right = match rhs_literal {
 			LiteralValue::Str(s) => s.to_lowercase(),
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
-					"Expected string literal comparison, found: {:?}",
+				let msg = format!(
+					"Expected string literal for string comparison, found: {:?}",
 					rhs_literal
-				)));
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
@@ -177,9 +174,10 @@ impl<'a> EVMConditionEvaluator<'a> {
 			ComparisonOperator::StartsWith => Ok(left.starts_with(&right)),
 			ComparisonOperator::EndsWith => Ok(left.ends_with(&right)),
 			ComparisonOperator::Contains => Ok(left.contains(&right)),
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!("Operator {:?} not supported for type String", operator),
-			}),
+			_ => {
+				let msg = format!("Operator {:?} not supported for type String", operator);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
 		}
 	}
 
@@ -191,10 +189,8 @@ impl<'a> EVMConditionEvaluator<'a> {
 		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		let left_decimal = Decimal::from_str(lhs_str).map_err(|e| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse LHS value '{}' as Decimal: {}",
-				lhs_str, e
-			))
+			let msg = format!("Failed to parse LHS value '{}' as Decimal", lhs_str);
+			EvaluationError::parse_error(msg, Some(e.into()), None)
 		})?;
 
 		// RHS must now be parsed from Number(&str) or Str(&str)
@@ -202,18 +198,17 @@ impl<'a> EVMConditionEvaluator<'a> {
 			LiteralValue::Number(s) => *s,
 			LiteralValue::Str(s) => *s, // If user quoted a numeric string e.g., '123.45'
 			_ => {
-				return Err(EvaluationError::TypeMismatch(format!(
+				let msg = format!(
 					"Expected number or string literal for Decimal comparison, found: {:?}",
 					rhs_literal
-				)));
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 
 		let right_decimal = Decimal::from_str(rhs_str).map_err(|e| {
-			EvaluationError::ParseError(format!(
-				"Failed to parse RHS value '{}' as Decimal: {}",
-				rhs_str, e
-			))
+			let msg = format!("Failed to parse RHS value '{}' as Decimal", rhs_str);
+			EvaluationError::parse_error(msg, Some(e.into()), None)
 		})?;
 
 		tracing::debug!(
@@ -235,22 +230,29 @@ impl<'a> EVMConditionEvaluator<'a> {
 		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		let lhs = lhs_value_str.parse::<bool>().map_err(|_| {
-			EvaluationError::ParseError(format!("Invalid EVM bool LHS: {}", lhs_value_str))
+			let msg = format!("Failed to parse LHS value '{}' as bool", lhs_value_str);
+			EvaluationError::parse_error(msg, None, None)
 		})?;
 		let rhs = match rhs_literal {
 			LiteralValue::Bool(b) => *b,
 			_ => {
-				return Err(EvaluationError::TypeMismatch(
-					"Expected bool literal for EVM Bool comparison".into(),
-				))
+				let msg = format!(
+					"Expected bool literal for EVM Bool comparison, found: {:?}",
+					rhs_literal
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
 			}
 		};
 		match operator {
 			ComparisonOperator::Eq => Ok(lhs == rhs),
 			ComparisonOperator::Ne => Ok(lhs != rhs),
-			_ => Err(EvaluationError::UnsupportedOperator {
-				op: format!("Unsupported op {:?} for EVM Bool", operator),
-			}),
+			_ => {
+				let msg = format!(
+					"Unsupported operator {:?} for EVM Bool comparison",
+					operator
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
 		}
 	}
 }
@@ -261,7 +263,10 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 			.iter()
 			.find(|p| p.name == name)
 			.map(|p| (p.value.as_str(), p.kind.as_str()))
-			.ok_or_else(|| EvaluationError::VariableNotFound(name.to_string()))
+			.ok_or_else(|| {
+				let msg = format!("Base parameter not found: {}", name);
+				EvaluationError::variable_not_found(msg, None, None)
+			})
 	}
 
 	fn compare_final_values(
@@ -296,10 +301,13 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 				self.compare_string(lhs_value_str, operator, rhs_literal)
 			}
 			"bool" => self.compare_boolean(lhs_value_str, operator, rhs_literal),
-			_ => Err(EvaluationError::TypeMismatch(format!(
-				"Unsupported EVM parameter kind for comparison: {}",
-				lhs_kind_str
-			))),
+			_ => {
+				let msg = format!(
+					"Unsupported EVM parameter kind for comparison: {}",
+					lhs_kind_str
+				);
+				Err(EvaluationError::type_mismatch(msg, None, None))
+			}
 		}
 	}
 
@@ -474,7 +482,7 @@ mod tests {
 				&ComparisonOperator::StartsWith,
 				&LiteralValue::Number("123")
 			),
-			Err(EvaluationError::UnsupportedOperator { op: _ })
+			Err(EvaluationError::UnsupportedOperator(_))
 		));
 	}
 
@@ -609,7 +617,7 @@ mod tests {
 				&ComparisonOperator::StartsWith,
 				&LiteralValue::Number("-123")
 			),
-			Err(EvaluationError::UnsupportedOperator { op: _ })
+			Err(EvaluationError::UnsupportedOperator(_))
 		));
 	}
 
@@ -677,7 +685,7 @@ mod tests {
 				&ComparisonOperator::Gte,
 				&LiteralValue::Str("0x0987654321098765432109876543210987654321")
 			),
-			Err(EvaluationError::UnsupportedOperator { op: _ })
+			Err(EvaluationError::UnsupportedOperator(_))
 		));
 	}
 
@@ -793,7 +801,7 @@ mod tests {
 				&ComparisonOperator::Gte,
 				&LiteralValue::Str("test_value_2")
 			),
-			Err(EvaluationError::UnsupportedOperator { op: _ })
+			Err(EvaluationError::UnsupportedOperator(_))
 		));
 	}
 
@@ -945,7 +953,7 @@ mod tests {
 				&ComparisonOperator::StartsWith,
 				&LiteralValue::Number("123.456")
 			),
-			Err(EvaluationError::UnsupportedOperator { op: _ })
+			Err(EvaluationError::UnsupportedOperator(_))
 		));
 	}
 
@@ -1003,7 +1011,7 @@ mod tests {
 		// Unsupported operator error
 		assert!(matches!(
 			evaluator.compare_boolean("true", &ComparisonOperator::Gte, &LiteralValue::Bool(true)),
-			Err(EvaluationError::UnsupportedOperator { op: _ })
+			Err(EvaluationError::UnsupportedOperator(_))
 		));
 	}
 
