@@ -85,8 +85,46 @@ impl<'a> StellarConditionEvaluator<'a> {
 		);
 
 		match operator {
-			ComparisonOperator::Eq => Ok(lhs_str == rhs_target_str),
-			ComparisonOperator::Ne => Ok(lhs_str != rhs_target_str),
+			ComparisonOperator::Eq | ComparisonOperator::Ne => {
+				let lhs_as_json: Option<JsonValue> = serde_json::from_str(lhs_str).ok();
+				let rhs_as_json: Option<JsonValue> = serde_json::from_str(rhs_target_str).ok();
+
+				// Helper closure to compare two strings as normalized CSV lists
+				let compare_strings_as_normalized_csv = |s1: &str, s2: &str| {
+					let normalize_to_vec = |s: &str| -> Vec<String> {
+						s.split(',')
+							.map(|part| part.trim().to_lowercase())
+							.collect()
+					};
+					normalize_to_vec(s1) == normalize_to_vec(s2)
+				};
+
+				let are_equal = match (lhs_as_json, rhs_as_json) {
+					// Both strings parsed successfully as JSON
+					(Some(lhs_json_val), Some(rhs_json_val)) => {
+						match (lhs_json_val.is_array(), rhs_json_val.is_array()) {
+							// Both are JSON arrays - compare them semantically
+							(true, true) => lhs_json_val == rhs_json_val,
+							// One is a JSON array, the other is valid JSON but not an array. Not equal as 'vec' types.
+							(true, false) | (false, true) => false,
+							// Both are valid JSON, but NEITHER is an array. Fallback to comparing original string forms as CSV.
+							(false, false) => {
+								compare_strings_as_normalized_csv(lhs_str, rhs_target_str)
+							}
+						}
+					}
+					// Neither string could be parsed as JSON - treat both as CSV
+					(None, None) => compare_strings_as_normalized_csv(lhs_str, rhs_target_str),
+					// One parsed as JSON, the other didn't - not equal
+					(Some(_), None) | (None, Some(_)) => false,
+				};
+
+				Ok(if *operator == ComparisonOperator::Eq {
+					are_equal
+				} else {
+					!are_equal
+				})
+			}
 			ComparisonOperator::Contains => {
 				// Try to parse lhs_str as a JSON array
 				if let Ok(json_array) = serde_json::from_str::<Vec<JsonValue>>(lhs_str) {
@@ -102,7 +140,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 					});
 					Ok(found)
 				} else {
-					// Fallback to comma-separated string behavior if not a valid JSON array
+					// Fallback to CSV
 					tracing::debug!(
 						"LHS for 'vec' ('{}') not valid JSON array, falling back to CSV check for value '{}'",
 						lhs_str, rhs_target_str
@@ -993,6 +1031,163 @@ mod tests {
 				&LiteralValue::Str(r#"["a", "c"]"#)
 			)
 			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_vec_eq_ne_json_vs_json_semantic() {
+		let evaluator = create_evaluator();
+
+		// --- Eq: Both JSON arrays ---
+		assert!(evaluator
+			.compare_vec(
+				r#"[1, 2, "hello"]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[1,2, "hello"]"#)
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_vec(
+				r#"["Foo", "Bar"]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[ "Foo", "Bar" ]"#)
+			)
+			.unwrap(),);
+
+		// Case sensitivity for string elements (serde_json::Value default behavior)
+		assert!(!evaluator
+			.compare_vec(
+				r#"["Alice"]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"["alice"]"#)
+			)
+			.unwrap(),);
+
+		// Order matters
+		assert!(!evaluator
+			.compare_vec(
+				r#"[1, 2]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[2, 1]"#)
+			)
+			.unwrap(),);
+
+		// --- Ne: Both JSON arrays ---
+		assert!(!evaluator
+			.compare_vec(
+				r#"[1, 2, 3]"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"[1,2,3]"#)
+			)
+			.unwrap(),);
+		assert!(evaluator
+			.compare_vec(
+				r#"["Alice"]"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"["alice"]"#)
+			)
+			.unwrap(),);
+	}
+
+	#[test]
+	fn test_compare_vec_eq_ne_csv_vs_csv_normalized() {
+		let evaluator = create_evaluator();
+
+		// --- Eq: Both CSV-like ---
+		assert!(evaluator
+			.compare_vec(
+				"alice, bob, charlie",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("alice,bob,charlie")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_vec(
+				"ALICE, BOB",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("alice,bob")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_vec(
+				"  leading,trailing  ",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("leading,trailing")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_vec("one", &ComparisonOperator::Eq, &LiteralValue::Str("ONE"))
+			.unwrap(),);
+		assert!(evaluator
+			.compare_vec(
+				"", // LHS empty CSV
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("") // RHS empty CSV
+			)
+			.unwrap(),);
+
+		// Order matters for CSV as well after normalization
+		assert!(!evaluator
+			.compare_vec(
+				"alice,bob",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("bob,alice")
+			)
+			.unwrap(),);
+
+		// Different content
+		assert!(!evaluator
+			.compare_vec(
+				"alice,bob",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("alice,charlie")
+			)
+			.unwrap(),);
+
+		// --- Ne: Both CSV-like ---
+		assert!(!evaluator
+			.compare_vec(
+				"alice, bob",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("ALICE,BOB")
+			)
+			.unwrap(),);
+		assert!(evaluator
+			.compare_vec(
+				"alice,bob",
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("bob,alice")
+			)
+			.unwrap(),);
+	}
+
+	#[test]
+	fn test_compare_vec_eq_ne_json_vs_csv() {
+		let evaluator = create_evaluator();
+
+		// Eq: JSON vs CSV - should be false
+		assert!(!evaluator
+			.compare_vec(
+				r#"["alice", "bob"]"#, // LHS JSON
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str("alice,bob") // RHS CSV
+			)
+			.unwrap(),);
+		assert!(!evaluator
+			.compare_vec(
+				"alice,bob", // LHS CSV
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"["alice", "bob"]"#) // RHS JSON
+			)
+			.unwrap(),);
+
+		// Ne: JSON vs CSV - should be true
+		assert!(evaluator
+			.compare_vec(
+				r#"["alice", "bob"]"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str("alice,bob")
+			)
+			.unwrap(),);
 	}
 
 	#[test]

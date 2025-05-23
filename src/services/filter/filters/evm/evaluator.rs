@@ -60,10 +60,26 @@ impl<'a> EVMConditionEvaluator<'a> {
 	) -> Result<bool, EvaluationError> {
 		let rhs_target_str = match rhs_literal {
 			LiteralValue::Str(s) => *s,
-			LiteralValue::Number(s) => *s,
+			LiteralValue::Number(s) => {
+				if *operator == ComparisonOperator::Contains {
+					*s // For Contains, we search for this number (as string)
+				} else {
+					// For Eq/Ne, a number literal cannot be equal to a JSON array string.
+					let msg = format!(
+							"Expected string literal (representing a JSON array) for EVM 'array' Eq/Ne comparison, found number: {:?}",
+							rhs_literal
+					);
+					return Err(EvaluationError::type_mismatch(msg, None, None));
+				}
+			}
 			_ => {
 				let msg = format!(
-					"Expected string or number literal for EVM 'array' comparison, found: {:?}",
+					"Expected string literal for EVM 'array' {} comparison, found: {:?}",
+					if *operator == ComparisonOperator::Contains {
+						"Contains"
+					} else {
+						"Eq/Ne"
+					},
 					rhs_literal
 				);
 				return Err(EvaluationError::type_mismatch(msg, None, None));
@@ -78,8 +94,41 @@ impl<'a> EVMConditionEvaluator<'a> {
 		);
 
 		match operator {
-			ComparisonOperator::Eq => Ok(lhs_json_array_str == rhs_target_str),
-			ComparisonOperator::Ne => Ok(lhs_json_array_str != rhs_target_str),
+			ComparisonOperator::Eq | ComparisonOperator::Ne => {
+				let lhs_json_value = serde_json::from_str::<JsonValue>(lhs_json_array_str)
+					.map_err(|e| {
+						let msg = format!(
+							"Failed to parse LHS value '{}' as JSON array for 'Eq/Ne' operator",
+							lhs_json_array_str
+						);
+						EvaluationError::parse_error(msg, Some(e.into()), None)
+					})?;
+
+				let rhs_json_value =
+					serde_json::from_str::<JsonValue>(rhs_target_str).map_err(|e| {
+						let msg = format!(
+							"Failed to parse RHS value '{}' as JSON array for 'Eq/Ne' operator",
+							rhs_target_str
+						);
+						EvaluationError::parse_error(msg, Some(e.into()), None)
+					})?;
+
+				// Ensure both parsed values are actually arrays
+				if !lhs_json_value.is_array() || !rhs_json_value.is_array() {
+					let msg = format!(
+							"For 'array' Eq/Ne comparison, both LHS ('{}') and RHS ('{}') must resolve to JSON arrays.",
+							lhs_json_array_str, rhs_target_str
+					);
+					return Err(EvaluationError::type_mismatch(msg, None, None));
+				}
+
+				let are_equal = lhs_json_value == rhs_json_value;
+				Ok(if *operator == ComparisonOperator::Eq {
+					are_equal
+				} else {
+					!are_equal
+				})
+			}
 			ComparisonOperator::Contains => {
 				let json_array = serde_json::from_str::<Vec<JsonValue>>(lhs_json_array_str)
 					.map_err(|e| {
@@ -1230,6 +1279,101 @@ mod tests {
 			.unwrap());
 		assert!(evaluator
 			.compare_array(lhs1, &ComparisonOperator::Ne, &LiteralValue::Str(lhs2))
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_array_semantic_json_equality() {
+		let evaluator = create_evaluator();
+
+		// --- Test Eq ---
+		// Basic semantic equality (whitespace)
+		assert!(evaluator
+			.compare_array(
+				r#"[1, 2, 3]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[1,2,3]"#)
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				r#"["a", "b"]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[ "a", "b" ]"#)
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				r#"[{"id":1}, {"id":2}]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[ { "id" : 1 } , { "id" : 2 } ]"#)
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				r#"[]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[]"#)
+			)
+			.unwrap());
+
+		// Case sensitivity for string elements (serde_json::Value default behavior)
+		assert!(!evaluator
+			.compare_array(
+				r#"["Alice"]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"["alice"]"#)
+			)
+			.unwrap());
+
+		// Order matters
+		assert!(!evaluator
+			.compare_array(
+				r#"[1, 2]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[2, 1]"#)
+			)
+			.unwrap());
+
+		// Different types: string vs number
+		assert!(!evaluator
+			.compare_array(
+				r#"[1, 2]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"["1", "2"]"#)
+			)
+			.unwrap());
+
+		// Different lengths
+		assert!(!evaluator
+			.compare_array(
+				r#"[1, 2]"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"[1, 2, 3]"#)
+			)
+			.unwrap());
+
+		// --- Test Ne ---
+		assert!(!evaluator
+			.compare_array(
+				r#"[1, 2, 3]"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"[1,2,3]"#)
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				r#"["Alice"]"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"["alice"]"#)
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				r#"[1, 2]"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"[2, 1]"#)
+			)
 			.unwrap());
 	}
 
