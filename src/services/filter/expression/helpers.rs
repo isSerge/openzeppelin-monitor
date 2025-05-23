@@ -15,6 +15,7 @@ pub fn evaluate(
 ) -> Result<bool, EvaluationError> {
 	match expression {
 		Expression::Condition(condition) => {
+			println!("{:?}", condition.left);
 			let base_name = condition.left.base_name();
 			let accessors = condition.left.accessors();
 			let (base_value_str, base_kind_str) = evaluator.get_base_param(base_name)?;

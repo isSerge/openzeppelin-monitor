@@ -169,23 +169,29 @@ fn parse_accessor<'a>(input: &mut Input<'a>) -> ParserResult<Accessor<'a>> {
 
 	let key_parser = (
 		literal("."),
-		(
-			one_of(|c: char| c.is_alpha() || c == '_'),
-			take_while(0.., |c: char| c.is_alphanum() || c == '_'),
-		)
-			.take(),
+		// Allow key to be purely numeric OR start with alpha/_
+		alt((
+			// Standard identifier-like key
+			(
+				one_of(|c: char| c.is_alpha() || c == '_'),
+				take_while(0.., |c: char| c.is_alphanum() || c == '_'),
+			)
+				.take(),
+			// Purely numeric key (e.g., ".0", ".123")
+			digit1.take(),
+		)),
 		// Ensure it's properly delimited
 		peek(alt((
-			space1.value(()),       // space
-			eof.value(()),          // end of input
-			literal("[").value(()), // start of index accessor
-			literal(".").value(()), // start of another key accessor
-			one_of(['=', '!', '>', '<', ')', '(']).value(()),
+			space1.value(()),                                 // space
+			eof.value(()),                                    // end of input
+			literal("[").value(()),                           // start of index accessor
+			literal(".").value(()),                           // start of another key accessor
+			one_of(['=', '!', '>', '<', ')', '(']).value(()), // Operators or delimiters
 		))),
 	)
 		.map(|(_, key_slice, _): (_, &str, _)| Accessor::Key(key_slice))
 		.context(StrContext::Expected(StrContextValue::Description(
-			"object key accessor like '.key'",
+			"object key accessor like '.key' or '.0'",
 		)));
 
 	alt((index_parser, key_parser)).parse_next(input)
@@ -642,6 +648,11 @@ mod tests {
 			"",
 		);
 		assert_parses_ok(parse_accessor, "[0].next", Accessor::Index(0), ".next");
+		// Numeric keys
+		assert_parses_ok(parse_accessor, ".0", Accessor::Key("0"), "");
+		assert_parses_ok(parse_accessor, ".123", Accessor::Key("123"), "");
+		assert_parses_ok(parse_accessor, ".0.next", Accessor::Key("0"), ".next"); // Numeric key followed by another accessor
+		assert_parses_ok(parse_accessor, ".45[0]", Accessor::Key("45"), "[0]"); // Numeric key followed by index
 
 		// Failures
 		assert_parse_fails(parse_accessor, "keyName"); // Missing .
@@ -709,6 +720,46 @@ mod tests {
 			ConditionLeft::Path(VariablePath {
 				base: "0",
 				accessors: vec![Accessor::Key("field")],
+			}),
+			"",
+		);
+		assert_parses_ok(
+			parse_condition_lhs,
+			"obj.0",
+			ConditionLeft::Path(VariablePath {
+				base: "obj",
+				accessors: vec![Accessor::Key("0")],
+			}),
+			"",
+		);
+		assert_parses_ok(
+			parse_condition_lhs,
+			"0.1", // e.g. base_param_named_0.field_named_1
+			ConditionLeft::Path(VariablePath {
+				base: "0",
+				accessors: vec![Accessor::Key("1")],
+			}),
+			"",
+		);
+		assert_parses_ok(
+			parse_condition_lhs,
+			"data.123.field",
+			ConditionLeft::Path(VariablePath {
+				base: "data",
+				accessors: vec![Accessor::Key("123"), Accessor::Key("field")],
+			}),
+			"",
+		);
+		assert_parses_ok(
+			parse_condition_lhs,
+			"map.0[1].name",
+			ConditionLeft::Path(VariablePath {
+				base: "map",
+				accessors: vec![
+					Accessor::Key("0"),
+					Accessor::Index(1),
+					Accessor::Key("name"),
+				],
 			}),
 			"",
 		);

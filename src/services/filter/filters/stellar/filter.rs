@@ -2740,7 +2740,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore = "This test is ignored because parser does not support this syntax yet"]
 	fn test_evaluate_expression_event_key_access() {
 		let filter = create_test_filter();
 
