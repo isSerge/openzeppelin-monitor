@@ -10,6 +10,7 @@ use crate::{
 	},
 };
 use rust_decimal::Decimal;
+use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
 type EVMArgs = Vec<EVMMatchParamEntry>;
@@ -27,6 +28,81 @@ pub struct EVMConditionEvaluator<'a> {
 impl<'a> EVMConditionEvaluator<'a> {
 	pub fn new(args: &'a EVMArgs) -> Self {
 		Self { args }
+	}
+
+	/// Helper to check if a serde_json::Value matches a target string.
+	/// Used by compare_array for items within a JSON array.
+	fn check_json_value_matches_str(&self, lhs_json: &JsonValue, rhs_str: &str) -> bool {
+		match lhs_json {
+			JsonValue::String(s) => {
+				if self.get_kind_from_json_value(lhs_json) == "address" {
+					are_same_address(s, rhs_str)
+				} else {
+					s.to_lowercase() == rhs_str.to_lowercase()
+				}
+			}
+			JsonValue::Number(n) => n.to_string() == rhs_str,
+			JsonValue::Bool(b) => b.to_string().to_lowercase() == rhs_str.to_lowercase(),
+			JsonValue::Object(nested_map) => nested_map
+				.values()
+				.any(|val_in_obj| self.check_json_value_matches_str(val_in_obj, rhs_str)),
+			JsonValue::Array(_) => false,
+			JsonValue::Null => rhs_str == "null",
+		}
+	}
+
+	/// Compares an "array" type parameter.
+	fn compare_array(
+		&self,
+		lhs_json_array_str: &str,
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let rhs_target_str = match rhs_literal {
+			LiteralValue::Str(s) => *s,
+			LiteralValue::Number(s) => *s,
+			_ => {
+				let msg = format!(
+					"Expected string or number literal for EVM 'array' comparison, found: {:?}",
+					rhs_literal
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
+			}
+		};
+
+		tracing::debug!(
+			"EVM Comparing array: lhs: '{}', operator: {:?}, rhs_target: '{}'",
+			lhs_json_array_str,
+			operator,
+			rhs_target_str
+		);
+
+		match operator {
+			ComparisonOperator::Eq => Ok(lhs_json_array_str == rhs_target_str),
+			ComparisonOperator::Ne => Ok(lhs_json_array_str != rhs_target_str),
+			ComparisonOperator::Contains => {
+				let json_array = serde_json::from_str::<Vec<JsonValue>>(lhs_json_array_str)
+					.map_err(|e| {
+						let msg = format!(
+							"Failed to parse LHS value '{}' as JSON array for 'contains' operator",
+							lhs_json_array_str
+						);
+						EvaluationError::parse_error(msg, Some(e.into()), None)
+					})?;
+
+				let found = json_array.iter().any(|item_in_array| {
+					self.check_json_value_matches_str(item_in_array, rhs_target_str)
+				});
+				Ok(found)
+			}
+			_ => {
+				let msg = format!(
+					"Operator {:?} not supported for EVM 'array' type. Supported: Eq, Ne, Contains.",
+					operator
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
+		}
 	}
 
 	/// Compares potential U256 LHS value with the RHS literal value
@@ -301,6 +377,7 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 				self.compare_string(lhs_value_str, operator, rhs_literal)
 			}
 			"bool" => self.compare_boolean(lhs_value_str, operator, rhs_literal),
+			"array" => self.compare_array(lhs_value_str, operator, rhs_literal),
 			_ => {
 				let msg = format!(
 					"Unsupported EVM parameter kind for comparison: {}",
@@ -1032,6 +1109,164 @@ mod tests {
 		));
 	}
 
+	// --- Test cases for compare_array ---
+	#[test]
+	fn test_compare_array_json_contains_simple_string() {
+		let evaluator = create_evaluator();
+		let lhs_json_array = r#"["alice", "bob", "charlie"]"#;
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("bob")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("charlie")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("dave")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_array_json_contains_number_as_string() {
+		let evaluator = create_evaluator();
+		let lhs_json_array = r#"[123, "test", 456, true]"#;
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Number("123")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("456")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("true")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_array_json_contains_address() {
+		let evaluator = create_evaluator();
+		let addr1 = "0x1234567890123456789012345678901234567890";
+		let addr1_mixed_case = "0x1234567890123456789012345678901234567890";
+		let lhs_json_array = format!(
+			r#"["0xAnotherAddress0000000000000000000000000", "{}", "text"]"#,
+			addr1_mixed_case
+		);
+
+		assert!(evaluator
+			.compare_array(
+				&lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str(addr1)
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_array_json_contains_in_object_field_value() {
+		let evaluator = create_evaluator();
+		let lhs_json_array = r#"[{"id": 1, "name": "Alice"}, {"id": 2, "token": "0xTokenAddress00000000000000000000000000"}]"#;
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("Alice")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("0xTokenAddress00000000000000000000000000")
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Number("2")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_array(
+				lhs_json_array,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("Bob")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_array_eq_ne_compares_raw_json_string() {
+		let evaluator = create_evaluator();
+		let lhs1 = r#"["alice", "bob"]"#;
+		let lhs2 = r#"["alice", "charlie"]"#;
+		assert!(evaluator
+			.compare_array(lhs1, &ComparisonOperator::Eq, &LiteralValue::Str(lhs1))
+			.unwrap());
+		assert!(!evaluator
+			.compare_array(lhs1, &ComparisonOperator::Eq, &LiteralValue::Str(lhs2))
+			.unwrap());
+		assert!(evaluator
+			.compare_array(lhs1, &ComparisonOperator::Ne, &LiteralValue::Str(lhs2))
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_array_errors() {
+		let evaluator = create_evaluator();
+		let valid_lhs_array_json = r#"["data"]"#;
+
+		assert!(matches!(
+			evaluator.compare_array(
+				valid_lhs_array_json,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Bool(true)
+			),
+			Err(EvaluationError::TypeMismatch(_))
+		));
+
+		let invalid_lhs_array_json = "not a json array";
+		assert!(matches!(
+			evaluator.compare_array(
+				invalid_lhs_array_json,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("data")
+			),
+			Err(EvaluationError::ParseError(_))
+		));
+
+		assert!(matches!(
+			evaluator.compare_array(
+				valid_lhs_array_json,
+				&ComparisonOperator::Gt,
+				&LiteralValue::Str("data")
+			),
+			Err(EvaluationError::UnsupportedOperator(_))
+		));
+	}
+
 	/// --- Test cases for compare_final_values ---
 	#[test]
 	fn test_compare_final_values_routing() {
@@ -1045,7 +1280,7 @@ mod tests {
 				&ComparisonOperator::Eq,
 				&LiteralValue::Number("100")
 			)
-			.is_ok());
+			.unwrap());
 		assert!(evaluator
 			.compare_final_values(
 				"number",
@@ -1053,7 +1288,7 @@ mod tests {
 				&ComparisonOperator::Gt,
 				&LiteralValue::Str("10")
 			)
-			.is_ok());
+			.unwrap());
 
 		// Test routing to compare_i256
 		let i256_res = std::panic::catch_unwind(|| {
@@ -1077,7 +1312,7 @@ mod tests {
 				&ComparisonOperator::Eq,
 				&LiteralValue::Number("1.23")
 			)
-			.is_ok());
+			.unwrap());
 
 		// Test routing to compare_address
 		assert!(evaluator
@@ -1087,7 +1322,7 @@ mod tests {
 				&ComparisonOperator::Ne,
 				&LiteralValue::Str("0x456...")
 			)
-			.is_ok());
+			.unwrap());
 
 		// Test routing to compare_string
 		assert!(evaluator
@@ -1097,7 +1332,7 @@ mod tests {
 				&ComparisonOperator::StartsWith,
 				&LiteralValue::Str("te")
 			)
-			.is_ok());
+			.unwrap());
 		assert!(evaluator
 			.compare_final_values(
 				"bytes",
@@ -1105,7 +1340,7 @@ mod tests {
 				&ComparisonOperator::Eq,
 				&LiteralValue::Str("0xab")
 			)
-			.is_ok());
+			.unwrap());
 
 		// Test routing to compare_boolean
 		assert!(evaluator
@@ -1115,7 +1350,17 @@ mod tests {
 				&ComparisonOperator::Eq,
 				&LiteralValue::Bool(true)
 			)
-			.is_ok());
+			.unwrap());
+
+		// Test routing to compare_array
+		assert!(evaluator
+			.compare_final_values(
+				"array",
+				r#"["val1", "val2"]"#,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("val1")
+			)
+			.unwrap());
 	}
 
 	#[test]

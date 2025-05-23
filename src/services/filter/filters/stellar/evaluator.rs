@@ -57,7 +57,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 	///         It does not recursively search all fields of arbitrarily nested objects beyond this specific "value" key check.
 	///   - If `lhs_str` is not a JSON array (or fails to parse as one): treats it as a comma-separated list
 	///     and checks if `rhs_literal` (as a string) is one of the values in the list.
-	/// 
+	///
 	/// For "Eq"/"Ne": compares `lhs_str` directly with `rhs_literal` (as string).
 	fn compare_vec(
 		&self,

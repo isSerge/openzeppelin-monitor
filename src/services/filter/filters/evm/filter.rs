@@ -2263,6 +2263,77 @@ mod tests {
 		assert!(!filter.evaluate_expression("objects[2].name == 'Charlie'", &args));
 	}
 
+	#[test]
+	fn test_evaluate_expression_array_json_contains_simple_values() {
+		let filter = create_test_filter();
+		let args = Some(vec![create_test_param(
+			"my_array",
+			r#"["alice", "0x1234567890123456789012345678901234567890", 123, true]"#,
+			"array",
+		)]);
+
+		// String contains
+		assert!(filter.evaluate_expression("my_array contains 'alice'", &args));
+		assert!(filter.evaluate_expression(
+			"my_array contains '0x1234567890123456789012345678901234567890'",
+			&args
+		));
+		// Number contains (target is number literal, EVMConditionEvaluator::compare_array gets it as string)
+		assert!(filter.evaluate_expression("my_array contains '123'", &args)); // RHS target_str will be "123"
+																		 // Boolean contains
+		assert!(filter.evaluate_expression("my_array contains 'true'", &args));
+
+		// Not contains
+		assert!(!filter.evaluate_expression("my_array contains 'dave'", &args));
+		assert!(!filter.evaluate_expression(
+			"my_array contains '0xNonExistentAddress00000000000000000000'",
+			&args
+		));
+		assert!(!filter.evaluate_expression("my_array contains '456'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_array_json_contains_in_object_field() {
+		let filter = create_test_filter();
+		let args = Some(vec![create_test_param(
+			"obj_array",
+			r#"[{"id": 1, "name": "alice", "details": {"color": "red"}}, {"id": 2, "name": "bob"}]"#,
+			"array",
+		)]);
+
+		// Checks if "bob" is a value of any field in any object within the array
+		assert!(filter.evaluate_expression("obj_array contains 'bob'", &args));
+		// Checks if "2" (as a string, from number 2) is a value
+		assert!(filter.evaluate_expression("obj_array contains '2'", &args));
+		// Checks a value within a nested object field
+		assert!(filter.evaluate_expression("obj_array contains 'red'", &args));
+		assert!(!filter.evaluate_expression("obj_array contains 'charlie'", &args));
+		assert!(!filter.evaluate_expression("obj_array contains 'green'", &args)); // color not green
+	}
+
+	#[test]
+	fn test_evaluate_expression_array_eq_ne_raw_json() {
+		let filter = create_test_filter();
+		let args_json_array = Some(vec![create_test_param(
+			"my_json_list",
+			r#"["alice", "bob"]"#,
+			"array",
+		)]);
+
+		// Eq/Ne on "array" kind compares the raw JSON string value
+		assert!(
+			filter.evaluate_expression("my_json_list == '[\"alice\", \"bob\"]'", &args_json_array)
+		);
+		assert!(!filter.evaluate_expression(
+			"my_json_list == '[\"alice\", \"charlie\"]'",
+			&args_json_array
+		));
+		assert!(filter.evaluate_expression(
+			"my_json_list != '[\"alice\", \"charlie\"]'",
+			&args_json_array
+		));
+	}
+
 	// TODO: replace with actual error tests when method returns Result
 	#[test]
 	fn test_evaluate_expression_error_cases() {
