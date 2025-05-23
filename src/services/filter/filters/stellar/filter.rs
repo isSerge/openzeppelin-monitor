@@ -2316,6 +2316,107 @@ mod tests {
 	}
 
 	#[test]
+	fn test_evaluate_expression_vec_csv_contains() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "csv_list".to_string(),
+			value: "apple,banana,cherry".to_string(),
+			kind: "vec".to_string(),
+			indexed: false,
+		}]);
+
+		assert!(filter.evaluate_expression("csv_list contains 'banana'", &args));
+		assert!(!filter.evaluate_expression("csv_list contains 'grape'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_vec_json_array_contains() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "json_array_param".to_string(),
+			value: r#"["alice", "bob"]"#.to_string(), // JSON array string
+			kind: "vec".to_string(),
+			indexed: false,
+		}]);
+
+		// "vec" kind with "contains" operator should use compare_vec (JSON array logic)
+		assert!(filter.evaluate_expression("json_array_param contains 'alice'", &args));
+		assert!(!filter.evaluate_expression("json_array_param contains 'charlie'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_vec_json_array_object_contains_field_value() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "obj_array".to_string(),
+			value: r#"[{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}]"#.to_string(),
+			kind: "vec".to_string(),
+			indexed: false,
+		}]);
+
+		assert!(filter.evaluate_expression("obj_array contains 'alice'", &args));
+		assert!(filter.evaluate_expression("obj_array contains '2'", &args));
+		assert!(!filter.evaluate_expression("obj_array contains 'charlie'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_vec_json_array_object_contains_nested_value_key() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "nested_obj_array".to_string(),
+			value: r#"[{"item": {"type": "name", "value": "alice"}}, {"item": {"type": "name", "value": "bob"}}]"#.to_string(),
+			kind: "vec".to_string(),
+			indexed: false,
+		}]);
+
+		assert!(filter.evaluate_expression("nested_obj_array contains 'alice'", &args));
+		assert!(!filter.evaluate_expression("nested_obj_array contains 'charlie'", &args));
+		// "name" is a key or a value of "type", not directly a "value" field's content as per the logic
+		assert!(!filter.evaluate_expression("nested_obj_array contains 'name'", &args));
+	}
+
+	#[test]
+	fn test_evaluate_expression_vec_eq_ne() {
+		let filter = create_test_filter();
+		let args_csv = Some(vec![StellarMatchParamEntry {
+			name: "csv_list".to_string(),
+			value: "alice,bob".to_string(),
+			kind: "vec".to_string(),
+			indexed: false,
+		}]);
+		let args_json_array = Some(vec![StellarMatchParamEntry {
+			name: "json_list".to_string(),
+			value: r#"["alice", "bob"]"#.to_string(),
+			kind: "vec".to_string(),
+			indexed: false,
+		}]);
+
+		// Eq/Ne on "vec" compares the raw string value
+		assert!(filter.evaluate_expression("csv_list == 'alice,bob'", &args_csv));
+		assert!(!filter.evaluate_expression("csv_list == 'alice,charlie'", &args_csv));
+		assert!(filter.evaluate_expression("json_list == '[\"alice\", \"bob\"]'", &args_json_array));
+		assert!(
+			filter.evaluate_expression("json_list != '[\"alice\", \"charlie\"]'", &args_json_array)
+		);
+	}
+
+	#[test]
+	fn test_evaluate_expression_with_map_path_access() {
+		let filter = create_test_filter();
+		let args = Some(vec![StellarMatchParamEntry {
+			name: "map".to_string(),
+			value: r#"{"prop1": "val1", "nested": {"prop2": 123}}"#.to_string(),
+			kind: "Map".to_string(),
+			indexed: false,
+		}]);
+
+		assert!(filter.evaluate_expression("map.prop1 == 'val1'", &args));
+		assert!(filter.evaluate_expression("map.nested.prop2 == 123", &args));
+		assert!(!filter.evaluate_expression("map.prop1 == 'wrong'", &args));
+		assert!(!filter.evaluate_expression("map.non_existent_key == 'anything'", &args));
+	}
+
+	#[test]
 	fn test_evaluate_expression_logical_and_operator() {
 		let filter = create_test_filter();
 		let args_true_true = Some(vec![

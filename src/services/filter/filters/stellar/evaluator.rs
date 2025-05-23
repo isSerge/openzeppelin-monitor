@@ -9,6 +9,7 @@ use crate::{
 		LiteralValue,
 	},
 };
+use serde_json::Value as JsonValue;
 
 type StellarArgs = Vec<StellarMatchParamEntry>;
 
@@ -19,6 +20,105 @@ pub struct StellarConditionEvaluator<'a> {
 impl<'a> StellarConditionEvaluator<'a> {
 	pub fn new(args: &'a StellarArgs) -> Self {
 		Self { args }
+	}
+
+	/// Helper to check if a serde_json::Value matches a target string.
+	/// Used by compare_vec for items within a JSON array.
+	fn check_json_value_matches_str(value_to_check: &JsonValue, target_str: &str) -> bool {
+		match value_to_check {
+			JsonValue::String(s) => s == target_str,
+			JsonValue::Object(nested_map) => {
+				// If 'value_to_check' is an object - check its "value" field.
+				if let Some(val_prop) = nested_map.get("value") {
+					return match val_prop {
+						JsonValue::String(s_val) => s_val == target_str,
+						_ => val_prop.to_string().trim_matches('"') == target_str,
+					};
+				}
+				false
+			}
+			// For numbers, bools, null - convert to string representation for matching.
+			_ => value_to_check.to_string().trim_matches('"') == target_str,
+		}
+	}
+
+	/// Compares a "vec" type parameter.
+	/// LHS (`lhs_str`) can be a JSON array string or a comma-separated string.
+	/// Supports "Eq", "Ne", "Contains" operators.
+	/// For "Contains":
+	///   - If `lhs_str` is a JSON array:
+	///     - It iterates through each element of the array.
+	///     - If an element is a simple type (string, number, bool), it's compared directly to `rhs_literal`.
+	///     - If an element is an object:
+	///       - It iterates through each field value of this object element.
+	///       - If a field's value is a simple type, it's compared directly.
+	///       - If a field's value is *itself another object*, the function checks if this *nested object*
+	///         has a key named `"value"`, and if so, compares the content of that `"value"` key.
+	///         It does not recursively search all fields of arbitrarily nested objects beyond this specific "value" key check.
+	///   - If `lhs_str` is not a JSON array (or fails to parse as one): treats it as a comma-separated list
+	///     and checks if `rhs_literal` (as a string) is one of the values in the list.
+	/// 
+	/// For "Eq"/"Ne": compares `lhs_str` directly with `rhs_literal` (as string).
+	fn compare_vec(
+		&self,
+		lhs_str: &str,
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let rhs_target_str = match rhs_literal {
+			LiteralValue::Str(s) => *s,
+			LiteralValue::Number(s) => *s,
+			_ => {
+				let msg = format!(
+					"Expected string or number literal for 'vec' comparison, found: {:?}",
+					rhs_literal
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
+			}
+		};
+
+		tracing::debug!(
+			"Comparing vec: lhs: '{}', operator: {:?}, rhs: '{}'",
+			lhs_str,
+			operator,
+			rhs_target_str
+		);
+
+		match operator {
+			ComparisonOperator::Eq => Ok(lhs_str == rhs_target_str),
+			ComparisonOperator::Ne => Ok(lhs_str != rhs_target_str),
+			ComparisonOperator::Contains => {
+				// Try to parse lhs_str as a JSON array
+				if let Ok(json_array) = serde_json::from_str::<Vec<JsonValue>>(lhs_str) {
+					let found = json_array.iter().any(|item| match item {
+						JsonValue::Object(map) => {
+							// Check each field in the object item
+							map.values().any(|val_in_obj| {
+								Self::check_json_value_matches_str(val_in_obj, rhs_target_str)
+							})
+						}
+						// For non-object array elements, compare directly
+						_ => Self::check_json_value_matches_str(item, rhs_target_str),
+					});
+					Ok(found)
+				} else {
+					// Fallback to comma-separated string behavior if not a valid JSON array
+					tracing::debug!(
+						"LHS for 'vec' ('{}') not valid JSON array, falling back to CSV check for value '{}'",
+						lhs_str, rhs_target_str
+					);
+					let csv_values: Vec<&str> = lhs_str.split(',').map(str::trim).collect();
+					Ok(csv_values.contains(&rhs_target_str))
+				}
+			}
+			_ => {
+				let msg = format!(
+					"Operator {:?} not supported for 'vec' type. Supported: Eq, Ne, Contains.",
+					operator
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
+		}
 	}
 
 	/// Compares two boolean values (true/false) using the specified operator.
@@ -238,6 +338,7 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 				operator,
 				rhs_literal,
 			),
+			"vec" => self.compare_vec(lhs_str, operator, rhs_literal),
 			unknown_type => {
 				let msg = format!("Unknown parameter type: {}", unknown_type);
 				Err(EvaluationError::type_mismatch(msg, None, None))
@@ -759,6 +860,163 @@ mod tests {
 		));
 	}
 
+	// --- Test cases for compare_vec method ---
+	#[test]
+	fn test_compare_vec_json_array_contains_string() {
+		let evaluator = create_evaluator();
+		let lhs = r#"["item1", "item2", "item3"]"#;
+		assert!(evaluator
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("item2")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("items5")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_vec_json_array_contains_number_as_string() {
+		let evaluator = create_evaluator();
+		let lhs = r#"[123, "test", 456]"#;
+		assert!(evaluator
+			.compare_vec(lhs, &ComparisonOperator::Contains, &LiteralValue::Number("123")) // RHS is Number("123")
+			.unwrap());
+		assert!(evaluator
+			.compare_vec(lhs, &ComparisonOperator::Contains, &LiteralValue::Str("456")) // RHS is Str("456")
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_vec_json_array_contains_in_object_direct_value() {
+		let evaluator = create_evaluator();
+		let lhs = r#"[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]"#;
+		assert!(evaluator // Search for string value
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("Alice")
+			)
+			.unwrap());
+		assert!(evaluator // Search for number value (as string)
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Number("2")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("Charlie")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_vec_json_array_contains_in_object_value_field() {
+		let evaluator = create_evaluator();
+		let lhs = r#"[{"type": "user", "value": "alice"}, {"type": "item", "value": 789}]"#;
+		assert!(evaluator // String in "value" field
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("alice")
+			)
+			.unwrap());
+		assert!(evaluator // Number in "value" field (compared as string)
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Number("789")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_vec_csv_fallback_contains() {
+		let evaluator = create_evaluator();
+		let lhs = "alpha, beta, gamma"; // Not a valid JSON array
+		assert!(evaluator
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("beta")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("delta")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_vec_eq_ne() {
+		let evaluator = create_evaluator();
+		let lhs_json = r#"["a", "b"]"#;
+		let lhs_csv = "a,b";
+
+		// Eq
+		assert!(evaluator
+			.compare_vec(
+				lhs_json,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"["a", "b"]"#)
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_vec(
+				lhs_json,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"["a", "c"]"#)
+			)
+			.unwrap());
+		assert!(evaluator
+			.compare_vec(lhs_csv, &ComparisonOperator::Eq, &LiteralValue::Str("a,b"))
+			.unwrap());
+
+		// Ne
+		assert!(evaluator
+			.compare_vec(
+				lhs_json,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"["a", "c"]"#)
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_vec_errors() {
+		let evaluator = create_evaluator();
+		let lhs = r#"["data"]"#;
+
+		// RHS TypeMismatch
+		assert!(matches!(
+			evaluator.compare_vec(
+				lhs,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Bool(true)
+			),
+			Err(EvaluationError::TypeMismatch(_))
+		));
+
+		// Unsupported Operator
+		assert!(matches!(
+			evaluator.compare_vec(lhs, &ComparisonOperator::Gt, &LiteralValue::Str("data")),
+			Err(EvaluationError::UnsupportedOperator(_))
+		));
+	}
+
 	/// --- Test cases for compare_final_values method ---
 	#[test]
 	fn test_compare_final_values_routing() {
@@ -811,6 +1069,25 @@ mod tests {
 				"GABC...",
 				&ComparisonOperator::Eq,
 				&LiteralValue::Str("gabc...")
+			)
+			.unwrap());
+
+		// Test routing to compare_vec
+		assert!(evaluator
+			.compare_final_values(
+				"vec",
+				r#"["item1", "item2"]"#,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("item1")
+			)
+			.unwrap());
+
+		assert!(evaluator
+			.compare_final_values(
+				"vec",
+				"apple,banana",
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("apple")
 			)
 			.unwrap());
 	}
