@@ -219,34 +219,13 @@ mod tests {
 	// --- Tests for `compare_ordered_values` ---
 	#[test]
 	fn test_compare_ordered_values_integers() {
-		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Eq, &5).unwrap(),
-			true
-		);
-		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Eq, &10).unwrap(),
-			false
-		);
-		assert_eq!(
-			compare_ordered_values(&10, &ComparisonOperator::Gt, &5).unwrap(),
-			true
-		);
-		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Lt, &10).unwrap(),
-			true
-		);
-		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Gte, &5).unwrap(),
-			true
-		);
-		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Lte, &5).unwrap(),
-			true
-		);
-		assert_eq!(
-			compare_ordered_values(&5, &ComparisonOperator::Ne, &10).unwrap(),
-			true
-		);
+		assert!(compare_ordered_values(&5, &ComparisonOperator::Eq, &5).unwrap());
+		assert!(compare_ordered_values(&5, &ComparisonOperator::Eq, &10).unwrap());
+		assert!(compare_ordered_values(&10, &ComparisonOperator::Gt, &5).unwrap());
+		assert!(compare_ordered_values(&5, &ComparisonOperator::Lt, &10).unwrap());
+		assert!(compare_ordered_values(&5, &ComparisonOperator::Gte, &5).unwrap());
+		assert!(compare_ordered_values(&5, &ComparisonOperator::Lte, &5).unwrap());
+		assert!(compare_ordered_values(&5, &ComparisonOperator::Ne, &10).unwrap());
 	}
 
 	#[test]
