@@ -209,8 +209,8 @@ pub fn string_to_i256(value_str: &str) -> Result<I256, String> {
 		}
 		// Parse hex as U256 first
 		U256::from_str_radix(hex_val_no_sign, 16)
-					.map_err(|e| format!("Failed to parse hex magnitude '{}': {}", hex_val_no_sign, e))
-					.map(I256::from_raw)
+			.map_err(|e| format!("Failed to parse hex magnitude '{}': {}", hex_val_no_sign, e))
+			.map(I256::from_raw)
 	} else {
 		I256::from_str(trimmed).map_err(|e| format!("Failed to parse decimal '{}': {}", trimmed, e))
 	}

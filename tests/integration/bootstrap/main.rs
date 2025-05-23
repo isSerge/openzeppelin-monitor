@@ -27,7 +27,10 @@ use openzeppelin_monitor::{
 		notification::NotificationService,
 		trigger::{TriggerExecutionService, TriggerExecutionServiceTrait},
 	},
-	utils::tests::{evm::monitor::MonitorBuilder, trigger::TriggerBuilder},
+	utils::tests::{
+		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+		trigger::TriggerBuilder,
+	},
 };
 use std::str::FromStr;
 use stellar_xdr::curr::{
@@ -64,19 +67,17 @@ fn create_test_monitor_match(chain: BlockChainType) -> MonitorMatch {
 	match chain {
 		BlockChainType::EVM => MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 			monitor: create_test_monitor("test", vec!["ethereum_mainnet"], false, vec![]),
-			transaction: match create_test_transaction(chain) {
-				TransactionType::EVM(tx) => tx,
-				_ => panic!("Expected EVM transaction"),
-			},
+			transaction: TransactionBuilder::new().build(),
 			network_slug: "ethereum_mainnet".to_string(),
-			receipt: EVMTransactionReceipt::default(),
+			receipt: Some(EVMTransactionReceipt::default()),
+			logs: Some(vec![]),
 			matched_on: MatchConditions::default(),
 			matched_on_args: None,
 		})),
 		BlockChainType::Stellar => MonitorMatch::Stellar(Box::new(StellarMonitorMatch {
 			monitor: create_test_monitor("test", vec!["stellar_mainnet"], false, vec![]),
 			transaction: match create_test_transaction(chain) {
-				TransactionType::Stellar(tx) => tx,
+				TransactionType::Stellar(tx) => *tx,
 				_ => panic!("Expected Stellar transaction"),
 			},
 			network_slug: "stellar_mainnet".to_string(),
@@ -171,11 +172,18 @@ async fn test_create_block_handler_evm() {
 	let block = create_test_block(BlockChainType::EVM, 100);
 	let network = create_test_network("Ethereum", "ethereum_mainnet", BlockChainType::EVM);
 
+	let mut mock_client = MockEvmClientTrait::new();
+
+	mock_client
+		.expect_get_logs_for_blocks()
+		.return_once(|_, _, _| Ok(vec![]));
+
 	// Create a mock client pool that returns a successful client
 	let mut mock_pool = MockClientPool::new();
 	mock_pool
 		.expect_get_evm_client()
-		.return_once(move |_| Ok(Arc::new(MockEvmClientTrait::new())));
+		.return_once(move |_| Ok(Arc::new(mock_client)));
+
 	let client_pool = Arc::new(mock_pool);
 
 	let network_monitors = vec![(network.clone(), monitors.clone())];
@@ -488,11 +496,9 @@ print(True)  # Always return true for test
 		network_slug: "ethereum_mainnet".to_string(),
 		processing_results: vec![MonitorMatch::EVM(Box::new(EVMMonitorMatch {
 			monitor,
-			transaction: match create_test_transaction(BlockChainType::EVM) {
-				TransactionType::EVM(tx) => tx,
-				_ => panic!("Expected EVM transaction"),
-			},
-			receipt: EVMTransactionReceipt::default(),
+			transaction: TransactionBuilder::new().build(),
+			receipt: Some(EVMTransactionReceipt::default()),
+			logs: Some(vec![]),
 			network_slug: "ethereum_mainnet".to_string(),
 			matched_on: MatchConditions::default(),
 			matched_on_args: None,
@@ -526,6 +532,10 @@ async fn test_process_block() {
 	mock_client
 		.expect_get_latest_block_number()
 		.return_once(|| Ok(100));
+
+	mock_client
+		.expect_get_logs_for_blocks()
+		.return_once(|_, _, _| Ok(vec![]));
 
 	let result = process_block(
 		&mock_client,

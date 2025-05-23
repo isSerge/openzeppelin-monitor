@@ -1,11 +1,14 @@
 use mockito::{Mock, Server};
 use openzeppelin_monitor::{
 	models::{
-		BlockChainType, BlockType, EVMBlock, EVMTransaction, EVMTransactionReceipt, Network,
+		BlockChainType, BlockType, EVMBlock, EVMReceiptLog, EVMTransactionReceipt, Network,
 		StellarBlock, StellarLedgerInfo, StellarTransaction, StellarTransactionInfo,
 		TransactionType,
 	},
-	utils::tests::builders::network::NetworkBuilder,
+	utils::tests::{
+		builders::network::NetworkBuilder,
+		evm::{receipt::ReceiptBuilder, transaction::TransactionBuilder},
+	},
 };
 use serde_json::json;
 
@@ -118,63 +121,20 @@ pub fn create_test_block(chain: BlockChainType, block_number: u64) -> BlockType 
 
 pub fn create_test_transaction(chain: BlockChainType) -> TransactionType {
 	match chain {
-		BlockChainType::EVM => {
-			let tx = alloy::consensus::TxLegacy {
-				chain_id: None,
-				nonce: 0,
-				gas_price: 0,
-				gas_limit: 0,
-				to: alloy::primitives::TxKind::Call(alloy::primitives::Address::ZERO),
-				value: alloy::primitives::U256::ZERO,
-				input: alloy::primitives::Bytes::default(),
-			};
-
-			let signature = alloy::signers::Signature::from_scalars_and_parity(
-				alloy::primitives::B256::ZERO,
-				alloy::primitives::B256::ZERO,
-				false,
-			);
-
-			let hash = alloy::primitives::B256::ZERO;
-
-			TransactionType::EVM(EVMTransaction::from(alloy::rpc::types::Transaction {
-				inner: alloy::consensus::transaction::Recovered::new_unchecked(
-					alloy::consensus::transaction::TxEnvelope::Legacy(
-						alloy::consensus::Signed::new_unchecked(tx, signature, hash),
-					),
-					alloy::primitives::Address::ZERO,
-				),
-				block_hash: None,
-				block_number: None,
-				transaction_index: None,
-				effective_gas_price: None,
-			}))
-		}
+		BlockChainType::EVM => TransactionType::EVM(TransactionBuilder::new().build()),
 		BlockChainType::Stellar => {
-			TransactionType::Stellar(StellarTransaction::from(StellarTransactionInfo {
+			TransactionType::Stellar(Box::new(StellarTransaction::from(StellarTransactionInfo {
 				..Default::default()
-			}))
+			})))
 		}
 		_ => panic!("Unsupported chain"),
 	}
 }
 
 pub fn create_test_evm_transaction_receipt() -> EVMTransactionReceipt {
-	EVMTransactionReceipt::from(alloy::rpc::types::TransactionReceipt {
-		inner: alloy::consensus::ReceiptEnvelope::Legacy(alloy::consensus::ReceiptWithBloom {
-			receipt: alloy::consensus::Receipt::default(),
-			logs_bloom: alloy::primitives::Bloom::default(),
-		}),
-		transaction_hash: alloy::primitives::B256::ZERO,
-		transaction_index: Some(0),
-		block_hash: Some(alloy::primitives::B256::ZERO),
-		block_number: Some(0),
-		gas_used: 0,
-		effective_gas_price: 0,
-		blob_gas_used: None,
-		blob_gas_price: None,
-		from: alloy::primitives::Address::ZERO,
-		to: Some(alloy::primitives::Address::ZERO),
-		contract_address: None,
-	})
+	ReceiptBuilder::new().build()
+}
+
+pub fn create_test_evm_logs() -> Vec<EVMReceiptLog> {
+	ReceiptBuilder::new().build().logs.clone()
 }

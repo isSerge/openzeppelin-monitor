@@ -938,7 +938,6 @@ mod tests {
 	}
 
 	/// Creates a mock transaction for testing
-	/// TODO: Refactor to use TransactionBuilder once it's implemented
 	#[allow(clippy::too_many_arguments)]
 	fn create_test_transaction(
 		status: &str,
