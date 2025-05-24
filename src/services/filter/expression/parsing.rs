@@ -102,30 +102,27 @@ fn parse_hex_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>>
 		.parse_next(input)
 }
 
-/// Parses string literals enclosed in single quotes into `LiteralValue::Str`
+/// Parses string literals enclosed in single or double quotes into `LiteralValue::Str`
 fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
-	// Match and consume opening quote
-	literal('\'').parse_next(input)?;
+	// Match and consume opening quote, remember which one it was.
+	let open_quote: char = one_of(['\'', '"']).parse_next(input)?;
 
-	// Parser for the content within the quotes.
-	let string_inner_content_parser: Repeat<_, _, _, Vec<&'a str>, _> = repeat(
-		0.., // The string can be empty
-		alt((
-			literal("\\'"),  // Matches and consumes an escaped single quote: \'
-			literal("\\\\"), // Matches and consumes an escaped backslash: \\
-			take_while(1.., |c: char| c != '\'' && c != '\\'),
-		)),
-	);
+	let character_or_escape_sequence = alt((
+			(literal("\\"), one_of([open_quote, '\\'])).void(),
+			take_while(1.., move |c: char| c != open_quote && c != '\\').void(),
+	));
 
-	// Get slice of the input
-	let string_content_slice: &'a str = string_inner_content_parser.take().parse_next(input)?;
+	let inner_parser:Repeat<_, &_, _, (), _> = repeat(0.., character_or_escape_sequence);
 
-	// Match and consume the closing quote
-	literal('\'')
-		.context(StrContext::Expected(StrContextValue::Description(
-			"closing single quote (') for string literal",
-		)))
-		.parse_next(input)?;
+	let string_content_slice: &'a str = inner_parser
+			.take() 
+			.parse_next(input)?;
+
+	literal(open_quote)
+			.context(StrContext::Expected(StrContextValue::Description(
+					"matching closing quote for string literal",
+			)))
+			.parse_next(input)?;
 
 	Ok(LiteralValue::Str(string_content_slice))
 }
@@ -252,7 +249,7 @@ fn parse_value<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'a>> {
 	delimited(
 		space0,
 		alt((
-			parse_quoted_string,       // "'string'"
+			parse_quoted_string,       // "'string'" or '"string"'
 			parse_boolean,             // "true" / "false"
 			parse_hex_string,          // "0x..."
 			parse_number_or_fixed_str, // "123" / "-123" / "123.456"
@@ -578,6 +575,15 @@ mod tests {
 		assert_parses_ok(parse_quoted_string, "'a\\''", LiteralValue::Str("a\\'"), "");
 		// Just an escaped quote
 		assert_parses_ok(parse_quoted_string, "'\\''", LiteralValue::Str("\\'"), "");
+		// Escaped double quotes
+		assert_parses_ok(
+			parse_quoted_string,
+			"'\"hello\"'",
+			LiteralValue::Str("\"hello\""),
+			"",
+		);
+		assert_parses_ok(parse_quoted_string, "'_'", LiteralValue::Str("_"), "");
+
 
 		// Failures
 		assert_parse_fails(parse_quoted_string, "'hello"); // Missing closing quote
