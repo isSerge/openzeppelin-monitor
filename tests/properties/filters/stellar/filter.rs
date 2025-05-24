@@ -840,7 +840,7 @@ proptest! {
 			values2 in prop::collection::vec(any::<i64>(), 0..5),
 	) {
 		let param_name = "vec_param";
-		let value_str1 = serde_json::to_string(&values1).unwrap(); 
+		let value_str1 = serde_json::to_string(&values1).unwrap();
 		let value_str2 = serde_json::to_string(&values2).unwrap();
 
 		// For single-quoted string literal in expression, escape single quotes
