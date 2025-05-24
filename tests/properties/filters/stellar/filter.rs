@@ -406,6 +406,93 @@ proptest! {
 		prop_assert_eq!(result, expected);
 	}
 
+	// Tests string comparison expressions in filter conditions
+	// Note: String comparisons are case-insensitive
+	#[test]
+	fn test_string_expression_evaluation(
+		value_orig in "[a-zA-Z0-9_]+",
+		operator in prop_oneof![
+			Just("=="),
+			Just("!="),
+			Just("startsWith"),
+			Just("endsWith"),
+			Just("contains")
+		],
+		compare_to_orig in "[a-zA-Z0-9_]+",
+	) {
+		let rhs_for_expr = format!("'{}'", compare_to_orig.replace('\'', "\\'"));
+		let expr = format!("name {} {}", operator, rhs_for_expr);
+
+		let params = vec![StellarMatchParamEntry {
+			name: "name".to_string(),
+			value: value_orig.clone(),
+			kind: "string".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+
+		let eval_result = filter.evaluate_expression(&expr, &Some(params.clone()));
+
+		// Normalize for expected result according to StellarConditionEvaluator::compare_string logic
+		let value_normalized = value_orig.to_lowercase();
+		let compare_to_normalized = compare_to_orig.to_lowercase();
+
+		let expected = match operator {
+			"==" => value_normalized == compare_to_normalized,
+			"!=" => value_normalized != compare_to_normalized,
+			"startsWith" => value_normalized.starts_with(&compare_to_normalized),
+			"endsWith" => value_normalized.ends_with(&compare_to_normalized),
+			"contains" => value_normalized.contains(&compare_to_normalized),
+			_ => false
+		};
+
+		prop_assert_eq!(eval_result, expected,
+			"\nExpression: '{}'\nOriginal LHS: '{}'\nOriginal RHS: '{}'\nNormalized LHS: '{}'\nNormalized RHS: '{}'\nEvaluated: {}, Expected: {}",
+			expr, value_orig, compare_to_orig, value_normalized, compare_to_normalized, eval_result, expected
+		);
+	}
+
+	// Tests numeric comparison expressions for i32 values
+	#[test]
+	fn test_i32_expression_evaluation(
+		value in any::<i32>(),
+		operator in prop_oneof![
+			Just(">"), Just(">="), Just("<"), Just("<="),
+			Just("=="), Just("!=")
+		],
+		compare_to in any::<i32>(),
+	) {
+		let param_name = "param0";
+		let expr = format!("{} {} {}", param_name, operator, compare_to);
+
+		let params = vec![StellarMatchParamEntry {
+			name: param_name.to_string(),
+			value: value.to_string(),
+			kind: "i32".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+		let result = filter.evaluate_expression(&expr, &Some(params));
+
+		let expected = match operator {
+			">" => value > compare_to,
+			">=" => value >= compare_to,
+			"<" => value < compare_to,
+			"<=" => value <= compare_to,
+			"==" => value == compare_to,
+			"!=" => value != compare_to,
+			_ => false
+		};
+
+		prop_assert_eq!(result, expected);
+	}
+
 	// Tests numeric comparison expressions for i64 values
 	#[test]
 	fn test_i64_expression_evaluation(
@@ -423,6 +510,158 @@ proptest! {
 			name: param_name.to_string(),
 			value: value.to_string(),
 			kind: "i64".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+		let result = filter.evaluate_expression(&expr, &Some(params));
+
+		let expected = match operator {
+			">" => value > compare_to,
+			">=" => value >= compare_to,
+			"<" => value < compare_to,
+			"<=" => value <= compare_to,
+			"==" => value == compare_to,
+			"!=" => value != compare_to,
+			_ => false
+		};
+
+		prop_assert_eq!(result, expected);
+	}
+
+	// Tests numeric comparison expressions for i128 values
+	#[test]
+	fn test_i128_expression_evaluation(
+		value in any::<i128>(),
+		operator in prop_oneof![
+			Just(">"), Just(">="), Just("<"), Just("<="),
+			Just("=="), Just("!=")
+		],
+		compare_to in any::<i128>(),
+	) {
+		let param_name = "param0";
+		let expr = format!("{} {} {}", param_name, operator, compare_to);
+
+		let params = vec![StellarMatchParamEntry {
+			name: param_name.to_string(),
+			value: value.to_string(),
+			kind: "i128".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+		let result = filter.evaluate_expression(&expr, &Some(params));
+
+		let expected = match operator {
+			">" => value > compare_to,
+			">=" => value >= compare_to,
+			"<" => value < compare_to,
+			"<=" => value <= compare_to,
+			"==" => value == compare_to,
+			"!=" => value != compare_to,
+			_ => false
+		};
+
+		prop_assert_eq!(result, expected);
+	}
+
+	// Tests numeric comparison expressions for u32 values
+	#[test]
+	fn test_u32_expression_evaluation(
+		value in any::<u32>(),
+		operator in prop_oneof![
+			Just(">"), Just(">="), Just("<"), Just("<="),
+			Just("=="), Just("!=")
+		],
+		compare_to in any::<u32>(),
+	) {
+		let param_name = "param0";
+		let expr = format!("{} {} {}", param_name, operator, compare_to);
+
+		let params = vec![StellarMatchParamEntry {
+			name: param_name.to_string(),
+			value: value.to_string(),
+			kind: "u32".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+		let result = filter.evaluate_expression(&expr, &Some(params));
+
+		let expected = match operator {
+			">" => value > compare_to,
+			">=" => value >= compare_to,
+			"<" => value < compare_to,
+			"<=" => value <= compare_to,
+			"==" => value == compare_to,
+			"!=" => value != compare_to,
+			_ => false
+		};
+
+		prop_assert_eq!(result, expected);
+	}
+
+	// Tests numeric comparison expressions for u64 values
+	#[test]
+	fn test_u64_expression_evaluation(
+		value in any::<u64>(),
+		operator in prop_oneof![
+			Just(">"), Just(">="), Just("<"), Just("<="),
+			Just("=="), Just("!=")
+		],
+		compare_to in any::<u64>(),
+	) {
+		let param_name = "param0";
+		let expr = format!("{} {} {}", param_name, operator, compare_to);
+
+		let params = vec![StellarMatchParamEntry {
+			name: param_name.to_string(),
+			value: value.to_string(),
+			kind: "u64".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+		let result = filter.evaluate_expression(&expr, &Some(params));
+
+		let expected = match operator {
+			">" => value > compare_to,
+			">=" => value >= compare_to,
+			"<" => value < compare_to,
+			"<=" => value <= compare_to,
+			"==" => value == compare_to,
+			"!=" => value != compare_to,
+			_ => false
+		};
+
+		prop_assert_eq!(result, expected);
+	}
+
+	// Tests numeric comparison expressions for u128 values
+	#[test]
+	fn test_u128_expression_evaluation(
+		value in any::<u128>(),
+		operator in prop_oneof![
+			Just(">"), Just(">="), Just("<"), Just("<="),
+			Just("=="), Just("!=")
+		],
+		compare_to in any::<u128>(),
+	) {
+		let param_name = "param0";
+		let expr = format!("{} {} {}", param_name, operator, compare_to);
+
+		let params = vec![StellarMatchParamEntry {
+			name: param_name.to_string(),
+			value: value.to_string(),
+			kind: "u128".to_string(),
 			indexed: false,
 		}];
 
