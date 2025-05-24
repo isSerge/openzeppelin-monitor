@@ -683,9 +683,9 @@ proptest! {
 		prop_assert_eq!(result, expected);
 	}
 
-	// Tests vector operations (contains, equality) in filter expressions
+	// Tests vector operations (contains, equality) in filter expressions with CSV format
 	#[test]
-	fn test_vec_expression_evaluation(
+	fn test_vec_csv_expression_evaluation(
 		values in prop::collection::vec(any::<i64>(), 0..5),
 		operator in prop_oneof![Just("contains"), Just("=="), Just("!=")],
 		compare_to in any::<i64>(),
@@ -721,6 +721,188 @@ proptest! {
 		};
 
 		prop_assert_eq!(result, expected);
+	}
+
+	// Tests JSON array contains operation with integer values
+	#[test]
+	fn test_vec_json_array_contains_i64_expression_evaluation(
+			values in prop::collection::vec(any::<i64>(), 0..5),
+			target in any::<i64>(),
+	) {
+			let param_name = "vec_param";
+			let value_str = serde_json::to_string(&values).unwrap();
+
+			let expr = format!("{} contains {}", param_name, target);
+
+			let params = vec![StellarMatchParamEntry {
+					name: param_name.to_string(),
+					value: value_str,
+					kind: "Vec".to_string(),
+					indexed: false,
+			}];
+
+			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+					_client: PhantomData,
+			};
+			let result = filter.evaluate_expression(&expr, &Some(params));
+
+			let expected = values.contains(&target);
+			prop_assert_eq!(
+					result, expected,
+					"Failed on values: {:?}, target: {}, expected: {}",
+					values, target, expected
+			);
+	}
+
+	// Tests JSON array contains operation with string values
+	#[test]
+	fn test_vec_json_array_contains_string_expression_evaluation(
+			values in prop::collection::vec("[a-zA-Z0-9_]{1,8}", 0..5),
+			target in "[a-zA-Z0-9_]{1,8}",
+	) {
+			let param_name = "vec_param";
+			let value_str = serde_json::to_string(&values).unwrap();
+
+			let expr = format!(r#"{} contains "{}""#, param_name, target);
+
+			let params = vec![StellarMatchParamEntry {
+					name: param_name.to_string(),
+					value: value_str,
+					kind: "Vec".to_string(),
+					indexed: false,
+			}];
+
+			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+					_client: PhantomData,
+			};
+			let result = filter.evaluate_expression(&expr, &Some(params));
+
+			let expected = values.contains(&target);
+			prop_assert_eq!(
+					result, expected,
+					"Failed on values: {:?}, target: {}, expected: {}",
+					values, target, expected
+			);
+	}
+
+	// Tests JSON array contains operation with mixed types
+	#[test]
+	fn test_vec_json_array_mixed_types_expression_evaluation(
+			int_values in prop::collection::vec(any::<i64>(), 0..2),
+			string_values in prop::collection::vec("[a-zA-Z0-9_]{1,8}", 0..2),
+			target in prop_oneof![any::<i64>().prop_map(|v| v.to_string()), "[a-zA-Z0-9_]{1,8}"],
+	) {
+			let param_name = "vec_param";
+
+			// Create mixed type array with proper JSON representation
+			let mut mixed_array = Vec::new();
+			for v in &int_values {
+					mixed_array.push(json!(v));
+			}
+			for v in &string_values {
+					mixed_array.push(json!(v));
+			}
+			let value_str = serde_json::to_string(&mixed_array).unwrap();
+
+			// Create expression with proper quoting based on target type
+			let expr = if target.parse::<i64>().is_ok() {
+					format!("{} contains {}", param_name, target)
+			} else {
+					format!(r#"{} contains "{}""#, param_name, target)
+			};
+
+			let params = vec![StellarMatchParamEntry {
+					name: param_name.to_string(),
+					value: value_str,
+					kind: "Vec".to_string(),
+					indexed: false,
+			}];
+
+			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+					_client: PhantomData,
+			};
+			let result = filter.evaluate_expression(&expr, &Some(params));
+
+			// Manually check for presence in original values
+			let expected = int_values.iter().any(|v| v.to_string() == target) || string_values.contains(&target);
+
+			prop_assert_eq!(
+					result, expected,
+					"Failed on values: {:?}, target: {}, expected: {}",
+					mixed_array, target, expected
+			);
+	}
+
+	// Tests JSON array equality comparison
+	#[test]
+	fn test_vec_json_array_equality_expression_evaluation(
+			values1 in prop::collection::vec(any::<i64>(), 0..5),
+			values2 in prop::collection::vec(any::<i64>(), 0..5),
+	) {
+		let param_name = "vec_param";
+		let value_str1 = serde_json::to_string(&values1).unwrap(); 
+		let value_str2 = serde_json::to_string(&values2).unwrap();
+
+		// For single-quoted string literal in expression, escape single quotes
+		let escaped_rhs_for_single_quotes = value_str2.replace('\'', r#"\'"#);
+		let expr = format!(r#"{} == '{}'"#, param_name, escaped_rhs_for_single_quotes);
+
+		let params = vec![StellarMatchParamEntry {
+			name: param_name.to_string(),
+			value: value_str1.clone(),
+			kind: "Vec".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+		let result = filter.evaluate_expression(&expr, &Some(params));
+
+		let expected = value_str1.eq_ignore_ascii_case(&value_str2);
+
+		prop_assert_eq!(
+			result, expected,
+			"Failed on values1: {:?}, values2: {:?}, expected: {}",
+			values1, values2, expected
+		);
+	}
+
+	// Tests nested JSON array contains operation
+	#[test]
+	fn test_vec_nested_json_array_contains_expression_evaluation(
+			outer_values in prop::collection::vec(
+					prop::collection::vec(any::<i64>(), 1..3),
+					1..3
+			),
+			target in any::<i64>(),
+	) {
+			let param_name = "vec_param";
+			let value_str = serde_json::to_string(&outer_values).unwrap();
+
+			let expr = format!("{} contains {}", param_name, target);
+
+			let params = vec![StellarMatchParamEntry {
+					name: param_name.to_string(),
+					value: value_str,
+					kind: "Vec".to_string(),
+					indexed: false,
+			}];
+
+			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+					_client: PhantomData,
+			};
+			let result = filter.evaluate_expression(&expr, &Some(params));
+
+			// Check if target exists in any nested array
+			let expected = outer_values.iter()
+					.any(|inner| inner.contains(&target));
+
+			prop_assert_eq!(
+					result, expected,
+					"Failed on values: {:?}, target: {}, expected: {}",
+					outer_values, target, expected
+			);
 	}
 
 	// Tests map/object property access in filter expressions
