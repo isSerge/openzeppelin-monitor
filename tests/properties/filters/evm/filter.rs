@@ -331,8 +331,8 @@ proptest! {
 		operator in prop_oneof![
 			Just("=="),
 			Just("!="),
-			Just("startsWith"),
-			Just("endsWith"),
+			Just("starts_with"),
+			Just("ends_with"),
 			Just("contains")
 		],
 		compare_to_orig in "[a-zA-Z0-9_]+",
@@ -359,8 +359,8 @@ proptest! {
 		let expected = match operator {
 			"==" => value_normalized == compare_to_normalized,
 			"!=" => value_normalized != compare_to_normalized,
-			"startsWith" => value_normalized.starts_with(&compare_to_normalized),
-			"endsWith" => value_normalized.ends_with(&compare_to_normalized),
+			"starts_with" => value_normalized.starts_with(&compare_to_normalized),
+			"ends_with" => value_normalized.ends_with(&compare_to_normalized),
 			"contains" => value_normalized.contains(&compare_to_normalized),
 			_ => false
 		};
@@ -599,8 +599,9 @@ proptest! {
 					_client: PhantomData,
 			};
 			let result = filter.evaluate_expression(&expr, &Some(params));
-
-			let expected = values.contains(&target);
+			// Normalize the target for comparison
+			let target_lowercase = target.to_lowercase();
+			let expected = values.iter().any(|v| v.to_lowercase() == target_lowercase);
 			prop_assert_eq!(
 					result, expected,
 					"Failed on values: {:?}, target: {}, expected: {}",
@@ -648,7 +649,8 @@ proptest! {
 			let result = filter.evaluate_expression(&expr, &Some(params));
 
 			// Manually check for presence in original values
-			let expected = int_values.iter().any(|v| v.to_string() == target) || string_values.contains(&target);
+			let expected_str_match = string_values.iter().any(|s_val| s_val.eq_ignore_ascii_case(&target));
+			let expected = int_values.iter().any(|v| v.to_string() == target) || expected_str_match;
 
 			prop_assert_eq!(
 					result, expected,
