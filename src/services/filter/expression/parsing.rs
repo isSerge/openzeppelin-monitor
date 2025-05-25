@@ -108,21 +108,19 @@ fn parse_quoted_string<'a>(input: &mut Input<'a>) -> ParserResult<LiteralValue<'
 	let open_quote: char = one_of(['\'', '"']).parse_next(input)?;
 
 	let character_or_escape_sequence = alt((
-			(literal("\\"), one_of([open_quote, '\\'])).void(),
-			take_while(1.., move |c: char| c != open_quote && c != '\\').void(),
+		(literal("\\"), one_of([open_quote, '\\'])).void(),
+		take_while(1.., move |c: char| c != open_quote && c != '\\').void(),
 	));
 
-	let inner_parser:Repeat<_, &_, _, (), _> = repeat(0.., character_or_escape_sequence);
+	let inner_parser: Repeat<_, &_, _, (), _> = repeat(0.., character_or_escape_sequence);
 
-	let string_content_slice: &'a str = inner_parser
-			.take() 
-			.parse_next(input)?;
+	let string_content_slice: &'a str = inner_parser.take().parse_next(input)?;
 
 	literal(open_quote)
-			.context(StrContext::Expected(StrContextValue::Description(
-					"matching closing quote for string literal",
-			)))
-			.parse_next(input)?;
+		.context(StrContext::Expected(StrContextValue::Description(
+			"matching closing quote for string literal",
+		)))
+		.parse_next(input)?;
 
 	Ok(LiteralValue::Str(string_content_slice))
 }
@@ -583,7 +581,6 @@ mod tests {
 			"",
 		);
 		assert_parses_ok(parse_quoted_string, "'_'", LiteralValue::Str("_"), "");
-
 
 		// Failures
 		assert_parse_fails(parse_quoted_string, "'hello"); // Missing closing quote
