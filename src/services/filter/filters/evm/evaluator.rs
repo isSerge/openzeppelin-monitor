@@ -21,6 +21,30 @@ const UNSIGNED_INTEGER_KINDS: &[&str] = &[
 
 const SIGNED_INTEGER_KINDS: &[&str] = &["int8", "int16", "int32", "int64", "int128", "int256"];
 
+const ARRAY_KINDS: &[&str] = &[
+	"array",
+	"uint8[]",
+	"uint16[]",
+	"uint32[]",
+	"uint64[]",
+	"uint128[]",
+	"uint256[]",
+	"int8[]",
+	"int16[]",
+	"int32[]",
+	"int64[]",
+	"int128[]",
+	"int256[]",
+	"string[]",
+	"address[]",
+	"bool[]",
+	"fixed[]",
+	"ufixed[]",
+	"bytes[]",
+	"bytes32[]",
+	"tuple[]",
+];
+
 pub struct EVMConditionEvaluator<'a> {
 	args: &'a EVMArgs,
 }
@@ -41,7 +65,19 @@ impl<'a> EVMConditionEvaluator<'a> {
 					s.to_lowercase() == rhs_str.to_lowercase()
 				}
 			}
-			JsonValue::Number(n) => n.to_string() == rhs_str,
+			JsonValue::Number(n) => {
+				let lhs_val_str = n.to_string();
+				match (Decimal::from_str(&lhs_val_str), Decimal::from_str(rhs_str)) {
+					(Ok(lhs_dec), Ok(rhs_dec)) => {
+						// Both are valid decimals, compare them numerically
+						lhs_dec == rhs_dec
+					}
+					_ => {
+						// At least one is not a valid decimal - fallback to string comparison.
+						lhs_val_str == rhs_str
+					}
+				}
+			}
 			JsonValue::Bool(b) => b.to_string().to_lowercase() == rhs_str.to_lowercase(),
 			JsonValue::Object(nested_map) => nested_map
 				.values()
@@ -136,8 +172,11 @@ impl<'a> EVMConditionEvaluator<'a> {
 							"Failed to parse LHS value '{}' as JSON array for 'contains' operator",
 							lhs_json_array_str
 						);
+						println!("Error msg: {}", msg);
 						EvaluationError::parse_error(msg, Some(e.into()), None)
 					})?;
+
+				println!("Checking if array contains: {}", rhs_target_str);
 
 				let found = json_array.iter().any(|item_in_array| {
 					self.check_json_value_matches_str(item_in_array, rhs_target_str)
@@ -419,6 +458,10 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 			return self.compare_u256(lhs_value_str, operator, rhs_literal);
 		}
 
+		if ARRAY_KINDS.contains(&lhs_kind.as_str()) {
+			return self.compare_array(lhs_value_str, operator, rhs_literal);
+		}
+
 		match lhs_kind.as_str() {
 			"fixed" | "ufixed" => self.compare_fixed_point(lhs_value_str, operator, rhs_literal),
 			"address" => self.compare_address(lhs_value_str, operator, rhs_literal),
@@ -426,7 +469,6 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 				self.compare_string(lhs_value_str, operator, rhs_literal)
 			}
 			"bool" => self.compare_boolean(lhs_value_str, operator, rhs_literal),
-			"array" => self.compare_array(lhs_value_str, operator, rhs_literal),
 			_ => {
 				let msg = format!(
 					"Unsupported EVM parameter kind for comparison: {}",
@@ -1375,6 +1417,274 @@ mod tests {
 				&LiteralValue::Str(r#"[2, 1]"#)
 			)
 			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_array_all_supported_kinds() {
+		let evaluator = create_evaluator();
+
+		// --- Prepare constants for addresses and bytes32 ---
+		const ADDR_1: &str = "0x1111111111111111111111111111111111111111";
+		const ADDR_2: &str = "0x2222222222222222222222222222222222222222";
+		const ADDR_3_MIXED_CASE: &str = "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa";
+		const ADDR_3_LOWER_CASE: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+		const BYTES32_1: &str =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		const BYTES32_2: &str =
+			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		const BYTES32_3: &str =
+			"0x3333333333333333333333333333333333333333333333333333333333333333";
+
+		// --- Prepare complex strings that need formatting ---
+		let tuple_array_lhs_string_data = format!(
+			r#"[{{ "name":"alice", "id":1, "addr":"{}" }}, {{ "item":"item_B", "val": "0xBytes01", "num_val":123.45, "active":true, "sub_tuple": {{ "key": "nested_value" }} }}]"#,
+			ADDR_1
+		);
+		let tuple_array_different_string_literal = r#"[{"name":"bob","id":2}]"#;
+
+		let samples: Vec<(
+			&'static str,
+			String,
+			LiteralValue<'_>,
+			LiteralValue<'_>,
+			String,
+		)> = vec![
+			(
+				"uintN[] (e.g., uint32[])",
+				"[10, 200, 3000]".to_string(),
+				LiteralValue::Number("200"),
+				LiteralValue::Number("40"),
+				"[1, 2, 3]".to_string(),
+			),
+			(
+				"intN[] (e.g., int64[])",
+				"[-10, 0, 30]".to_string(),
+				LiteralValue::Number("-10"),
+				LiteralValue::Str("40"),
+				"[-1, -2, -3]".to_string(),
+			),
+			(
+				"string[]",
+				r#"["apple", "Banana", ""]"#.to_string(),
+				LiteralValue::Str("banana"),
+				LiteralValue::Str("cherry"),
+				r#"["orange", "grape"]"#.to_string(),
+			),
+			(
+				"address[]",
+				format!(r#"["{}", "{}"]"#, ADDR_1, ADDR_3_MIXED_CASE), 
+				LiteralValue::Str(ADDR_3_LOWER_CASE),                  
+				LiteralValue::Str(ADDR_2),
+				format!(r#"["{}"]"#, ADDR_2),
+			),
+			(
+				"bool[]",
+				"[true, false, true]".to_string(),
+				LiteralValue::Str("false"),
+				LiteralValue::Str("maybe"),
+				"[false, false]".to_string(),
+			),
+			(
+				"fixed[]/ufixed[] (elements as JSON numbers)",
+				"[1.23, 4.500, 6.789]".to_string(),
+				LiteralValue::Number("4.500"),
+				LiteralValue::Str("3.14"),
+				"[10.0, 20.01]".to_string(),
+			),
+			(
+				"fixed[]/ufixed[] (elements as JSON strings)",
+				r#"["10.23", "40.50", "60.789"]"#.to_string(),
+				LiteralValue::Str("40.50"),
+				LiteralValue::Number("30.14"),
+				r#"["100.0", "200.01"]"#.to_string(),
+			),
+			(
+				"bytes[]",
+				r#"["0xaa", "0xbbcc", "0x", "0x123456EF"]"#.to_string(),
+				LiteralValue::Str("0x123456ef"),
+				LiteralValue::Str("0xff00"),
+				r#"["0x11", "0x2233"]"#.to_string(),
+			),
+			(
+				"bytes32[]",
+				format!(r#"["{}", "{}"]"#, BYTES32_1, BYTES32_2),
+				LiteralValue::Str(BYTES32_1),
+				LiteralValue::Str(BYTES32_3),
+				format!(r#"["{}"]"#, BYTES32_3),
+			),
+			(
+				"tuple[]",
+				tuple_array_lhs_string_data.clone(),
+				LiteralValue::Str("alice"),
+				LiteralValue::Str("unknown_field_value"),
+				tuple_array_different_string_literal.to_string(),
+			),
+			(
+				"array (generic)",
+				r#"["text_val", 12345, true, "0xNonStandardHexMaybe"]"#.to_string(),
+				LiteralValue::Number("12345"),
+				LiteralValue::Str("nonexistent"),
+				r#"["another_val", 67890]"#.to_string(),
+			),
+		];
+
+		for (
+			kind_desc,
+			lhs_json_string_owner,
+			contain_elem,
+			not_contain_elem,
+			diff_json_string_owner,
+		) in &samples
+		{
+			let lhs_json_str = lhs_json_string_owner.as_str();
+			let diff_json_str = diff_json_string_owner.as_str();
+
+			// Test Eq
+			assert!(
+				evaluator
+					.compare_array(
+						lhs_json_str,
+						&ComparisonOperator::Eq,
+						&LiteralValue::Str(lhs_json_str)
+					)
+					.unwrap(),
+				"Eq failed for {}: LHS: '{}' == RHS: '{}'",
+				kind_desc,
+				lhs_json_str,
+				lhs_json_str
+			);
+
+			// Test Ne
+			assert!(
+				evaluator
+					.compare_array(
+						lhs_json_str,
+						&ComparisonOperator::Ne,
+						&LiteralValue::Str(diff_json_str)
+					)
+					.unwrap(),
+				"Ne failed for {}: LHS: '{}' != RHS: '{}'",
+				kind_desc,
+				lhs_json_str,
+				diff_json_str
+			);
+			// Test Ne (with the same array - should be false)
+			assert!(
+				!evaluator
+					.compare_array(
+						lhs_json_str,
+						&ComparisonOperator::Ne,
+						&LiteralValue::Str(lhs_json_str)
+					)
+					.unwrap(),
+				"Ne (same) failed for {}: LHS: '{}' == RHS: '{}' (should not be Ne)",
+				kind_desc,
+				lhs_json_str,
+				lhs_json_str
+			);
+
+			// Test Contains (expected to be found)
+			assert!(
+				evaluator
+					.compare_array(lhs_json_str, &ComparisonOperator::Contains, contain_elem)
+					.unwrap(),
+				"Contains (found) failed for {}: LHS: '{}', ELEM: {:?}",
+				kind_desc,
+				lhs_json_str,
+				contain_elem
+			);
+
+			// Test Contains (expected not to be found)
+			assert!(
+				!evaluator
+					.compare_array(
+						lhs_json_str,
+						&ComparisonOperator::Contains,
+						not_contain_elem
+					)
+					.unwrap(),
+				"Contains (not found) failed for {}: LHS: '{}', ELEM: {:?}",
+				kind_desc,
+				lhs_json_str,
+				not_contain_elem
+			);
+		}
+
+		// Specific Contains checks for tuple[] elements of different types
+		let tuple_kind_desc = "tuple[] specific elements";
+		assert!(
+			evaluator
+				.compare_array(
+					&tuple_array_lhs_string_data,
+					&ComparisonOperator::Contains,
+					&LiteralValue::Number("1")
+				)
+				.unwrap(),
+			"Contains (tuple numeric id) failed for {}: LHS: {}",
+			tuple_kind_desc,
+			tuple_array_lhs_string_data
+		);
+		assert!(
+			evaluator
+				.compare_array(
+					&tuple_array_lhs_string_data,
+					&ComparisonOperator::Contains,
+					&LiteralValue::Str(ADDR_1)
+				)
+				.unwrap(),
+			"Contains (tuple address string) failed for {}: LHS: {}",
+			tuple_kind_desc,
+			tuple_array_lhs_string_data
+		);
+		assert!(
+			evaluator
+				.compare_array(
+					&tuple_array_lhs_string_data,
+					&ComparisonOperator::Contains,
+					&LiteralValue::Str("0xBytes01")
+				)
+				.unwrap(),
+			"Contains (tuple bytes string) failed for {}: LHS: {}",
+			tuple_kind_desc,
+			tuple_array_lhs_string_data
+		);
+		assert!(
+			evaluator
+				.compare_array(
+					&tuple_array_lhs_string_data,
+					&ComparisonOperator::Contains,
+					&LiteralValue::Number("123.45")
+				)
+				.unwrap(),
+			"Contains (tuple fixed num) failed for {}: LHS: {}",
+			tuple_kind_desc,
+			tuple_array_lhs_string_data
+		);
+		assert!(
+			evaluator
+				.compare_array(
+					&tuple_array_lhs_string_data,
+					&ComparisonOperator::Contains,
+					&LiteralValue::Str("true")
+				)
+				.unwrap(),
+			"Contains (tuple bool string) failed for {}: LHS: {}",
+			tuple_kind_desc,
+			tuple_array_lhs_string_data
+		);
+		assert!(
+			evaluator
+				.compare_array(
+					&tuple_array_lhs_string_data,
+					&ComparisonOperator::Contains,
+					&LiteralValue::Str("nested_value")
+				)
+				.unwrap(),
+			"Contains (tuple nested object value) failed for {}: LHS: {}",
+			tuple_kind_desc,
+			tuple_array_lhs_string_data
+		);
 	}
 
 	#[test]
