@@ -273,7 +273,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			"==" => are_same_address(&addr1, &addr2),
@@ -308,7 +308,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -351,7 +351,7 @@ proptest! {
 			_client: PhantomData,
 		};
 
-		let eval_result = filter.evaluate_expression(&expr, &Some(params.clone()));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let value_normalized = value_orig.to_lowercase();
 		let compare_to_normalized = compare_to_orig.to_lowercase();
@@ -365,9 +365,9 @@ proptest! {
 			_ => false
 		};
 
-		prop_assert_eq!(eval_result, expected,
+		prop_assert_eq!(result, expected,
 			"\nExpression: '{}'\nOriginal LHS: '{}'\nOriginal RHS: '{}'\nNormalized LHS: '{}'\nNormalized RHS: '{}'\nEvaluated: {}, Expected: {}",
-			expr, value_orig, compare_to_orig, value_normalized, compare_to_normalized, eval_result, expected
+			expr, value_orig, compare_to_orig, value_normalized, compare_to_normalized, result, expected
 		);
 	}
 
@@ -391,7 +391,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			"==" => value == compare_to,
@@ -425,7 +425,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -468,7 +468,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value_i128 > compare_to_i128,
@@ -526,7 +526,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 		let lhs_as_u128 = lhs_value_str.parse::<u128>().unwrap_or_default();
 		let rhs_as_u128 = rhs_value_str.parse::<u128>().unwrap_or_default();
 
@@ -567,7 +567,7 @@ proptest! {
 			let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 					_client: PhantomData,
 			};
-			let result = filter.evaluate_expression(&expr, &Some(params));
+			let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 			let expected = values.contains(&target);
 			prop_assert_eq!(
@@ -598,7 +598,7 @@ proptest! {
 			let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 					_client: PhantomData,
 			};
-			let result = filter.evaluate_expression(&expr, &Some(params));
+			let result = filter.evaluate_expression(&expr, &params).unwrap();
 			// Normalize the target for comparison
 			let target_lowercase = target.to_lowercase();
 			let expected = values.iter().any(|v| v.to_lowercase() == target_lowercase);
@@ -646,7 +646,7 @@ proptest! {
 			let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 					_client: PhantomData,
 			};
-			let result = filter.evaluate_expression(&expr, &Some(params));
+			let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 			// Manually check for presence in original values
 			let expected_str_match = string_values.iter().any(|s_val| s_val.eq_ignore_ascii_case(&target));
@@ -683,7 +683,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = value_str1.eq_ignore_ascii_case(&value_str2);
 
@@ -723,7 +723,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = amount >= threshold && are_same_address(&addr, &addr);
 		prop_assert_eq!(result, expected);
@@ -750,7 +750,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = amount < threshold1 || amount > threshold2;
 		prop_assert_eq!(result, expected);
@@ -802,7 +802,7 @@ proptest! {
 		let filter = EVMBlockFilter::<EvmClient<EVMTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = (value1 > threshold && value2 < threshold) ||
 					  (are_same_address(&addr1, &addr1) && are_same_address(&addr2, &addr2));
@@ -842,16 +842,16 @@ proptest! {
 
 		// Test various invalid expression scenarios
 		let invalid_operator = format!("amount <=> {}", value);
-		prop_assert!(!filter.evaluate_expression(&invalid_operator, &Some(params.clone())));
+		prop_assert!(filter.evaluate_expression(&invalid_operator, &params).is_err());
 
 		let invalid_param = format!("nonexistent == {}", value);
-		prop_assert!(!filter.evaluate_expression(&invalid_param, &Some(params.clone())));
+		prop_assert!(filter.evaluate_expression(&invalid_param, &params).is_err());
 
 		let invalid_comparison = format!("recipient > {}", value);
-		prop_assert!(!filter.evaluate_expression(&invalid_comparison, &Some(params.clone())));
+		prop_assert!(filter.evaluate_expression(&invalid_comparison, &params).is_err());
 
 		let malformed = "amount > ".to_string();
-		prop_assert!(!filter.evaluate_expression(&malformed, &Some(params)));
+		prop_assert!(filter.evaluate_expression(&malformed, &params).is_err());
 	}
 
 	// Tests transaction matching against monitor conditions
@@ -887,14 +887,14 @@ proptest! {
 				let mut expr_matches = true;
 
 				if let Some(expr) = &condition.expression {
-					expr_matches = filter.evaluate_expression(expr, &Some(vec![
+					expr_matches = filter.evaluate_expression(expr, &vec![
 						EVMMatchParamEntry {
 							name: "value".to_string(),
 							value: value.to_string(),
 							kind: "uint256".to_string(),
 							indexed: false,
 						}
-					]))
+					]).unwrap()
 				}
 
 				status_matches && expr_matches

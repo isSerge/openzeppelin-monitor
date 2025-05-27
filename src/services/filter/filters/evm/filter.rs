@@ -28,7 +28,7 @@ use crate::{
 				are_same_address, are_same_signature, b256_to_string, format_token_value,
 				h160_to_string, h256_to_string, normalize_address,
 			},
-			expression,
+			expression::{self, EvaluationError},
 			filters::evm::evaluator::EVMConditionEvaluator,
 			BlockFilter, FilterError,
 		},
@@ -157,12 +157,20 @@ impl<T> EVMBlockFilter<T> {
 							},
 						];
 
-						if self.evaluate_expression(expr, &Some(tx_params)) {
-							matched_transactions.push(TransactionCondition {
-								expression: Some(expr.to_string()),
-								status: *tx_status,
-							});
-							break;
+						// Evaluate the expression with transaction parameters
+						match self.evaluate_expression(expr, &tx_params) {
+							Ok(true) => {
+								matched_transactions.push(TransactionCondition {
+									expression: Some(expr.to_string()),
+									status: *tx_status,
+								});
+								break;
+							}
+							Ok(false) => continue,
+							Err(e) => {
+								tracing::error!("Failed to evaluate expression '{}': {}", expr, e);
+								continue;
+							}
 						}
 					} else {
 						// No expression but status matched
@@ -272,24 +280,37 @@ impl<T> EVMBlockFilter<T> {
 										})
 										.collect();
 									if let Some(expr) = &condition.expression {
-										if self.evaluate_expression(expr, &Some(params.clone())) {
-											matched_functions.push(FunctionCondition {
-												signature: function_signature_with_params.clone(),
-												expression: Some(expr.to_string()),
-											});
-											if let Some(functions) = &mut matched_on_args.functions
-											{
-												functions.push(EVMMatchParamsMap {
+										// Evaluate the expression condition
+										match self.evaluate_expression(expr, &params) {
+											Ok(true) => {
+												matched_functions.push(FunctionCondition {
 													signature: function_signature_with_params
 														.clone(),
-													args: Some(params.clone()),
-													hex_signature: Some(format!(
-														"0x{}",
-														hex::encode(function.short_signature())
-													)),
+													expression: Some(expr.to_string()),
 												});
+												if let Some(functions) =
+													&mut matched_on_args.functions
+												{
+													functions.push(EVMMatchParamsMap {
+														signature: function_signature_with_params
+															.clone(),
+														args: Some(params.clone()),
+														hex_signature: Some(hex::encode(
+															function.short_signature(),
+														)),
+													});
+												}
+												break;
 											}
-											break;
+											Ok(false) => continue,
+											Err(e) => {
+												tracing::error!(
+													"Failed to evaluate expression '{}': {}",
+													expr,
+													e
+												);
+												continue;
+											}
 										}
 									} else {
 										// No expression, just match on function name
@@ -385,15 +406,29 @@ impl<T> EVMBlockFilter<T> {
 								} else {
 									// Evaluate the expression condition
 									if let Some(expr) = &condition.expression {
-										if self.evaluate_expression(expr, &event_condition.args) {
-											matched_events.push(EventCondition {
-												signature: event_condition.signature.clone(),
-												expression: Some(expr.to_string()),
-											});
-											if let Some(events) = &mut matched_on_args.events {
-												events.push(event_condition);
+										match self.evaluate_expression(
+											expr,
+											&event_condition.args.as_deref().unwrap_or_default(),
+										) {
+											Ok(true) => {
+												matched_events.push(EventCondition {
+													signature: event_condition.signature.clone(),
+													expression: Some(expr.to_string()),
+												});
+												if let Some(events) = &mut matched_on_args.events {
+													events.push(event_condition);
+												}
+												break;
 											}
-											break;
+											Ok(false) => continue,
+											Err(e) => {
+												tracing::error!(
+													"Failed to evaluate expression '{}': {}",
+													expr,
+													e
+												);
+												continue;
+											}
 										}
 									}
 								}
@@ -405,7 +440,6 @@ impl<T> EVMBlockFilter<T> {
 		}
 	}
 
-	// TODO: should return Result<bool>
 	/// Evaluates a match expression against provided parameters.
 	///
 	/// # Arguments
@@ -417,36 +451,30 @@ impl<T> EVMBlockFilter<T> {
 	pub fn evaluate_expression(
 		&self,
 		expression: &str,
-		args: &Option<Vec<EVMMatchParamEntry>>,
-	) -> bool {
-		// TODO: double-check cases where args is None
-		let Some(args) = args else {
-			tracing::warn!("No arguments provided for expression evaluation");
-			return false;
-		};
+		args: &[EVMMatchParamEntry],
+	) -> Result<bool, EvaluationError> {
+		// Check if the expression is empty
+		if expression.trim().is_empty() {
+			tracing::error!("Empty expression provided for evaluation");
+			return Err(EvaluationError::parse_error(
+				"Expression cannot be empty".to_string(),
+				None,
+				None,
+			));
+		}
 
 		let evaluator = EVMConditionEvaluator::new(args);
 
 		// Parse the expression
-		let parsed_ast = match expression::parse(expression) {
-			Ok(parsed) => {
-				tracing::debug!("Parsed AST for '{}': {:?}", expression, parsed);
-				parsed
-			}
-			Err(e) => {
-				tracing::warn!("Failed to parse expression '{}': {}", expression, e);
-				return false;
-			}
-		};
+		let parsed_ast = expression::parse(expression).map_err(|e| {
+			tracing::error!("Failed to parse expression '{}': {}", expression, e);
+			let msg = format!("Failed to parse expression '{}': {}", expression, e);
+			EvaluationError::parse_error(msg, None, None)
+		})?;
+		tracing::debug!("Parsed AST for '{}': {:?}", expression, parsed_ast);
 
 		// Evaluate the expression
-		match expression::evaluate(&parsed_ast, &evaluator) {
-			Ok(result) => result,
-			Err(e) => {
-				tracing::warn!("Failed to evaluate expression: {}", e);
-				false
-			}
-		}
+		expression::evaluate(&parsed_ast, &evaluator)
 	}
 
 	/// Decodes event logs using the provided ABI.
@@ -2071,267 +2099,353 @@ mod tests {
 	#[test]
 	fn test_evaluate_expression_simple_uint_comparisons() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param("amount", "1000", "uint256")]);
+		let args = vec![create_test_param("amount", "1000", "uint256")];
 
 		// Test all operators
-		assert!(filter.evaluate_expression("amount > 500", &args));
-		assert!(filter.evaluate_expression("amount >= 1000", &args));
-		assert!(filter.evaluate_expression("amount < 2000", &args));
-		assert!(filter.evaluate_expression("amount <= 1000", &args));
-		assert!(filter.evaluate_expression("amount == 1000", &args));
-		assert!(filter.evaluate_expression("amount != 999", &args));
+		assert!(filter.evaluate_expression("amount > 500", &args).unwrap());
+		assert!(filter.evaluate_expression("amount >= 1000", &args).unwrap());
+		assert!(filter.evaluate_expression("amount < 2000", &args).unwrap());
+		assert!(filter.evaluate_expression("amount <= 1000", &args).unwrap());
+		assert!(filter.evaluate_expression("amount == 1000", &args).unwrap());
+		assert!(filter.evaluate_expression("amount != 999", &args).unwrap());
 
 		// Test false conditions
-		assert!(!filter.evaluate_expression("amount > 1000", &args));
-		assert!(!filter.evaluate_expression("amount < 1000", &args));
-		assert!(!filter.evaluate_expression("amount == 999", &args));
-		assert!(!filter.evaluate_expression("amount != 1000", &args));
-		assert!(!filter.evaluate_expression("amount <= 500", &args));
-		assert!(!filter.evaluate_expression("amount >= 2000", &args));
+		assert!(!filter.evaluate_expression("amount > 1000", &args).unwrap());
+		assert!(!filter.evaluate_expression("amount < 1000", &args).unwrap());
+		assert!(!filter.evaluate_expression("amount == 999", &args).unwrap());
+		assert!(!filter.evaluate_expression("amount != 1000", &args).unwrap());
+		assert!(!filter.evaluate_expression("amount <= 500", &args).unwrap());
+		assert!(!filter.evaluate_expression("amount >= 2000", &args).unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_signed_int_comparisons() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param("balance", "-100", "int256")]);
+		let args = vec![create_test_param("balance", "-100", "int256")];
 
 		// Test all operators
-		assert!(filter.evaluate_expression("balance == -100", &args));
-		assert!(filter.evaluate_expression("balance != 0", &args));
-		assert!(filter.evaluate_expression("balance < 0", &args));
-		assert!(filter.evaluate_expression("balance <= 0", &args));
-		assert!(filter.evaluate_expression("balance > -200", &args));
-		assert!(filter.evaluate_expression("balance >= -100", &args));
+		assert!(filter
+			.evaluate_expression("balance == -100", &args)
+			.unwrap());
+		assert!(filter.evaluate_expression("balance != 0", &args).unwrap());
+		assert!(filter.evaluate_expression("balance < 0", &args).unwrap());
+		assert!(filter.evaluate_expression("balance <= 0", &args).unwrap());
+		assert!(filter.evaluate_expression("balance > -200", &args).unwrap());
+		assert!(filter
+			.evaluate_expression("balance >= -100", &args)
+			.unwrap());
 
 		// Test false conditions
-		assert!(!filter.evaluate_expression("balance < -100", &args));
-		assert!(!filter.evaluate_expression("balance <= -200", &args));
-		assert!(!filter.evaluate_expression("balance > -100", &args));
-		assert!(!filter.evaluate_expression("balance >= 0", &args));
-		assert!(!filter.evaluate_expression("balance != -100", &args));
-		assert!(!filter.evaluate_expression("balance == 0", &args));
+		assert!(!filter.evaluate_expression("balance < -100", &args).unwrap());
+		assert!(!filter
+			.evaluate_expression("balance <= -200", &args)
+			.unwrap());
+		assert!(!filter.evaluate_expression("balance > -100", &args).unwrap());
+		assert!(!filter.evaluate_expression("balance >= 0", &args).unwrap());
+		assert!(!filter
+			.evaluate_expression("balance != -100", &args)
+			.unwrap());
+		assert!(!filter.evaluate_expression("balance == 0", &args).unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_fixed_point_comparisons() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param("price", "123.45", "fixed")]);
+		let args = vec![create_test_param("price", "123.45", "fixed")];
 
 		// Test all operators
-		assert!(filter.evaluate_expression("price == 123.45", &args));
-		assert!(filter.evaluate_expression("price != 0.0", &args));
-		assert!(filter.evaluate_expression("price < 200.0", &args));
-		assert!(filter.evaluate_expression("price <= 123.45", &args));
-		assert!(filter.evaluate_expression("price > 100.0", &args));
-		assert!(filter.evaluate_expression("price >= 123.45", &args));
+		assert!(filter
+			.evaluate_expression("price == 123.45", &args)
+			.unwrap());
+		assert!(filter.evaluate_expression("price != 0.0", &args).unwrap());
+		assert!(filter.evaluate_expression("price < 200.0", &args).unwrap());
+		assert!(filter
+			.evaluate_expression("price <= 123.45", &args)
+			.unwrap());
+		assert!(filter.evaluate_expression("price > 100.0", &args).unwrap());
+		assert!(filter
+			.evaluate_expression("price >= 123.45", &args)
+			.unwrap());
 
 		// Test false conditions
-		assert!(!filter.evaluate_expression("price < 123.45", &args));
-		assert!(!filter.evaluate_expression("price <= 100.0", &args));
-		assert!(!filter.evaluate_expression("price > 123.45", &args));
-		assert!(!filter.evaluate_expression("price >= 200.0", &args));
-		assert!(!filter.evaluate_expression("price != 123.45", &args));
-		assert!(!filter.evaluate_expression("price == 0.0", &args));
+		assert!(!filter.evaluate_expression("price < 123.45", &args).unwrap());
+		assert!(!filter.evaluate_expression("price <= 100.0", &args).unwrap());
+		assert!(!filter.evaluate_expression("price > 123.45", &args).unwrap());
+		assert!(!filter.evaluate_expression("price >= 200.0", &args).unwrap());
+		assert!(!filter
+			.evaluate_expression("price != 123.45", &args)
+			.unwrap());
+		assert!(!filter.evaluate_expression("price == 0.0", &args).unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_address_comparisons() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param(
+		let args = vec![create_test_param(
 			"recipient",
 			"0x1234567890123456789012345678901234567890",
 			"address",
-		)]);
+		)];
 
 		// Test equality
-		assert!(filter.evaluate_expression(
-			"recipient == 0x1234567890123456789012345678901234567890",
-			&args
-		));
-		assert!(filter.evaluate_expression(
-			"recipient != 0x0000000000000000000000000000000000000000",
-			&args
-		));
+		assert!(filter
+			.evaluate_expression(
+				"recipient == 0x1234567890123456789012345678901234567890",
+				&args
+			)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression(
+				"recipient != 0x0000000000000000000000000000000000000000",
+				&args
+			)
+			.unwrap());
 
 		// Test case-insensitive comparison
-		assert!(filter.evaluate_expression(
-			"recipient == 0x1234567890123456789012345678901234567890",
-			&args
-		));
+		assert!(filter
+			.evaluate_expression(
+				"recipient == 0x1234567890123456789012345678901234567890",
+				&args
+			)
+			.unwrap());
 
 		// Test false conditions
-		assert!(!filter.evaluate_expression(
-			"recipient == 0x0000000000000000000000000000000000000000",
-			&args
-		));
+		assert!(!filter
+			.evaluate_expression(
+				"recipient == 0x0000000000000000000000000000000000000000",
+				&args
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_boolean_comparisons() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param("is_active", "true", "bool")]);
+		let args = vec![create_test_param("is_active", "true", "bool")];
 
 		// Test equality
-		assert!(filter.evaluate_expression("is_active == true", &args));
-		assert!(filter.evaluate_expression("is_active != false", &args));
+		assert!(filter
+			.evaluate_expression("is_active == true", &args)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression("is_active != false", &args)
+			.unwrap());
 
 		// Test false conditions
-		assert!(!filter.evaluate_expression("is_active == false", &args));
-		assert!(!filter.evaluate_expression("is_active != true", &args));
+		assert!(!filter
+			.evaluate_expression("is_active == false", &args)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression("is_active != true", &args)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_string_comparisons() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param("name", "Alice", "string")]);
+		let args = vec![create_test_param("name", "Alice", "string")];
 
 		// Test true conditions
-		assert!(filter.evaluate_expression("name == 'Alice'", &args));
-		assert!(filter.evaluate_expression("name != 'Bob'", &args));
-		assert!(filter.evaluate_expression("name contains 'ice'", &args));
-		assert!(filter.evaluate_expression("name starts_with 'ali'", &args));
-		assert!(filter.evaluate_expression("name ends_with 'ice'", &args));
+		assert!(filter
+			.evaluate_expression("name == 'Alice'", &args)
+			.unwrap());
+		assert!(filter.evaluate_expression("name != 'Bob'", &args).unwrap());
+		assert!(filter
+			.evaluate_expression("name contains 'ice'", &args)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression("name starts_with 'ali'", &args)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression("name ends_with 'ice'", &args)
+			.unwrap());
 
 		// Test false conditions
-		assert!(!filter.evaluate_expression("name == 'Bob'", &args));
-		assert!(!filter.evaluate_expression("name != 'Alice'", &args));
-		assert!(!filter.evaluate_expression("name contains 'Bob'", &args));
-		assert!(!filter.evaluate_expression("name starts_with 'Bob'", &args));
-		assert!(!filter.evaluate_expression("name ends_with 'Bob'", &args));
+		assert!(!filter.evaluate_expression("name == 'Bob'", &args).unwrap());
+		assert!(!filter
+			.evaluate_expression("name != 'Alice'", &args)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression("name contains 'Bob'", &args)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression("name starts_with 'Bob'", &args)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression("name ends_with 'Bob'", &args)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_basic_field_access() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param(
+		let args = vec![create_test_param(
 			"transaction",
 			r#"{"to": "0x1234567890123456789012345678901234567890"}"#,
 			"object",
-		)]);
+		)];
 
 		// Test field access
-		assert!(filter.evaluate_expression(
-			"transaction.to == 0x1234567890123456789012345678901234567890",
-			&args
-		));
+		assert!(filter
+			.evaluate_expression(
+				"transaction.to == 0x1234567890123456789012345678901234567890",
+				&args
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_nested_field_access() {
 		let filter = create_test_filter();
 
-		let args = Some(vec![create_test_param(
+		let args = vec![create_test_param(
 			"transaction",
 			r#"{"from": {"address": "0x1234567890123456789012345678901234567890"}}"#,
 			"object",
-		)]);
+		)];
 
-		assert!(filter.evaluate_expression(
-			"transaction.from.address == 0x1234567890123456789012345678901234567890",
-			&args
-		));
+		assert!(filter
+			.evaluate_expression(
+				"transaction.from.address == 0x1234567890123456789012345678901234567890",
+				&args
+			)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_array_indexing() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param("array", "[1, 2, 3]", "array")]);
+		let args = vec![create_test_param("array", "[1, 2, 3]", "array")];
 
 		// Test array indexing
-		assert!(filter.evaluate_expression("array[0] == 1", &args));
-		assert!(filter.evaluate_expression("array[1] == 2", &args));
-		assert!(filter.evaluate_expression("array[2] == 3", &args));
+		assert!(filter.evaluate_expression("array[0] == 1", &args).unwrap());
+		assert!(filter.evaluate_expression("array[1] == 2", &args).unwrap());
+		assert!(filter.evaluate_expression("array[2] == 3", &args).unwrap());
 
 		// Test out-of-bounds access
-		assert!(!filter.evaluate_expression("array[3] == 4", &args));
+		assert!(filter.evaluate_expression("array[3] == 4", &args).is_err());
 	}
 
 	#[test]
 	fn test_evaluate_expression_object_in_array() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param(
+		let args = vec![create_test_param(
 			"objects",
 			r#"[{"name": "Alice"}, {"name": "Bob"}]"#,
 			"array",
-		)]);
+		)];
 
 		// Test object in array
-		assert!(filter.evaluate_expression("objects[0].name == 'Alice'", &args));
-		assert!(filter.evaluate_expression("objects[1].name == 'Bob'", &args));
+		assert!(filter
+			.evaluate_expression("objects[0].name == 'Alice'", &args)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression("objects[1].name == 'Bob'", &args)
+			.unwrap());
 
 		// Test out-of-bounds access
-		assert!(!filter.evaluate_expression("objects[2].name == 'Charlie'", &args));
+		assert!(filter
+			.evaluate_expression("objects[2].name == 'Charlie'", &args)
+			.is_err());
 	}
 
 	#[test]
 	fn test_evaluate_expression_array_json_contains_simple_values() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param(
+		let args = vec![create_test_param(
 			"my_array",
 			r#"["alice", "0x1234567890123456789012345678901234567890", 123, true]"#,
 			"array",
-		)]);
+		)];
 
 		// String contains
-		assert!(filter.evaluate_expression("my_array contains 'alice'", &args));
-		assert!(filter.evaluate_expression(
-			"my_array contains '0x1234567890123456789012345678901234567890'",
-			&args
-		));
+		assert!(filter
+			.evaluate_expression("my_array contains 'alice'", &args)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression(
+				"my_array contains '0x1234567890123456789012345678901234567890'",
+				&args
+			)
+			.unwrap());
 		// Number contains (target is number literal, EVMConditionEvaluator::compare_array gets it as string)
-		assert!(filter.evaluate_expression("my_array contains '123'", &args)); // RHS target_str will be "123"
-																		 // Boolean contains
-		assert!(filter.evaluate_expression("my_array contains 'true'", &args));
+		assert!(filter
+			.evaluate_expression("my_array contains '123'", &args)
+			.unwrap()); // RHS target_str will be "123"
+			   // Boolean contains
+		assert!(filter
+			.evaluate_expression("my_array contains 'true'", &args)
+			.unwrap());
 
 		// Not contains
-		assert!(!filter.evaluate_expression("my_array contains 'dave'", &args));
-		assert!(!filter.evaluate_expression(
-			"my_array contains '0xNonExistentAddress00000000000000000000'",
-			&args
-		));
-		assert!(!filter.evaluate_expression("my_array contains '456'", &args));
+		assert!(!filter
+			.evaluate_expression("my_array contains 'dave'", &args)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression(
+				"my_array contains '0xNonExistentAddress00000000000000000000'",
+				&args
+			)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression("my_array contains '456'", &args)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_array_json_contains_in_object_field() {
 		let filter = create_test_filter();
-		let args = Some(vec![create_test_param(
+		let args = vec![create_test_param(
 			"obj_array",
 			r#"[{"id": 1, "name": "alice", "details": {"color": "red"}}, {"id": 2, "name": "bob"}]"#,
 			"array",
-		)]);
+		)];
 
 		// Checks if "bob" is a value of any field in any object within the array
-		assert!(filter.evaluate_expression("obj_array contains 'bob'", &args));
+		assert!(filter
+			.evaluate_expression("obj_array contains 'bob'", &args)
+			.unwrap());
 		// Checks if "2" (as a string, from number 2) is a value
-		assert!(filter.evaluate_expression("obj_array contains '2'", &args));
+		assert!(filter
+			.evaluate_expression("obj_array contains '2'", &args)
+			.unwrap());
 		// Checks a value within a nested object field
-		assert!(filter.evaluate_expression("obj_array contains 'red'", &args));
-		assert!(!filter.evaluate_expression("obj_array contains 'charlie'", &args));
-		assert!(!filter.evaluate_expression("obj_array contains 'green'", &args)); // color not green
+		assert!(filter
+			.evaluate_expression("obj_array contains 'red'", &args)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression("obj_array contains 'charlie'", &args)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression("obj_array contains 'green'", &args)
+			.unwrap()); // color not green
 	}
 
 	#[test]
 	fn test_evaluate_expression_array_eq_ne_raw_json() {
 		let filter = create_test_filter();
-		let args_json_array = Some(vec![create_test_param(
+		let args_json_array = vec![create_test_param(
 			"my_json_list",
 			r#"["alice", "bob"]"#,
 			"array",
-		)]);
+		)];
 
 		// Eq/Ne on "array" kind compares the raw JSON string value
-		assert!(
-			filter.evaluate_expression("my_json_list == '[\"alice\", \"bob\"]'", &args_json_array)
-		);
-		assert!(!filter.evaluate_expression(
-			"my_json_list == '[\"alice\", \"charlie\"]'",
-			&args_json_array
-		));
-		assert!(filter.evaluate_expression(
-			"my_json_list != '[\"alice\", \"charlie\"]'",
-			&args_json_array
-		));
+		assert!(filter
+			.evaluate_expression("my_json_list == '[\"alice\", \"bob\"]'", &args_json_array)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression(
+				"my_json_list == '[\"alice\", \"charlie\"]'",
+				&args_json_array
+			)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression(
+				"my_json_list != '[\"alice\", \"charlie\"]'",
+				&args_json_array
+			)
+			.unwrap());
 	}
 
 	// TODO: replace with actual error tests when method returns Result
@@ -2339,90 +2453,105 @@ mod tests {
 	fn test_evaluate_expression_error_cases() {
 		let filter = create_test_filter();
 
-		// Test with no args
-		assert!(!filter.evaluate_expression("amount > 1000", &None));
-
 		// Test with empty args
-		assert!(!filter.evaluate_expression("amount > 1000", &Some(vec![])));
+		assert!(filter
+			.evaluate_expression("amount > 1000", &vec![])
+			.is_err());
 
 		// Test with invalid parameter name
-		let args = Some(vec![create_test_param("amount", "1000", "uint256")]);
-		assert!(!filter.evaluate_expression("invalid_param > 1000", &args));
+		let args = vec![create_test_param("amount", "1000", "uint256")];
+		assert!(filter
+			.evaluate_expression("invalid_param > 1000", &args)
+			.is_err());
 
 		// Test with invalid operator
-		assert!(!filter.evaluate_expression("amount >>> 1000", &args));
+		assert!(filter
+			.evaluate_expression("amount >>> 1000", &args)
+			.is_err());
 
 		// Test with invalid value format
-		let args = Some(vec![create_test_param("amount", "not_a_number", "uint256")]);
-		assert!(!filter.evaluate_expression("amount > 1000", &args));
+		let args = vec![create_test_param("amount", "not_a_number", "uint256")];
+		assert!(filter.evaluate_expression("amount > 1000", &args).is_err());
 
 		// Test with unsupported parameter type
-		let args = Some(vec![create_test_param(
-			"param",
-			"value",
-			"unsupported_type",
-		)]);
-		assert!(!filter.evaluate_expression("param == value", &args));
+		let args = vec![create_test_param("param", "value", "unsupported_type")];
+		assert!(filter.evaluate_expression("param == value", &args).is_err());
 	}
 
 	#[test]
 	fn test_evaluate_expression_logical_and_operator() {
 		let filter = create_test_filter();
-		let args_true_true = Some(vec![
+		let args_true_true = vec![
 			create_test_param("value", "150", "uint256"),
 			create_test_param("name", "Alice", "string"),
-		]);
-		let args_true_false = Some(vec![
+		];
+		let args_true_false = vec![
 			create_test_param("value", "150", "uint256"),
 			create_test_param("name", "Bob", "string"), // This will make 'name == "Alice"' false
-		]);
-		let args_false_true = Some(vec![
+		];
+		let args_false_true = vec![
 			create_test_param("value", "50", "uint256"), // This will make 'value > 100' false
 			create_test_param("name", "Alice", "string"),
-		]);
-		let args_false_false = Some(vec![
+		];
+		let args_false_false = vec![
 			create_test_param("value", "50", "uint256"), // 'value > 100' is false
 			create_test_param("name", "Bob", "string"),  // 'name == "Alice"' is false
-		]);
+		];
 
 		// True AND True
-		assert!(filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_true_true));
+		assert!(filter
+			.evaluate_expression("value > 100 AND name == 'Alice'", &args_true_true)
+			.unwrap());
 		// True AND False
-		assert!(!filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_true_false));
+		assert!(!filter
+			.evaluate_expression("value > 100 AND name == 'Alice'", &args_true_false)
+			.unwrap());
 		// False AND True
-		assert!(!filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_false_true));
+		assert!(!filter
+			.evaluate_expression("value > 100 AND name == 'Alice'", &args_false_true)
+			.unwrap());
 		// False AND False
-		assert!(!filter.evaluate_expression("value > 100 AND name == 'Alice'", &args_false_false));
+		assert!(!filter
+			.evaluate_expression("value > 100 AND name == 'Alice'", &args_false_false)
+			.unwrap());
 	}
 
 	#[test]
 	fn test_evaluate_expression_logical_or_operator() {
 		let filter = create_test_filter();
-		let args_true_true = Some(vec![
+		let args_true_true = vec![
 			create_test_param("value", "150", "uint256"),
 			create_test_param("name", "Alice", "string"),
-		]);
-		let args_true_false = Some(vec![
+		];
+		let args_true_false = vec![
 			create_test_param("value", "150", "uint256"),
 			create_test_param("name", "Bob", "string"),
-		]);
-		let args_false_true = Some(vec![
+		];
+		let args_false_true = vec![
 			create_test_param("value", "50", "uint256"),
 			create_test_param("name", "Alice", "string"),
-		]);
-		let args_false_false = Some(vec![
+		];
+		let args_false_false = vec![
 			create_test_param("value", "50", "uint256"),
 			create_test_param("name", "Bob", "string"),
-		]);
+		];
 
 		// True OR True
-		assert!(filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_true_true));
+		assert!(filter
+			.evaluate_expression("value > 100 OR name == 'Alice'", &args_true_true)
+			.unwrap());
 		// True OR False
-		assert!(filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_true_false));
+		assert!(filter
+			.evaluate_expression("value > 100 OR name == 'Alice'", &args_true_false)
+			.unwrap());
 		// False OR True
-		assert!(filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_false_true));
+		assert!(filter
+			.evaluate_expression("value > 100 OR name == 'Alice'", &args_false_true)
+			.unwrap());
 		// False OR False
-		assert!(!filter.evaluate_expression("value > 100 OR name == 'Alice'", &args_false_false));
+		assert!(!filter
+			.evaluate_expression("value > 100 OR name == 'Alice'", &args_false_false)
+			.unwrap());
 	}
 
 	#[test]
@@ -2430,67 +2559,79 @@ mod tests {
 		let filter = create_test_filter();
 
 		// Case 1: (T AND T) OR F  => T (due to AND precedence over OR)
-		let args1 = Some(vec![
+		let args1 = vec![
 			create_test_param("val1", "10", "uint256"), // T for val1 > 5
 			create_test_param("str1", "hello", "string"), // T for str1 == 'hello'
 			create_test_param("bool1", "false", "bool"), // F for bool1 == true
-		]);
-		assert!(filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args1));
+		];
+		assert!(filter
+			.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args1)
+			.unwrap());
 
 		// Case 2: T AND (T OR F) => T (parentheses first)
-		assert!(
-			filter.evaluate_expression("val1 > 5 AND (str1 == 'hello' OR bool1 == true)", &args1)
-		);
+		assert!(filter
+			.evaluate_expression("val1 > 5 AND (str1 == 'hello' OR bool1 == true)", &args1)
+			.unwrap());
 
 		// Case 3: (T AND F) OR T => T
-		let args2 = Some(vec![
+		let args2 = vec![
 			create_test_param("val1", "10", "uint256"),   // T
 			create_test_param("str1", "world", "string"), // F
 			create_test_param("bool1", "true", "bool"),   // T
-		]);
-		assert!(filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args2));
+		];
+		assert!(filter
+			.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args2)
+			.unwrap());
 
 		// Case 4: (T OR F) AND T => T
-		assert!(
-			filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args2)
-		);
+		assert!(filter
+			.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args2)
+			.unwrap());
 
 		// Case 5: (F AND F) OR F => F
-		let args3 = Some(vec![
+		let args3 = vec![
 			create_test_param("val1", "1", "uint256"),    // F
 			create_test_param("str1", "world", "string"), // F
 			create_test_param("bool1", "false", "bool"),  // F
-		]);
-		assert!(
-			!filter.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args3)
-		);
+		];
+		assert!(!filter
+			.evaluate_expression("val1 > 5 AND str1 == 'hello' OR bool1 == true", &args3)
+			.unwrap());
 
 		// Case 6: (F OR F) AND F => F
-		assert!(
-			!filter.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args3)
-		);
+		assert!(!filter
+			.evaluate_expression("(val1 > 5 OR str1 == 'hello') AND bool1 == true", &args3)
+			.unwrap());
 
 		// Case 7: T AND F OR F -> (T AND F) OR F -> F OR F -> F
-		let args_t_f_f = Some(vec![
+		let args_t_f_f = vec![
 			create_test_param("a", "10", "uint256"), // a > 0 (T)
 			create_test_param("b", "foo", "string"), // b == 'bar' (F)
 			create_test_param("c", "false", "bool"), // c == true (F)
-		]);
-		assert!(!filter.evaluate_expression("a > 0 AND b == 'bar' OR c == true", &args_t_f_f));
+		];
+		assert!(!filter
+			.evaluate_expression("a > 0 AND b == 'bar' OR c == true", &args_t_f_f)
+			.unwrap());
 
 		// Case 8: (T OR F) AND F -> T AND F -> F
-		assert!(!filter.evaluate_expression("(a > 0 OR b == 'bar') AND c == true", &args_t_f_f));
+		assert!(!filter
+			.evaluate_expression("(a > 0 OR b == 'bar') AND c == true", &args_t_f_f)
+			.unwrap());
 
 		// Case 9: F AND T OR T -> (F AND T) OR T -> F OR T -> T
-		let args_f_t_t = Some(vec![
+		let args_f_t_t = vec![
 			create_test_param("a", "-5", "int256"),  // a > 0 (F)
 			create_test_param("b", "bar", "string"), // b == 'bar' (T)
 			create_test_param("c", "true", "bool"),  // c == true (T)
-		]);
-		assert!(filter.evaluate_expression("a > 0 AND b == 'bar' OR c == true", &args_f_t_t));
+		];
+		assert!(filter
+			.evaluate_expression("a > 0 AND b == 'bar' OR c == true", &args_f_t_t)
+			.unwrap());
 
 		// Case 10: (F OR T) AND T -> T AND T -> T
-		assert!(filter.evaluate_expression("(a > 0 OR b == 'bar') AND c == true", &args_f_t_t));
+		assert!(filter
+			.evaluate_expression("(a > 0 OR b == 'bar') AND c == true", &args_f_t_t)
+			.unwrap());
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
