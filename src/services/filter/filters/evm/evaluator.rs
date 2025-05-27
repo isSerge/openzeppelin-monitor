@@ -172,11 +172,8 @@ impl<'a> EVMConditionEvaluator<'a> {
 							"Failed to parse LHS value '{}' as JSON array for 'contains' operator",
 							lhs_json_array_str
 						);
-						println!("Error msg: {}", msg);
 						EvaluationError::parse_error(msg, Some(e.into()), None)
 					})?;
-
-				println!("Checking if array contains: {}", rhs_target_str);
 
 				let found = json_array.iter().any(|item_in_array| {
 					self.check_json_value_matches_str(item_in_array, rhs_target_str)
@@ -419,6 +416,110 @@ impl<'a> EVMConditionEvaluator<'a> {
 			}
 		}
 	}
+
+	/// Compares a map (JSON object) value with a literal value.
+	fn compare_map(
+		&self,
+		lhs_json_map_str: &str,
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let rhs_target_str = match rhs_literal {
+			LiteralValue::Str(s) => *s,
+			LiteralValue::Number(s) => {
+				if *operator == ComparisonOperator::Contains {
+					*s // For Contains, we search for this number (as string)
+				} else {
+					let msg = format!(
+						"Expected string literal (representing a JSON map) for EVM 'map' Eq/Ne comparison, found number: {:?}",
+						rhs_literal
+					);
+					return Err(EvaluationError::type_mismatch(msg, None, None));
+				}
+			}
+			_ => {
+				let msg = format!(
+					"Expected string literal for EVM 'map' {} comparison, found: {:?}",
+					if *operator == ComparisonOperator::Contains {
+						"Contains"
+					} else {
+						"Eq/Ne"
+					},
+					rhs_literal
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
+			}
+		};
+
+		tracing::debug!(
+			"EVM Comparing map: lhs: '{}', operator: {:?}, rhs_target: '{}'",
+			lhs_json_map_str,
+			operator,
+			rhs_target_str
+		);
+
+		match operator {
+			ComparisonOperator::Eq | ComparisonOperator::Ne => {
+				let lhs_json_value =
+					serde_json::from_str::<JsonValue>(lhs_json_map_str).map_err(|e| {
+						let msg = format!(
+							"Failed to parse LHS value '{}' as JSON map for 'Eq/Ne' operator",
+							lhs_json_map_str
+						);
+						EvaluationError::parse_error(msg, Some(e.into()), None)
+					})?;
+
+				let rhs_json_value =
+					serde_json::from_str::<JsonValue>(rhs_target_str).map_err(|e| {
+						let msg = format!(
+							"Failed to parse RHS value '{}' as JSON map for 'Eq/Ne' operator",
+							rhs_target_str
+						);
+						EvaluationError::parse_error(msg, Some(e.into()), None)
+					})?;
+
+				// Ensure both parsed values are actually objects
+				if !lhs_json_value.is_object() || !rhs_json_value.is_object() {
+					let msg = format!(
+						"For 'map' Eq/Ne comparison, both LHS ('{}') and RHS ('{}') must resolve to JSON objects.",
+						lhs_json_map_str, rhs_target_str
+					);
+					return Err(EvaluationError::type_mismatch(msg, None, None));
+				}
+
+				let are_equal = lhs_json_value == rhs_json_value;
+
+				Ok(if *operator == ComparisonOperator::Eq {
+					are_equal
+				} else {
+					!are_equal
+				})
+			}
+			ComparisonOperator::Contains => {
+				let json_map =
+					serde_json::from_str::<serde_json::Map<String, JsonValue>>(lhs_json_map_str)
+						.map_err(|e| {
+							let msg = format!(
+						"Failed to parse LHS value '{}' as JSON map for 'contains' operator",
+						lhs_json_map_str
+					);
+							EvaluationError::parse_error(msg, Some(e.into()), None)
+						})?;
+
+				let found = json_map.values().any(|item_in_map| {
+					self.check_json_value_matches_str(item_in_map, rhs_target_str)
+				});
+				Ok(found)
+			}
+			_ => {
+				let msg = format!(
+					"Operator {:?} not supported for EVM 'map' type. Supported: Eq, Ne, Contains.",
+					operator
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
+		}
+	}
 }
 
 impl ConditionEvaluator for EVMConditionEvaluator<'_> {
@@ -469,6 +570,7 @@ impl ConditionEvaluator for EVMConditionEvaluator<'_> {
 				self.compare_string(lhs_value_str, operator, rhs_literal)
 			}
 			"bool" => self.compare_boolean(lhs_value_str, operator, rhs_literal),
+			"map" => self.compare_map(lhs_value_str, operator, rhs_literal),
 			_ => {
 				let msg = format!(
 					"Unsupported EVM parameter kind for comparison: {}",
@@ -1436,7 +1538,7 @@ mod tests {
 		const BYTES32_3: &str =
 			"0x3333333333333333333333333333333333333333333333333333333333333333";
 
-		// --- Prepare complex strings that need formatting ---
+		// --- Prepare complex strings ---
 		let tuple_array_lhs_string_data = format!(
 			r#"[{{ "name":"alice", "id":1, "addr":"{}" }}, {{ "item":"item_B", "val": "0xBytes01", "num_val":123.45, "active":true, "sub_tuple": {{ "key": "nested_value" }} }}]"#,
 			ADDR_1
@@ -1473,8 +1575,8 @@ mod tests {
 			),
 			(
 				"address[]",
-				format!(r#"["{}", "{}"]"#, ADDR_1, ADDR_3_MIXED_CASE), 
-				LiteralValue::Str(ADDR_3_LOWER_CASE),                  
+				format!(r#"["{}", "{}"]"#, ADDR_1, ADDR_3_MIXED_CASE),
+				LiteralValue::Str(ADDR_3_LOWER_CASE),
 				LiteralValue::Str(ADDR_2),
 				format!(r#"["{}"]"#, ADDR_2),
 			),
@@ -1721,6 +1823,50 @@ mod tests {
 		));
 	}
 
+	/// --- Test cases for compare_map ---
+	#[test]
+	fn test_compare_map_contains_value() {
+		let evaluator = create_evaluator();
+		let lhs_json_map = r#"{"key1": "value1", "key2": "value2"}"#;
+		assert!(evaluator
+			.compare_map(
+				lhs_json_map,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("value1")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_map(
+				lhs_json_map,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("value3")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_map_semantic_equality() {
+		let evaluator = create_evaluator();
+
+		// Test Eq
+		assert!(evaluator
+			.compare_map(
+				r#"{"key1": "value1", "key2": "value2"}"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"{"key2":"value2","key1":"value1"}"#)
+			)
+			.unwrap());
+
+		// Test Ne
+		assert!(!evaluator
+			.compare_map(
+				r#"{"key1": "value1", "key2": "value2"}"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"{"key1":"value1","key2":"value2"}"#)
+			)
+			.unwrap());
+	}
+
 	/// --- Test cases for compare_final_values ---
 	#[test]
 	fn test_compare_final_values_routing() {
@@ -1745,18 +1891,14 @@ mod tests {
 			.unwrap());
 
 		// Test routing to compare_i256
-		let i256_res = std::panic::catch_unwind(|| {
-			evaluator.compare_final_values(
-				"int128",
-				"-50",
-				&ComparisonOperator::Lt,
-				&LiteralValue::Number("0"),
+		assert!(evaluator
+			.compare_final_values(
+				"int256",
+				"-123",
+				&ComparisonOperator::Eq,
+				&LiteralValue::Number("-123")
 			)
-		});
-		assert!(
-			i256_res.is_err() || i256_res.unwrap().is_ok(),
-			"compare_i256 test needs update post-impl"
-		);
+			.unwrap());
 
 		// Test routing to compare_fixed_point
 		assert!(evaluator
@@ -1813,6 +1955,16 @@ mod tests {
 				r#"["val1", "val2"]"#,
 				&ComparisonOperator::Contains,
 				&LiteralValue::Str("val1")
+			)
+			.unwrap());
+
+		// Test routing to compare_map
+		assert!(evaluator
+			.compare_final_values(
+				"map",
+				r#"{"key1": "value1", "key2": "value2"}"#,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("value1")
 			)
 			.unwrap());
 	}

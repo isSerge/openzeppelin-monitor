@@ -334,6 +334,110 @@ impl<'a> StellarConditionEvaluator<'a> {
 			}
 		}
 	}
+
+	/// Compares a map (JSON object) value with a literal value.
+	fn compare_map(
+		&self,
+		lhs_json_map_str: &str,
+		operator: &ComparisonOperator,
+		rhs_literal: &LiteralValue<'_>,
+	) -> Result<bool, EvaluationError> {
+		let rhs_target_str = match rhs_literal {
+			LiteralValue::Str(s) => *s,
+			LiteralValue::Number(s) => {
+				if *operator == ComparisonOperator::Contains {
+					*s // For Contains, we search for this number (as string)
+				} else {
+					let msg = format!(
+						"Expected string literal (representing a JSON map) for EVM 'map' Eq/Ne comparison, found number: {:?}",
+						rhs_literal
+					);
+					return Err(EvaluationError::type_mismatch(msg, None, None));
+				}
+			}
+			_ => {
+				let msg = format!(
+					"Expected string literal for EVM 'map' {} comparison, found: {:?}",
+					if *operator == ComparisonOperator::Contains {
+						"Contains"
+					} else {
+						"Eq/Ne"
+					},
+					rhs_literal
+				);
+				return Err(EvaluationError::type_mismatch(msg, None, None));
+			}
+		};
+
+		tracing::debug!(
+			"EVM Comparing map: lhs: '{}', operator: {:?}, rhs_target: '{}'",
+			lhs_json_map_str,
+			operator,
+			rhs_target_str
+		);
+
+		match operator {
+			ComparisonOperator::Eq | ComparisonOperator::Ne => {
+				let lhs_json_value =
+					serde_json::from_str::<JsonValue>(lhs_json_map_str).map_err(|e| {
+						let msg = format!(
+							"Failed to parse LHS value '{}' as JSON map for 'Eq/Ne' operator",
+							lhs_json_map_str
+						);
+						EvaluationError::parse_error(msg, Some(e.into()), None)
+					})?;
+
+				let rhs_json_value =
+					serde_json::from_str::<JsonValue>(rhs_target_str).map_err(|e| {
+						let msg = format!(
+							"Failed to parse RHS value '{}' as JSON map for 'Eq/Ne' operator",
+							rhs_target_str
+						);
+						EvaluationError::parse_error(msg, Some(e.into()), None)
+					})?;
+
+				// Ensure both parsed values are actually objects
+				if !lhs_json_value.is_object() || !rhs_json_value.is_object() {
+					let msg = format!(
+						"For 'map' Eq/Ne comparison, both LHS ('{}') and RHS ('{}') must resolve to JSON objects.",
+						lhs_json_map_str, rhs_target_str
+					);
+					return Err(EvaluationError::type_mismatch(msg, None, None));
+				}
+
+				let are_equal = lhs_json_value == rhs_json_value;
+
+				Ok(if *operator == ComparisonOperator::Eq {
+					are_equal
+				} else {
+					!are_equal
+				})
+			}
+			ComparisonOperator::Contains => {
+				let json_map =
+					serde_json::from_str::<serde_json::Map<String, JsonValue>>(lhs_json_map_str)
+						.map_err(|e| {
+							let msg = format!(
+						"Failed to parse LHS value '{}' as JSON map for 'contains' operator",
+						lhs_json_map_str
+					);
+							EvaluationError::parse_error(msg, Some(e.into()), None)
+						})?;
+
+				let found = json_map.values().any(|item_in_map| {
+					Self::check_json_value_matches_str(item_in_map, rhs_target_str)
+				});
+				Ok(found)
+			}
+			_ => {
+				let msg = format!(
+					"Operator {:?} not supported for EVM 'map' type. Supported: Eq, Ne, Contains.",
+					operator
+				);
+				Err(EvaluationError::unsupported_operator(msg, None, None))
+			}
+		}
+	}
 }
 
 impl ConditionEvaluator for StellarConditionEvaluator<'_> {
@@ -377,6 +481,7 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 				rhs_literal,
 			),
 			"vec" => self.compare_vec(lhs_str, operator, rhs_literal),
+			"map" => self.compare_map(lhs_str, operator, rhs_literal),
 			unknown_type => {
 				let msg = format!("Unknown parameter type: {}", unknown_type);
 				Err(EvaluationError::type_mismatch(msg, None, None))
@@ -1210,6 +1315,50 @@ mod tests {
 			evaluator.compare_vec(lhs, &ComparisonOperator::Gt, &LiteralValue::Str("data")),
 			Err(EvaluationError::UnsupportedOperator(_))
 		));
+	}
+
+	/// --- Test cases for compare_map ---
+	#[test]
+	fn test_compare_map_contains_value() {
+		let evaluator = create_evaluator();
+		let lhs_json_map = r#"{"key1": "value1", "key2": "value2"}"#;
+		assert!(evaluator
+			.compare_map(
+				lhs_json_map,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("value1")
+			)
+			.unwrap());
+		assert!(!evaluator
+			.compare_map(
+				lhs_json_map,
+				&ComparisonOperator::Contains,
+				&LiteralValue::Str("value3")
+			)
+			.unwrap());
+	}
+
+	#[test]
+	fn test_compare_map_semantic_equality() {
+		let evaluator = create_evaluator();
+
+		// Test Eq
+		assert!(evaluator
+			.compare_map(
+				r#"{"key1": "value1", "key2": "value2"}"#,
+				&ComparisonOperator::Eq,
+				&LiteralValue::Str(r#"{"key2":"value2","key1":"value1"}"#)
+			)
+			.unwrap());
+
+		// Test Ne
+		assert!(!evaluator
+			.compare_map(
+				r#"{"key1": "value1", "key2": "value2"}"#,
+				&ComparisonOperator::Ne,
+				&LiteralValue::Str(r#"{"key1":"value1","key2":"value2"}"#)
+			)
+			.unwrap());
 	}
 
 	/// --- Test cases for compare_final_values method ---
