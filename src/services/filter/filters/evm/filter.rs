@@ -408,7 +408,7 @@ impl<T> EVMBlockFilter<T> {
 									if let Some(expr) = &condition.expression {
 										match self.evaluate_expression(
 											expr,
-											&event_condition.args.as_deref().unwrap_or_default(),
+											event_condition.args.as_deref().unwrap_or_default(),
 										) {
 											Ok(true) => {
 												matched_events.push(EventCondition {
@@ -2448,7 +2448,6 @@ mod tests {
 			.unwrap());
 	}
 
-	// TODO: replace with actual error tests when method returns Result
 	#[test]
 	fn test_evaluate_expression_error_cases() {
 		let filter = create_test_filter();
