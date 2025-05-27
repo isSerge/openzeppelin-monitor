@@ -11,7 +11,7 @@ use crate::{
 };
 use serde_json::Value as JsonValue;
 
-type StellarArgs = Vec<StellarMatchParamEntry>;
+type StellarArgs = [StellarMatchParamEntry];
 
 pub struct StellarConditionEvaluator<'a> {
 	args: &'a StellarArgs,
@@ -26,7 +26,7 @@ impl<'a> StellarConditionEvaluator<'a> {
 	/// Used by compare_vec for items within a JSON array.
 	fn check_json_value_matches_str(value_to_check: &JsonValue, target_str: &str) -> bool {
 		match value_to_check {
-			JsonValue::String(s) => s == target_str,
+			JsonValue::String(s) => s.eq_ignore_ascii_case(target_str),
 			JsonValue::Object(nested_map) => {
 				// If 'value_to_check' is an object - check its "value" field.
 				if let Some(val_prop) = nested_map.get("value") {
@@ -391,7 +391,7 @@ mod tests {
 
 	// Helper to create a dummy StellarConditionEvaluator (args don't matter for these unit tests)
 	fn create_evaluator() -> StellarConditionEvaluator<'static> {
-		static EMPTY_ARGS: StellarArgs = Vec::new();
+		static EMPTY_ARGS: &'static StellarArgs = &[];
 		StellarConditionEvaluator::new(&EMPTY_ARGS)
 	}
 

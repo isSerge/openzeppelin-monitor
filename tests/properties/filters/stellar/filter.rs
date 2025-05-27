@@ -363,7 +363,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		// Test address comparison based on normalized form
 		let expected = match operator {
@@ -395,7 +395,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			"==" => value == compare_to,
@@ -414,8 +414,8 @@ proptest! {
 		operator in prop_oneof![
 			Just("=="),
 			Just("!="),
-			Just("startsWith"),
-			Just("endsWith"),
+			Just("starts_with"),
+			Just("ends_with"),
 			Just("contains")
 		],
 		compare_to_orig in "[a-zA-Z0-9_]+",
@@ -434,7 +434,7 @@ proptest! {
 			_client: PhantomData,
 		};
 
-		let eval_result = filter.evaluate_expression(&expr, &Some(params.clone()));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		// Normalize for expected result according to StellarConditionEvaluator::compare_string logic
 		let value_normalized = value_orig.to_lowercase();
@@ -449,9 +449,9 @@ proptest! {
 			_ => false
 		};
 
-		prop_assert_eq!(eval_result, expected,
+		prop_assert_eq!(result, expected,
 			"\nExpression: '{}'\nOriginal LHS: '{}'\nOriginal RHS: '{}'\nNormalized LHS: '{}'\nNormalized RHS: '{}'\nEvaluated: {}, Expected: {}",
-			expr, value_orig, compare_to_orig, value_normalized, compare_to_normalized, eval_result, expected
+			expr, value_orig, compare_to_orig, value_normalized, compare_to_normalized, result, expected
 		);
 	}
 
@@ -478,7 +478,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -516,7 +516,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -554,7 +554,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -592,7 +592,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -630,7 +630,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -668,7 +668,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			">" => value > compare_to,
@@ -709,7 +709,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		// Handle different vector operations: contains checks for membership,
 		// equality operators compare string representation
@@ -744,7 +744,7 @@ proptest! {
 			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 					_client: PhantomData,
 			};
-			let result = filter.evaluate_expression(&expr, &Some(params));
+			let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 			let expected = values.contains(&target);
 			prop_assert_eq!(
@@ -775,7 +775,7 @@ proptest! {
 			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 					_client: PhantomData,
 			};
-			let result = filter.evaluate_expression(&expr, &Some(params));
+			let result = filter.evaluate_expression(&expr, &params).unwrap();
 			// Normalize the target for comparison
 			let target_lowercase = target.to_lowercase();
 			let expected = values.iter().any(|v| v.to_lowercase() == target_lowercase);
@@ -822,7 +822,7 @@ proptest! {
 			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 					_client: PhantomData,
 			};
-			let result = filter.evaluate_expression(&expr, &Some(params));
+			let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 			// Manually check for presence in original values
 			let expected_str_match = string_values.iter().any(|s_val| s_val.eq_ignore_ascii_case(&target));
@@ -859,7 +859,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = value_str1.eq_ignore_ascii_case(&value_str2);
 
@@ -894,7 +894,7 @@ proptest! {
 			let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 					_client: PhantomData,
 			};
-			let result = filter.evaluate_expression(&expr, &Some(params));
+			let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 			// Check if target exists in any nested array
 			let expected = outer_values.iter()
@@ -934,7 +934,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = match operator {
 			"==" => value == compare_to,
@@ -972,7 +972,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = amount >= threshold && are_same_address(&addr, &addr);
 		prop_assert_eq!(result, expected);
@@ -998,7 +998,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		let expected = amount < threshold1 || amount > threshold2;
 		prop_assert_eq!(result, expected);
@@ -1050,7 +1050,7 @@ proptest! {
 		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
 			_client: PhantomData,
 		};
-		let result = filter.evaluate_expression(&expr, &Some(params));
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
 
 		// Expected result combines numeric threshold checks with address equality checks
 		let expected = (value1 > threshold && value2 < threshold) ||
@@ -1087,19 +1087,19 @@ proptest! {
 		// Test cases for expression validation:
 		// 1. Invalid operator syntax
 		let invalid_operator = format!("param0 <=> {}", value);
-		prop_assert!(!filter.evaluate_expression(&invalid_operator, &Some(params.clone())));
+		prop_assert!(filter.evaluate_expression(&invalid_operator, &params).is_err());
 
 		// 2. Non-existent parameter reference
 		let invalid_param = format!("param2 == {}", value);
-		prop_assert!(!filter.evaluate_expression(&invalid_param, &Some(params.clone())));
+		prop_assert!(filter.evaluate_expression(&invalid_param, &params).is_err());
 
 		// 3. Type mismatch in comparison
 		let invalid_comparison = format!("param1 > {}", value);
-		prop_assert!(!filter.evaluate_expression(&invalid_comparison, &Some(params.clone())));
+		prop_assert!(filter.evaluate_expression(&invalid_comparison, &params).is_err());
 
 		// 4. Syntactically incomplete expression
 		let malformed = "param0 > ".to_string();
-		prop_assert!(!filter.evaluate_expression(&malformed, &Some(params)));
+		prop_assert!(filter.evaluate_expression(&malformed, &params).is_err());
 	}
 
 	// Tests transaction matching against monitor conditions
@@ -1141,7 +1141,7 @@ proptest! {
 							indexed: false,
 						}
 					];
-					filter.evaluate_expression(expr, &Some(tx_params))
+					filter.evaluate_expression(expr, &tx_params).unwrap()
 				} else {
 					true
 				}
