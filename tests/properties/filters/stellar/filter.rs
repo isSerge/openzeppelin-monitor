@@ -20,7 +20,7 @@ use openzeppelin_monitor::{
 	utils::tests::stellar::monitor::MonitorBuilder,
 };
 use proptest::{prelude::*, test_runner::Config};
-use serde_json::{json, Value};
+use serde_json::{json, Value as JsonValue};
 use std::{marker::PhantomData, str::FromStr};
 use stellar_strkey::Contract;
 use stellar_xdr::curr::{
@@ -945,6 +945,51 @@ proptest! {
 		prop_assert_eq!(result, expected);
 	}
 
+	// Tests direct object comparison expressions
+	#[test]
+	fn test_map_json_object_eq_ne_expression_evaluation(
+		lhs_json_map_str in prop_oneof![
+			Just("{\"name\":\"alice\", \"id\":1}".to_string()),
+			Just("{\"id\":1, \"name\":\"alice\"}".to_string()), // Same as above, different order
+			Just("{\"name\":\"bob\", \"id\":2}".to_string()),
+			Just("{\"city\":\"london\"}".to_string()),
+			Just("{}".to_string()) // Empty object
+		],
+		rhs_json_map_str in prop_oneof![
+			Just("{\"name\":\"alice\", \"id\":1}".to_string()),
+			Just("{\"id\":1, \"name\":\"alice\"}".to_string()),
+			Just("{\"name\":\"bob\", \"id\":2}".to_string()),
+			Just("{\"city\":\"london\"}".to_string()),
+			Just("{}".to_string()),
+			Just("{\"name\":\"alice\"}".to_string()) // Partially different
+		],
+		operator in prop_oneof![Just("=="), Just("!=")],
+	) {
+		let expr = format!("map_param {} '{}'", operator, rhs_json_map_str);
+
+		let params = vec![StellarMatchParamEntry {
+			name: "map_param".to_string(),
+			value: lhs_json_map_str.clone(),
+			kind: "map".to_string(),
+			indexed: false,
+		}];
+
+		let filter = StellarBlockFilter::<StellarClient<StellarTransportClient>> {
+			_client: PhantomData,
+		};
+		let result = filter.evaluate_expression(&expr, &params).unwrap();
+		let lhs_json_val = serde_json::from_str::<JsonValue>(&lhs_json_map_str).unwrap();
+		let rhs_json_val = serde_json::from_str::<JsonValue>(&rhs_json_map_str).unwrap();
+
+		let expected = match operator {
+			"==" => lhs_json_val == rhs_json_val,
+			"!=" => lhs_json_val != rhs_json_val,
+			_ => unreachable!(),
+		};
+
+		prop_assert_eq!(result, expected);
+	}
+
 	// Tests logical AND combinations in filter expressions
 	#[test]
 	fn test_and_expression_evaluation(
@@ -1367,10 +1412,10 @@ proptest! {
 
 		// Create array of JSON values with explicit types
 		let arguments = vec![
-			Value::Number(serde_json::Number::from(int_value)),
-			Value::Number(serde_json::Number::from(uint_value)),
-			Value::Bool(bool_value),
-			Value::String(string_value.to_string()),
+			JsonValue::Number(serde_json::Number::from(int_value)),
+			JsonValue::Number(serde_json::Number::from(uint_value)),
+			JsonValue::Bool(bool_value),
+			JsonValue::String(string_value.to_string()),
 		];
 
 		let function_spec = StellarContractFunction::default();
