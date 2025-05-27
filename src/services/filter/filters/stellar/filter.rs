@@ -2551,6 +2551,37 @@ mod tests {
 	}
 
 	#[test]
+	fn test_evaluate_expression_map_eq_ne_raw_json() {
+		let filter = create_test_filter();
+		let args_json_map = vec![StellarMatchParamEntry {
+			name: "my_json_map".to_string(),
+			value: r#"{"key1": "value1", "key2": "value2"}"#.to_string(),
+			kind: "map".to_string(),
+			indexed: false,
+		}];
+
+		// Eq/Ne on "object" kind compares the raw JSON string value
+		assert!(filter
+			.evaluate_expression(
+				"my_json_map == '{\"key1\": \"value1\", \"key2\": \"value2\"}'",
+				&args_json_map
+			)
+			.unwrap());
+		assert!(!filter
+			.evaluate_expression(
+				"my_json_map == '{\"key1\": \"value1\", \"key2\": \"value3\"}'",
+				&args_json_map
+			)
+			.unwrap());
+		assert!(filter
+			.evaluate_expression(
+				"my_json_map != '{\"key1\": \"value1\", \"key2\": \"value3\"}'",
+				&args_json_map
+			)
+			.unwrap());
+	}
+
+	#[test]
 	fn test_evaluate_expression_logical_and_operator() {
 		let filter = create_test_filter();
 		let args_true_true = vec![
