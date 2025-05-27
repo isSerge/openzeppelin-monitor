@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
-type EVMArgs = Vec<EVMMatchParamEntry>;
+type EVMArgs = [EVMMatchParamEntry];
 
 const UNSIGNED_INTEGER_KINDS: &[&str] = &[
 	"uint8", "uint16", "uint32", "uint64", "uint128", "uint256", "number",
@@ -493,7 +493,7 @@ mod tests {
 
 	// Helper to create a dummy EVMConditionEvaluator (args don't matter for these unit tests)
 	fn create_evaluator() -> EVMConditionEvaluator<'static> {
-		static EMPTY_ARGS: EVMArgs = Vec::new();
+		static EMPTY_ARGS: &'static EVMArgs = &[];
 		EVMConditionEvaluator::new(&EMPTY_ARGS)
 	}
 
