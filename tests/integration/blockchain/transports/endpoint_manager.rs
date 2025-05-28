@@ -216,6 +216,15 @@ async fn test_no_fallback_urls_available() {
 		.await;
 
 	assert!(result.is_err());
+	let err = result.unwrap_err();
+	match err {
+		TransportError::Http { status_code, url, body, .. } => {
+			assert_eq!(status_code, 429);
+			assert_eq!(url, server.url());
+			assert_eq!(body, "Rate limited");
+		}
+		_ => panic!("Expected Http error with status code 429"),
+	}
 	mock.assert();
 }
 
@@ -492,11 +501,38 @@ async fn test_send_raw_request_network_error_no_fallback() {
 
 	// Verify error
 	assert!(result.is_err());
-	assert!(result
-		.unwrap_err()
-		.to_string()
-		.contains("Failed to send request"));
+	assert!(matches!(result.unwrap_err(), TransportError::Network(_)));
 
 	// Verify URL didn't change
 	assert_eq!(&*manager.active_url.read().await, invalid_url);
+}
+
+#[tokio::test]
+async fn test_send_raw_request_response_parse_error() {
+	let mut server = Server::new_async().await;
+
+	let mock = server
+		.mock("POST", "/")
+		.with_status(200)
+		.with_header("content-type", "application/json")
+		.with_body(r#"{"jsonrpc": "2.0", "result": "invalid_json"#) // Missing closing brace
+		.expect(1)
+		.create_async()
+		.await;
+
+	let manager = EndpointManager::new(get_mock_client_builder(), server.url().as_ref(), vec![]);
+	let transport = MockTransport::new();
+
+	// Send request - should fail with parse error
+	let result = manager
+		.send_raw_request(&transport, "test_method", Some(json!(["param1"])))
+		.await;
+
+	assert!(result.is_err());
+	assert!(matches!(
+		result.unwrap_err(),
+		TransportError::ResponseParse(_)
+	));
+
+	mock.assert();
 }
