@@ -218,7 +218,12 @@ async fn test_no_fallback_urls_available() {
 	assert!(result.is_err());
 	let err = result.unwrap_err();
 	match err {
-		TransportError::Http { status_code, url, body, .. } => {
+		TransportError::Http {
+			status_code,
+			url,
+			body,
+			..
+		} => {
 			assert_eq!(status_code, 429);
 			assert_eq!(url, server.url());
 			assert_eq!(body, "Rate limited");
