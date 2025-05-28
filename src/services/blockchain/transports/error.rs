@@ -42,18 +42,13 @@ impl TransportError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		let mut md = metadata.unwrap_or_default();
-		md.insert("status_code".to_string(), status_code.as_str().to_string());
-		md.insert("url".to_string(), url.clone());
-		md.insert("body".to_string(), body.clone());
-
 		let msg = format!("HTTP error: status {} for URL {}", status_code, url);
 
 		Self::Http {
 			status_code,
 			url,
 			body,
-			context: ErrorContext::new_with_log(msg, source, Some(md)),
+			context: ErrorContext::new_with_log(msg, source, metadata),
 		}
 	}
 
