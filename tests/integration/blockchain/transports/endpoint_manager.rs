@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 
 use openzeppelin_monitor::services::blockchain::{
 	BlockchainTransport, EndpointManager, RotatingTransport, TransientErrorRetryStrategy,
+	TransportError,
 };
 
 // Mock transport implementation for testing
@@ -36,7 +37,7 @@ impl BlockchainTransport for MockTransport {
 		&self,
 		_method: &str,
 		_params: Option<P>,
-	) -> Result<serde_json::Value, anyhow::Error> {
+	) -> Result<serde_json::Value, TransportError> {
 		Ok(json!({
 			"jsonrpc": "2.0",
 			"result": "mocked_response",
