@@ -541,3 +541,27 @@ async fn test_send_raw_request_response_parse_error() {
 
 	mock.assert();
 }
+
+#[tokio::test]
+async fn test_send_raw_request_all_urls_fail_with_rotation_error() {
+	let invalid_url1 = "http://invalid-domain-that-will-fail-1:12345";
+	let invalid_url2 = "http://invalid-domain-that-will-fail-2:12345";
+	let invalid_url3 = "http://invalid-domain-that-will-fail-3:12345";
+
+	let manager = EndpointManager::new(
+		get_mock_client_builder(),
+		invalid_url1,
+		vec![invalid_url2.to_string(), invalid_url3.to_string()],
+	);
+	let transport = MockTransport::new();
+
+	let result = manager
+		.send_raw_request(&transport, "test_method", Some(json!(["param1"])))
+		.await;
+
+	assert!(result.is_err());
+	assert!(matches!(
+		result.unwrap_err(),
+		TransportError::UrlRotation(_)
+	));
+}
