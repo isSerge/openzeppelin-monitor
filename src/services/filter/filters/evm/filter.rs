@@ -2484,7 +2484,7 @@ mod tests {
 
 		// Test with empty args
 		assert!(filter
-			.evaluate_expression("amount > 1000", &vec![])
+			.evaluate_expression("amount > 1000", &[])
 			.is_err());
 
 		// Test with invalid parameter name

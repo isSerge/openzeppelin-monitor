@@ -496,8 +496,8 @@ mod tests {
 
 	// Helper to create a dummy StellarConditionEvaluator (args don't matter for these unit tests)
 	fn create_evaluator() -> StellarConditionEvaluator<'static> {
-		static EMPTY_ARGS: &'static StellarArgs = &[];
-		StellarConditionEvaluator::new(&EMPTY_ARGS)
+		static EMPTY_ARGS: &StellarArgs = &[];
+		StellarConditionEvaluator::new(EMPTY_ARGS)
 	}
 
 	/// --- Test cases for compare_bool method ---

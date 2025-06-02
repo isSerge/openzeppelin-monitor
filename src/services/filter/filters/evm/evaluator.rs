@@ -637,8 +637,8 @@ mod tests {
 
 	// Helper to create a dummy EVMConditionEvaluator (args don't matter for these unit tests)
 	fn create_evaluator() -> EVMConditionEvaluator<'static> {
-		static EMPTY_ARGS: &'static EVMArgs = &[];
-		EVMConditionEvaluator::new(&EMPTY_ARGS)
+		static EMPTY_ARGS: &EVMArgs = &[];
+		EVMConditionEvaluator::new(EMPTY_ARGS)
 	}
 
 	/// --- Test cases for compare_u256 ---
