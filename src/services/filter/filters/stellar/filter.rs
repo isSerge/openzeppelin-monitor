@@ -2952,9 +2952,7 @@ mod tests {
 		let filter = create_test_filter();
 
 		// Test with empty args
-		assert!(filter
-			.evaluate_expression("amount > 1000", &[])
-			.is_err());
+		assert!(filter.evaluate_expression("amount > 1000", &[]).is_err());
 
 		// Test with invalid parameter name
 		let args = vec![StellarMatchParamEntry {
