@@ -295,8 +295,9 @@ impl<T> EVMBlockFilter<T> {
 														signature: function_signature_with_params
 															.clone(),
 														args: Some(params.clone()),
-														hex_signature: Some(hex::encode(
-															function.short_signature(),
+														hex_signature: Some(format!(
+															"0x{}",
+															hex::encode(function.short_signature())
 														)),
 													});
 												}
