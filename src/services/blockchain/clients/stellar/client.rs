@@ -19,7 +19,7 @@ use crate::{
 		blockchain::{
 			client::{BlockChainClient, BlockFilterFactory},
 			transports::StellarTransportClient,
-			BlockchainTransport,
+			BlockchainTransport, TransportError,
 		},
 		filter::{
 			stellar_helpers::{
@@ -82,51 +82,109 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 		Self { http_client }
 	}
 
+	/// Handles transport errors and converts them into StellarClientError
+	/// # Arguments
+	/// * `err` - The transport error encountered
+	/// * `ledger_info` - Contextual information about the ledger range or request
+	/// * `method_name` - The name of the RPC method that encountered the error
+	///
+	/// # Returns
+	/// * `StellarClientError` - The converted error with context
+	///
 	pub fn handle_transport_error(
 		&self,
-		err: anyhow::Error,
+		err: TransportError,
 		ledger_info: String,
 		method_name: &'static str,
 	) -> StellarClientError {
-		let (status_code, body_text) = parse_status_and_body_from_anyhow(&err);
-		let parsed_body_json: serde_json::Value =
-			serde_json::from_str(&body_text.unwrap_or_default()).unwrap_or_default();
-
-		let is_before_history_error = status_code.map_or(false, |code| code == 410)
-			&& parsed_body_json
-				.get("type")
-				.and_then(serde_json::Value::as_str)
-				.map_or(false, |t| t.contains("before_history"));
-
-		if is_before_history_error {
-			let context = ErrorContext::new("BeforeHistory", None, None);
-
-			return StellarClientError::BeforeHistory {
-				ledger_info,
-				http_status: 410,
-				horizon_type: parsed_body_json
-					.get("type")
-					.and_then(serde_json::Value::as_str)
-					.unwrap_or("")
-					.to_string(),
-				title: parsed_body_json
-					.get("title")
-					.and_then(serde_json::Value::as_str)
-					.unwrap_or("")
-					.to_string(),
-				detail: parsed_body_json
-					.get("detail")
-					.and_then(serde_json::Value::as_str)
-					.unwrap_or("")
-					.to_string(),
+		match err {
+			TransportError::Http {
+				status_code,
+				body,
+				url,
 				context,
-			};
-		}
+			} => {
+				// Check if status code is 410 Gone, indicating before history error
+				if status_code == reqwest::StatusCode::GONE {
+					// Parse the body
+					match serde_json::from_str::<serde_json::Value>(&body) {
+						Ok(json_body) => {
+							// Check if the body contains a "type" field indicating a before history error
+							let is_history_type = json_body
+								.get("type")
+								.and_then(|t| t.as_str())
+								.map_or(false, |t| t.contains("before") && t.contains("history"));
 
-		// Return a generic RPC error if not a before history error
-		StellarClientError::RpcError {
-			method_name,
-			source: err,
+							let bh_ctx = ErrorContext::new(
+								format!(
+									"Before history error for method {} for ledger ragnge {}",
+									method_name, ledger_info
+								),
+								None, // 
+								Some(context.metadata.unwrap_or_default()),
+							);
+
+							if is_history_type {
+								return StellarClientError::BeforeHistory {
+									title: json_body
+										.get("title")
+										.and_then(|t| t.as_str())
+										.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
+									detail: json_body
+										.get("detail")
+										.and_then(|d| d.as_str())
+										.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
+									horizon_type: json_body
+										.get("type")
+										.and_then(|t| t.as_str())
+										.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
+									ledger_info,
+									context: bh_ctx,
+									http_status: status_code.into(),
+								};
+							} else {
+								// HTTP 410, but not before history error
+								let source_err =
+									anyhow::anyhow!(
+									"HTTP 410 GONE from {} for method {} with unexpected body: {}",
+									url, method_name, body
+							);
+								return StellarClientError::RpcError {
+									method_name,
+									source: source_err,
+								};
+							}
+						}
+						Err(parse_err) => {
+							let source_err = anyhow::Error::new(parse_err).context(format!(
+								"Failed to parse JSON body of HTTP 410 GONE from {} for method {}. Body: {}",
+								url, method_name, body
+						));
+							return StellarClientError::RpcError {
+								source: source_err,
+								method_name,
+							};
+						}
+					}
+				} else {
+					// Other HTTP errors
+					let source_err = anyhow::anyhow!(
+						"HTTP error {} from {} for method {}: {}",
+						status_code,
+						url,
+						method_name,
+						body
+					);
+					return StellarClientError::RpcError {
+						source: source_err,
+						method_name,
+					};
+				}
+			}
+			_ => StellarClientError::RpcError {
+				source: anyhow::anyhow!(err),
+				method_name,
+			},
 		}
 	}
 }
@@ -239,11 +297,13 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						.get("result")
 						.and_then(|r| r.get("transactions"))
 						.ok_or_else(|| {
-							let sce_parse_error = StellarClientError::ResponseParseError {
+							StellarClientError::ResponseParseError {
 								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
 								method_name: RPC_METHOD_GET_TRANSACTIONS,
-							};
-							anyhow::anyhow!(sce_parse_error)
+							}
+						})
+						.map_err(|client_parse_error| {
+							anyhow::anyhow!(client_parse_error)
 								.context("Failed to parse transactions from response")
 						})?;
 
@@ -277,20 +337,39 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						break;
 					}
 				}
-				// TODO: consider returning structured errors from the transport layer
-				Err(anyhow_transport_err) => {
-					// Parse transport error
+				Err(transport_err) => {
 					let ledger_info = format!(
 						"start_sequence: {}, end_sequence: {:?}",
 						start_sequence, end_sequence
 					);
 					let stellar_client_error = self.handle_transport_error(
-						anyhow_transport_err,
+						transport_err,
 						ledger_info,
 						RPC_METHOD_GET_TRANSACTIONS,
 					);
-					return Err(anyhow::anyhow!(stellar_client_error))
-						.context("Failed to get transactions from Stellar RPC");
+
+					// Log Before History error if applicable
+					if let StellarClientError::BeforeHistory {
+						ledger_info,
+						title,
+						detail,
+						context,
+						..
+					} = &stellar_client_error
+					{
+						tracing::warn!(
+							trace_id = context.trace_id,
+							%ledger_info,
+							%title,
+							%detail,
+							"Stellar RPC returned before history error",
+						);
+					}
+
+					return Err(anyhow::anyhow!(stellar_client_error)).context(format!(
+						"Failed to {} from Stellar RPC",
+						RPC_METHOD_GET_TRANSACTIONS
+					));
 				}
 			}
 		}
@@ -363,11 +442,13 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						.get("result")
 						.and_then(|r| r.get("events"))
 						.ok_or_else(|| {
-							let sce_parse_error = StellarClientError::ResponseParseError {
+							StellarClientError::ResponseParseError {
 								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
 								method_name: RPC_METHOD_GET_EVENTS,
-							};
-							anyhow::anyhow!(sce_parse_error)
+							}
+						})
+						.map_err(|client_parse_error| {
+							anyhow::anyhow!(client_parse_error)
 								.context("Failed to parse events from response")
 						})?;
 
@@ -401,19 +482,39 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						break;
 					}
 				}
-				Err(anyhow_transport_err) => {
-					// Parse transport error
+				Err(transport_err) => {
 					let ledger_info = format!(
 						"start_sequence: {}, end_sequence: {:?}",
 						start_sequence, end_sequence
 					);
 					let stellar_client_error = self.handle_transport_error(
-						anyhow_transport_err,
+						transport_err,
 						ledger_info,
 						RPC_METHOD_GET_EVENTS,
 					);
-					return Err(anyhow::anyhow!(stellar_client_error))
-						.context("Failed to get events from Stellar RPC");
+
+					// Log Before History error if applicable
+					if let StellarClientError::BeforeHistory {
+						ledger_info,
+						title,
+						detail,
+						context,
+						..
+					} = &stellar_client_error
+					{
+						tracing::warn!(
+							trace_id = context.trace_id,
+							%ledger_info,
+							%title,
+							%detail,
+							"Stellar RPC returned before history error",
+						);
+					}
+
+					return Err(anyhow::anyhow!(stellar_client_error)).context(format!(
+						"Failed to {} from Stellar RPC",
+						RPC_METHOD_GET_EVENTS,
+					));
 				}
 			}
 		}
@@ -556,17 +657,37 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 						break;
 					}
 				}
-				Err(anyhow_transport_err) => {
-					// Parse transport error
+				Err(transport_err) => {
 					let ledger_info =
 						format!("start_block: {}, end_block: {:?}", start_block, end_block);
 					let stellar_client_error = self.handle_transport_error(
-						anyhow_transport_err,
+						transport_err,
 						ledger_info,
 						RPC_METHOD_GET_LEDGERS,
 					);
-					return Err(anyhow::anyhow!(stellar_client_error))
-						.context("Failed to get ledgers from Stellar RPC");
+
+					// Log Before History error if applicable
+					if let StellarClientError::BeforeHistory {
+						ledger_info,
+						title,
+						detail,
+						context,
+						..
+					} = &stellar_client_error
+					{
+						tracing::warn!(
+							trace_id = context.trace_id,
+							%ledger_info,
+							%title,
+							%detail,
+							"Stellar RPC returned before history error",
+						);
+					}
+
+					return Err(anyhow::anyhow!(stellar_client_error)).context(format!(
+						"Failed to {} from Stellar RPC",
+						RPC_METHOD_GET_LEDGERS,
+					));
 				}
 			}
 		}
@@ -653,19 +774,4 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 			contract_spec,
 		)))
 	}
-}
-
-// TODO: Remove once structured errors are implemented in the transport layer
-/// Helper function to parse status and body from an `anyhow::Error`
-fn parse_status_and_body_from_anyhow(err: &anyhow::Error) -> (Option<u16>, Option<String>) {
-	let err_string = err.to_string();
-	if let Some(http_error_part) = err_string.split("HTTP error ").nth(1) {
-		let parts: Vec<&str> = http_error_part.splitn(2, ':').collect();
-		if parts.len() == 2 {
-			let status_code = parts[0].trim().parse::<u16>().ok();
-			let body = parts[1].trim().to_string();
-			return (status_code, Some(body));
-		}
-	}
-	(None, None)
 }
