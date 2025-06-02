@@ -932,7 +932,7 @@ proptest! {
 				let mut expr_matches = true;
 
 				if let Some(expr) = &condition.expression {
-					expr_matches = filter.evaluate_expression(expr, &vec![
+					expr_matches = filter.evaluate_expression(expr, &[
 						EVMMatchParamEntry {
 							name: "value".to_string(),
 							value: value.to_string(),
