@@ -117,10 +117,10 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 
 							let bh_ctx = ErrorContext::new(
 								format!(
-									"Before history error for method {} for ledger ragnge {}",
+									"Before history error for method {} for ledger range {}",
 									method_name, ledger_info
 								),
-								None, // 
+								None,
 								Some(context.metadata.unwrap_or_default()),
 							);
 
@@ -148,7 +148,7 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 									anyhow::anyhow!(
 									"HTTP 410 GONE from {} for method {} with unexpected body: {}",
 									url, method_name, body
-							);
+								);
 								return StellarClientError::RpcError {
 									method_name,
 									source: source_err,
@@ -159,7 +159,7 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 							let source_err = anyhow::Error::new(parse_err).context(format!(
 								"Failed to parse JSON body of HTTP 410 GONE from {} for method {}. Body: {}",
 								url, method_name, body
-						));
+							));
 							return StellarClientError::RpcError {
 								source: source_err,
 								method_name,
@@ -338,10 +338,13 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 					}
 				}
 				Err(transport_err) => {
+					// Ledger info for logging
 					let ledger_info = format!(
 						"start_sequence: {}, end_sequence: {:?}",
 						start_sequence, end_sequence
 					);
+
+					// Handle transport error and convert to StellarClientError
 					let stellar_client_error = self.handle_transport_error(
 						transport_err,
 						ledger_info,
@@ -483,10 +486,13 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 					}
 				}
 				Err(transport_err) => {
+					// Ledger info for logging
 					let ledger_info = format!(
 						"start_sequence: {}, end_sequence: {:?}",
 						start_sequence, end_sequence
 					);
+
+					// Handle transport error and convert to StellarClientError
 					let stellar_client_error = self.handle_transport_error(
 						transport_err,
 						ledger_info,
@@ -658,8 +664,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 					}
 				}
 				Err(transport_err) => {
+					// Ledger info for logging
 					let ledger_info =
 						format!("start_block: {}, end_block: {:?}", start_block, end_block);
+
+					// Handle transport error and convert to StellarClientError
 					let stellar_client_error = self.handle_transport_error(
 						transport_err,
 						ledger_info,
@@ -775,3 +784,4 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 		)))
 	}
 }
+
