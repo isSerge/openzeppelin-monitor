@@ -13,7 +13,7 @@ use openzeppelin_monitor::{
 		FunctionCondition, Monitor, MonitorMatch, TransactionCondition, TransactionStatus,
 	},
 	services::{
-		blockchain::EvmClient,
+		blockchain::{EvmClient, TransportError},
 		filter::{handle_match, FilterError, FilterService},
 	},
 	utils::tests::evm::{receipt::ReceiptBuilder, transaction::TransactionBuilder},
@@ -41,7 +41,13 @@ fn setup_mock_transport(test_data: TestData) -> MockEVMTransportClient {
 				("eth_getLogs", i) => Ok(json!({
 					"result": &receipts[i].logs
 				})),
-				_ => Err(anyhow::anyhow!("Unexpected method call")),
+				_ => Err(TransportError::http(
+					reqwest::StatusCode::METHOD_NOT_ALLOWED,
+					"random.url".to_string(),
+					"Unexpected method call".to_string(),
+					None,
+					None,
+				)),
 			}
 		});
 
@@ -1022,7 +1028,13 @@ async fn test_filter_block_needs_receipt_for_status() -> Result<(), Box<FilterEr
 				("eth_getLogs", _) => Ok(json!({
 					"result": Vec::<EVMReceiptLog>::new()
 				})),
-				_ => Err(anyhow::anyhow!("Unexpected method call")),
+				_ => Err(TransportError::http(
+					reqwest::StatusCode::METHOD_NOT_ALLOWED,
+					"random.url".to_string(),
+					"Unexpected method call".to_string(),
+					None,
+					None,
+				)),
 			}
 		});
 

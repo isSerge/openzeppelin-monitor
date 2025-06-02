@@ -274,6 +274,7 @@ docker compose logs -f
 
 ==== Configuration References
 
+* Monitor, network, and trigger names **must be unique** across all configurations files
 * Monitor's `networks` array must contain valid network `slug` values from network configuration files
 * Monitor's `triggers` array must contain valid trigger configuration keys
 * Example valid references:
@@ -620,11 +621,11 @@ A Network configuration defines connection details and operational parameters fo
 
 |slug
 |String
-|Unique identifier for the network
+|**Unique** identifier for the network
 
 |name
 |String
-|Human-readable network name
+|**Unique** Human-readable network name
 
 |rpc_urls
 |Array[Object]
@@ -726,7 +727,7 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 
 |name
 |String
-|Human-readable name for the notification
+|**Unique** Human-readable name for the notification
 
 |trigger_type
 |String
@@ -779,7 +780,7 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 
 |name
 |String
-|Human-readable name for the notification
+|**Unique** Human-readable name for the notification
 
 |trigger_type
 |String
@@ -856,7 +857,7 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 
 |name
 |String
-|Human-readable name for the notification
+|**Unique** Human-readable name for the notification
 
 |trigger_type
 |String
@@ -917,7 +918,7 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 
 |name
 |String
-|Human-readable name for the notification
+|**Unique** Human-readable name for the notification
 
 |trigger_type
 |String
@@ -963,7 +964,7 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 
 |name
 |String
-|Human-readable name for the notification
+|**Unique** Human-readable name for the notification
 
 |trigger_type
 |String
@@ -1013,7 +1014,7 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 
 |name
 |String
-|Human-readable name for the notification
+|**Unique** Human-readable name for the notification
 
 |trigger_type
 |String
@@ -1188,7 +1189,7 @@ Slack, Discord, Telegram, Email and Webhook support Markdown formatting in their
 }
 ----
 
-==== Important Considerations:
+==== Important Considerations
 
 * Email notification port defaults to 465 if not specified.
 * Template variables are context-dependent:
@@ -1427,7 +1428,7 @@ Match transaction properties. The available fields and expression syntax depend 
 
 |name
 |String
-|Unique identifier for this monitor
+|**Unique** identifier for this monitor
 
 |networks
 |Array[String]
@@ -1555,7 +1556,7 @@ For more information about custom scripts, see xref:scripts.adoc[Custom Scripts 
 |The timeout of the script is important to avoid infinite loops during the execution. If the script takes longer than the timeout, it will be killed and the match will be included by default.
 |===
 
-==== Important Considerations:
+==== Important Considerations
 
 * Network slugs in the monitor must match valid network configurations.
 * Trigger IDs must match configured triggers.
@@ -1744,9 +1745,9 @@ docker compose restart monitor
 
 The monitor implements a comprehensive error handling system with rich context and tracing capabilities. For detailed information about error handling, see xref:error.adoc[Error Handling Guide].
 
-== Important Considerations:
+== Important Considerations
 
-=== Performance Considerations:
+=== Performance Considerations
 
 * Monitor performance depends on network congestion and RPC endpoint reliability.
 ** View the xref:rpc.adoc#list_of_rpc_calls[list of RPC calls] made by the monitor.
