@@ -12,4 +12,4 @@ mod stellar {
 }
 
 pub use evm::client::{EvmClient, EvmClientTrait};
-pub use stellar::client::{StellarClient, StellarClientTrait};
+pub use stellar::client::{StellarClient, StellarClientError, StellarClientTrait};

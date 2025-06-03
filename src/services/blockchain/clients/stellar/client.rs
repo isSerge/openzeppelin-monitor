@@ -44,12 +44,12 @@ const RPC_METHOD_GET_LEDGER_ENTRIES: &str = "getLedgerEntries";
 pub enum StellarClientError {
 	#[error("Data for '{ledger_info}' is before recorded history (HTTP {http_status}). Horizon Type: '{horizon_type}', Title: '{title}'. Detail: '{detail}'")]
 	BeforeHistory {
-		title: String,         // From Horizon JSON: "title"
-		detail: String,        // From Horizon JSON: "detail"
-		horizon_type: String,  // From Horizon JSON: "type"
-		ledger_info: String,   // Client-side context about the request
-		context: ErrorContext, // Internal tracing context
-		http_status: u16,      // HTTP status code (should be 410)
+		title: String,              // From Horizon JSON: "title"
+		detail: String,             // From Horizon JSON: "detail"
+		horizon_type: String,       // From Horizon JSON: "type"
+		ledger_info: String,        // Client-side context about the request
+		context: Box<ErrorContext>, // Internal tracing context
+		http_status: u16,           // HTTP status code (should be 410)
 	},
 	#[error("Stellar RPC request failed")]
 	RpcError {
@@ -113,7 +113,7 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 							let is_history_type = json_body
 								.get("type")
 								.and_then(|t| t.as_str())
-								.map_or(false, |t| t.contains("before") && t.contains("history"));
+								.is_some_and(|t| t.contains("before") && t.contains("history"));
 
 							let bh_ctx = ErrorContext::new(
 								format!(
@@ -125,7 +125,7 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 							);
 
 							if is_history_type {
-								return StellarClientError::BeforeHistory {
+								StellarClientError::BeforeHistory {
 									title: json_body
 										.get("title")
 										.and_then(|t| t.as_str())
@@ -139,9 +139,9 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 										.and_then(|t| t.as_str())
 										.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
 									ledger_info,
-									context: bh_ctx,
+									context: Box::new(bh_ctx),
 									http_status: status_code.into(),
-								};
+								}
 							} else {
 								// HTTP 410, but not before history error
 								let source_err =
@@ -149,10 +149,11 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 									"HTTP 410 GONE from {} for method {} with unexpected body: {}",
 									url, method_name, body
 								);
-								return StellarClientError::RpcError {
+
+								StellarClientError::RpcError {
 									method_name,
 									source: source_err,
-								};
+								}
 							}
 						}
 						Err(parse_err) => {
@@ -160,10 +161,11 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 								"Failed to parse JSON body of HTTP 410 GONE from {} for method {}. Body: {}",
 								url, method_name, body
 							));
-							return StellarClientError::RpcError {
+
+							StellarClientError::RpcError {
 								source: source_err,
 								method_name,
-							};
+							}
 						}
 					}
 				} else {
@@ -175,10 +177,11 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 						method_name,
 						body
 					);
-					return StellarClientError::RpcError {
+
+					StellarClientError::RpcError {
 						source: source_err,
 						method_name,
-					};
+					}
 				}
 			}
 			_ => StellarClientError::RpcError {
@@ -784,4 +787,3 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 		)))
 	}
 }
-

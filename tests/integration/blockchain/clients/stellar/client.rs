@@ -9,7 +9,9 @@ use openzeppelin_monitor::{
 		BlockType, ContractSpec, StellarBlock, StellarEvent, StellarFormattedContractSpec,
 		StellarLedgerInfo, StellarTransaction, StellarTransactionInfo,
 	},
-	services::blockchain::{BlockChainClient, StellarClient, StellarClientTrait},
+	services::blockchain::{
+		BlockChainClient, StellarClient, StellarClientError, StellarClientTrait,
+	},
 };
 use serde_json::json;
 
@@ -475,4 +477,129 @@ async fn test_get_contract_spec_invalid_response() {
 	contract_invalid_code_mock.assert_async().await;
 
 	// Failed to get contract code XDR
+}
+
+#[tokio::test]
+async fn test_handle_transport_error_before_history() {
+	let mut server = Server::new_async().await;
+	let mock = create_stellar_valid_server_mock_network_response(&mut server);
+	let network = create_stellar_test_network_with_urls(vec![&server.url()]);
+
+	let before_history_error_response = json!({
+		"type": "https://stellar.org/horizon-errors/before_history",
+		"title": "Data Requested Is Before Recorded History",
+		"status": reqwest::StatusCode::GONE.as_u16(), // 410 Gone
+		"detail": "This instance is too old."
+	});
+
+	// Mock a transport error
+	server
+		.mock("POST", "/")
+		.with_status(reqwest::StatusCode::GONE.as_u16().into())
+		.with_body(before_history_error_response.to_string())
+		.create_async()
+		.await;
+
+	let client = StellarClient::new(&network).await.unwrap();
+	let result = client.get_transactions(1, Some(2)).await;
+
+	assert!(result.is_err(), "Should return an error");
+
+	let error = result.unwrap_err();
+
+	assert!(error
+		.to_string()
+		.contains("Failed to getTransactions from Stellar RPC"));
+
+	// Check if source error is of type BeforeHistory
+	assert!(matches!(
+		error
+			.source()
+			.expect("Expected source error to be present")
+			.downcast_ref::<StellarClientError>(),
+		Some(StellarClientError::BeforeHistory { .. })
+	));
+
+	mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_handle_transport_error_http_410_not_before_history() {
+	let mut server = Server::new_async().await;
+	let mock = create_stellar_valid_server_mock_network_response(&mut server);
+	let network = create_stellar_test_network_with_urls(vec![&server.url()]);
+
+	let before_history_error_response = json!({
+		"type": "this is another http error", // Not a BeforeHistory error
+		"title": "HTTP Error",
+		"status": reqwest::StatusCode::GONE.as_u16(), // 410 Gone
+		"detail": "This is a random HTTP error."
+	});
+
+	// Mock a transport error
+	server
+		.mock("POST", "/")
+		.with_status(reqwest::StatusCode::GONE.as_u16().into())
+		.with_body(before_history_error_response.to_string())
+		.create_async()
+		.await;
+
+	let client = StellarClient::new(&network).await.unwrap();
+	let result = client.get_events(1, Some(2)).await;
+
+	assert!(result.is_err(), "Should return an error");
+
+	let error = result.unwrap_err();
+
+	assert!(error
+		.to_string()
+		.contains("Failed to getEvents from Stellar RPC"));
+
+	// Check if source error is of type RpcError
+	assert!(matches!(
+		error
+			.source()
+			.expect("Expected source error to be present")
+			.downcast_ref::<StellarClientError>(),
+		Some(StellarClientError::RpcError { .. })
+	));
+
+	mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_handle_transport_error_http_error() {
+	let mut server = Server::new_async().await;
+	let mock = create_stellar_valid_server_mock_network_response(&mut server);
+	let network = create_stellar_test_network_with_urls(vec![&server.url()]);
+
+	// Mock a transport error
+	server
+		.mock("POST", "/")
+		.with_status(reqwest::StatusCode::INTERNAL_SERVER_ERROR.as_u16().into()) // 500 Internal Server Error
+		.with_body("Internal Server Error")
+		.create_async()
+		.await;
+
+	let client = StellarClient::new(&network).await.unwrap();
+	let result = client.get_blocks(1, Some(2)).await;
+
+	assert!(result.is_err(), "Should return an error");
+
+	let error = result.unwrap_err();
+
+	assert!(error
+		.to_string()
+		.contains("Failed to getLedgers from Stellar RPC"));
+
+	// Check if source error is of type RpcError
+	assert!(matches!(
+		error
+			.source()
+			.expect("Expected source error to be present")
+			.downcast_ref::<StellarClientError>(),
+		Some(StellarClientError::RpcError { .. })
+	));
+
+	mock.assert_async().await;
 }

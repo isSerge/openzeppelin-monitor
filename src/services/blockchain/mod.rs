@@ -16,7 +16,9 @@ mod pool;
 mod transports;
 
 pub use client::{BlockChainClient, BlockFilterFactory};
-pub use clients::{EvmClient, EvmClientTrait, StellarClient, StellarClientTrait};
+pub use clients::{
+	EvmClient, EvmClientTrait, StellarClient, StellarClientError, StellarClientTrait,
+};
 pub use error::BlockChainError;
 pub use pool::{ClientPool, ClientPoolTrait};
 pub use transports::{
