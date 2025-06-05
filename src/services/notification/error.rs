@@ -204,21 +204,47 @@ mod tests {
 	}
 
 	#[test]
-	fn test_all_error_variants_have_trace_id() {
-		let base_context = || Box::new(ErrorContext::new("test", None, None));
-		let errors = vec![
-			NotificationError::NetworkError(base_context()),
-			NotificationError::ConfigError(base_context()),
-			NotificationError::InternalError(base_context()),
-			NotificationError::ExecutionError(base_context()),
-			NotificationError::NotifyFailed(base_context()),
+	fn test_all_error_variants_have_and_propagate_consistent_trace_id() {
+		let create_context_with_id = || {
+			let context = ErrorContext::new("test message", None, None);
+			let original_id = context.trace_id.clone();
+			(Box::new(context), original_id)
+		};
+
+		let errors_with_ids: Vec<(NotificationError, String)> = vec![
+			{
+				let (ctx, id) = create_context_with_id();
+				(NotificationError::NetworkError(ctx), id)
+			},
+			{
+				let (ctx, id) = create_context_with_id();
+				(NotificationError::ConfigError(ctx), id)
+			},
+			{
+				let (ctx, id) = create_context_with_id();
+				(NotificationError::InternalError(ctx), id)
+			},
+			{
+				let (ctx, id) = create_context_with_id();
+				(NotificationError::ExecutionError(ctx), id)
+			},
+			{
+				let (ctx, id) = create_context_with_id();
+				(NotificationError::NotifyFailed(ctx), id)
+			},
 		];
 
-		for error in errors {
+		for (error, original_id) in errors_with_ids {
+			let propagated_id = error.trace_id();
 			assert!(
-				!error.trace_id().is_empty(),
-				"Error {:?} should have a trace_id",
+				!propagated_id.is_empty(),
+				"Error {:?} should have a non-empty trace_id",
 				error
+			);
+			assert_eq!(
+				propagated_id, original_id,
+				"Trace ID for {:?} was not propagated consistently. Expected: {}, Got: {}",
+				error, original_id, propagated_id
 			);
 		}
 	}
