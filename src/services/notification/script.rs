@@ -13,6 +13,7 @@ use super::NotificationError;
 /// This notifier takes a script configuration and executes the specified script
 /// when a monitor match occurs. It supports different script languages and
 /// allows passing arguments and setting timeouts for script execution.
+#[derive(Debug)]
 pub struct ScriptNotifier {
 	config: TriggerTypeConfig,
 }
@@ -86,7 +87,10 @@ impl ScriptExecutor for ScriptNotifier {
 mod tests {
 	use super::*;
 	use crate::{
-		models::{EVMMonitorMatch, EVMTransactionReceipt, MatchConditions, Monitor, MonitorMatch},
+		models::{
+			EVMMonitorMatch, EVMTransactionReceipt, MatchConditions, Monitor, MonitorMatch,
+			NotificationMessage, SecretString, SecretValue,
+		},
 		utils::tests::{
 			builders::evm::monitor::MonitorBuilder, evm::transaction::TransactionBuilder,
 		},
@@ -133,6 +137,24 @@ mod tests {
 		let config = create_test_script_config();
 		let notifier = ScriptNotifier::from_config(&config);
 		assert!(notifier.is_ok());
+	}
+
+	#[test]
+	fn test_from_config_invalid_type() {
+		// Create a config that is not a script type
+		let config = TriggerTypeConfig::Slack {
+			slack_url: SecretValue::Plain(SecretString::new("random.url".to_string())),
+			message: NotificationMessage {
+				title: "Test Slack".to_string(),
+				body: "This is a test message".to_string(),
+			},
+		};
+
+		let notifier = ScriptNotifier::from_config(&config);
+		assert!(notifier.is_err());
+
+		let error = notifier.unwrap_err();
+		assert!(matches!(error, NotificationError::ConfigError { .. }));
 	}
 
 	#[tokio::test]
@@ -206,5 +228,21 @@ mod tests {
 			.contains("Script execution timed out"));
 		// Verify that it failed around the timeout time
 		assert!(elapsed.as_millis() >= 400 && elapsed.as_millis() < 600);
+	}
+
+	#[tokio::test]
+	async fn test_script_notify_with_invalid_script() {
+		let config = create_test_script_config();
+		let notifier = ScriptNotifier::from_config(&config).unwrap();
+		let monitor_match = create_test_monitor_match();
+		let script_content = (ScriptLanguage::Python, "invalid syntax".to_string());
+
+		let result = notifier
+			.script_notify(&monitor_match, &script_content)
+			.await;
+		assert!(result.is_err());
+
+		let error = result.unwrap_err();
+		assert!(matches!(error, NotificationError::ExecutionError { .. }));
 	}
 }

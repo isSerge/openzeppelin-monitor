@@ -43,6 +43,7 @@ pub struct WebhookConfig {
 }
 
 /// Implementation of webhook notifications via webhooks
+#[derive(Debug)]
 pub struct WebhookNotifier {
 	/// Webhook URL for message delivery
 	pub url: String,
@@ -455,6 +456,26 @@ mod tests {
 		assert_eq!(notifier.body_template, "Test message ${value}");
 	}
 
+	#[test]
+	fn test_from_config_invalid_type() {
+		// Create a config that is not a Telegram type
+		let config = TriggerTypeConfig::Slack {
+			slack_url: SecretValue::Plain(SecretString::new(
+				"https://slack.example.com".to_string(),
+			)),
+			message: NotificationMessage {
+				title: "Test Alert".to_string(),
+				body: "Test message ${value}".to_string(),
+			},
+		};
+
+		let notifier = WebhookNotifier::from_config(&config);
+		assert!(notifier.is_err());
+
+		let error = notifier.unwrap_err();
+		assert!(matches!(error, NotificationError::ConfigError { .. }));
+	}
+
 	////////////////////////////////////////////////////////////
 	// notify tests
 	////////////////////////////////////////////////////////////
@@ -808,5 +829,18 @@ mod tests {
 		let result = notifier.notify_with_payload("Test message", payload).await;
 		assert!(result.is_ok());
 		mock.assert();
+	}
+
+	#[tokio::test]
+	async fn test_notify_with_payload_invalid_url() {
+		let notifier = create_test_notifier("invalid-url", "Test message", None, None);
+
+		let result = notifier
+			.notify_with_payload("Test message", HashMap::new())
+			.await;
+		assert!(result.is_err());
+
+		let error = result.unwrap_err();
+		assert!(matches!(error, NotificationError::NotifyFailed { .. }));
 	}
 }

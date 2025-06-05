@@ -12,6 +12,7 @@ use crate::{
 };
 
 /// Implementation of Slack notifications via webhooks
+#[derive(Debug)]
 pub struct SlackNotifier {
 	inner: WebhookNotifier,
 }
@@ -196,6 +197,26 @@ mod tests {
 		assert_eq!(notifier.inner.body_template, "Test message ${value}");
 	}
 
+	#[test]
+	fn test_from_config_invalid_type() {
+		// Create a config that is not a Slack type
+		let config = TriggerTypeConfig::Discord {
+			discord_url: SecretValue::Plain(SecretString::new(
+				"https://discord.example.com".to_string(),
+			)),
+			message: NotificationMessage {
+				title: "Test Alert".to_string(),
+				body: "Test message ${value}".to_string(),
+			},
+		};
+
+		let notifier = SlackNotifier::from_config(&config);
+		assert!(notifier.is_err());
+
+		let error = notifier.unwrap_err();
+		assert!(matches!(error, NotificationError::ConfigError { .. }));
+	}
+
 	////////////////////////////////////////////////////////////
 	// notify tests
 	////////////////////////////////////////////////////////////
@@ -205,6 +226,9 @@ mod tests {
 		let notifier = create_test_notifier("Test message");
 		let result = notifier.notify("Test message").await;
 		assert!(result.is_err());
+
+		let error = result.unwrap_err();
+		assert!(matches!(error, NotificationError::NotifyFailed { .. }));
 	}
 
 	#[tokio::test]
@@ -214,5 +238,8 @@ mod tests {
 			.notify_with_payload("Test message", HashMap::new())
 			.await;
 		assert!(result.is_err());
+
+		let error = result.unwrap_err();
+		assert!(matches!(error, NotificationError::NotifyFailed { .. }));
 	}
 }

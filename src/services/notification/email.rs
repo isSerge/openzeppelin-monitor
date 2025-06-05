@@ -22,6 +22,7 @@ use crate::{
 use pulldown_cmark::{html, Options, Parser};
 
 /// Implementation of email notifications via SMTP
+#[derive(Debug)]
 pub struct EmailNotifier<T: Transport + Send + Sync> {
 	/// Email subject
 	subject: String,
@@ -360,6 +361,24 @@ mod tests {
 		assert!(notifier.is_ok());
 	}
 
+	#[test]
+	fn test_from_config_invalid_type() {
+		// Create a Slack config instead of Email
+		let config = TriggerTypeConfig::Slack {
+			slack_url: SecretValue::Plain(SecretString::new("random.url".to_string())),
+			message: NotificationMessage {
+				title: "Test Slack".to_string(),
+				body: "This is a test message".to_string(),
+			},
+		};
+
+		let notifier = EmailNotifier::from_config(&config);
+		assert!(notifier.is_err());
+
+		let error = notifier.unwrap_err();
+		assert!(matches!(error, NotificationError::ConfigError { .. }));
+	}
+
 	////////////////////////////////////////////////////////////
 	// notify tests
 	////////////////////////////////////////////////////////////
@@ -370,5 +389,8 @@ mod tests {
 		let result = notifier.notify("Test message").await;
 		// Expected to fail since we're using a dummy SMTP server
 		assert!(result.is_err());
+
+		let error = result.unwrap_err();
+		assert!(matches!(error, NotificationError::NotifyFailed { .. }));
 	}
 }
