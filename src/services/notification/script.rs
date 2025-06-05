@@ -89,13 +89,15 @@ mod tests {
 	use crate::{
 		models::{
 			EVMMonitorMatch, EVMTransactionReceipt, MatchConditions, Monitor, MonitorMatch,
-			NotificationMessage, SecretString, SecretValue,
+			NotificationMessage, SecretString, SecretValue, TriggerType,
 		},
+		services::notification::NotificationService,
 		utils::tests::{
 			builders::evm::monitor::MonitorBuilder, evm::transaction::TransactionBuilder,
+			trigger::TriggerBuilder,
 		},
 	};
-	use std::time::Instant;
+	use std::{collections::HashMap, time::Instant};
 
 	fn create_test_script_config() -> TriggerTypeConfig {
 		TriggerTypeConfig::Script {
@@ -244,5 +246,37 @@ mod tests {
 
 		let error = result.unwrap_err();
 		assert!(matches!(error, NotificationError::ExecutionError { .. }));
+	}
+
+	#[tokio::test]
+	async fn test_script_notification_script_content_not_found() {
+		let service = NotificationService::new();
+		let script_config = TriggerTypeConfig::Script {
+			language: ScriptLanguage::Python,
+			script_path: "non_existent_script.py".to_string(), // This path won't be in the map
+			arguments: None,
+			timeout_ms: 1000,
+		};
+		let trigger = TriggerBuilder::new()
+        .name("test_script_missing")
+        .config(script_config) // Use the actual script config
+        .trigger_type(TriggerType::Script)
+        .build();
+
+		let variables = HashMap::new();
+		let monitor_match = create_test_monitor_match();
+		let trigger_scripts = HashMap::new(); // Empty map, so script won't be found
+
+		let result = service
+			.execute(&trigger, variables, &monitor_match, &trigger_scripts)
+			.await;
+
+		assert!(result.is_err());
+		match result.unwrap_err() {
+			NotificationError::ConfigError(ctx) => {
+				assert!(ctx.message.contains("Script content not found"));
+			}
+			_ => panic!("Expected ConfigError for missing script content"),
+		}
 	}
 }
