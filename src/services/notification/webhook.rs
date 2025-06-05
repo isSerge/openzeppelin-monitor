@@ -79,8 +79,8 @@ impl WebhookNotifier {
 	/// * `config` - Webhook configuration
 	///
 	/// # Returns
-	/// * `Result<Self, Box<NotificationError>>` - Notifier instance if config is valid
-	pub fn new(config: WebhookConfig) -> Result<Self, Box<NotificationError>> {
+	/// * `Result<Self, NotificationError>` - Notifier instance if config is valid
+	pub fn new(config: WebhookConfig) -> Result<Self, NotificationError> {
 		let mut headers = config.headers.unwrap_or_default();
 		if !headers.contains_key("Content-Type") {
 			headers.insert("Content-Type".to_string(), "application/json".to_string());
@@ -147,7 +147,7 @@ impl WebhookNotifier {
 		&self,
 		secret: &str,
 		payload: &WebhookMessage,
-	) -> Result<(String, String), Box<NotificationError>> {
+	) -> Result<(String, String), NotificationError> {
 		let timestamp = Utc::now().timestamp_millis();
 
 		// Create HMAC instance

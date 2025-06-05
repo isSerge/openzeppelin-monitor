@@ -35,7 +35,7 @@ impl TelegramNotifier {
 		disable_web_preview: Option<bool>,
 		title: String,
 		body_template: String,
-	) -> Result<Self, Box<NotificationError>> {
+	) -> Result<Self, NotificationError> {
 		let url = format!(
 			"{}/bot{}/sendMessage",
 			base_url.unwrap_or("https://api.telegram.org".to_string()),

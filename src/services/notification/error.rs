@@ -13,19 +13,19 @@ use uuid::Uuid;
 pub enum NotificationError {
 	/// Errors related to network connectivity issues
 	#[error("Network error: {0}")]
-	NetworkError(ErrorContext),
+	NetworkError(Box<ErrorContext>),
 
 	/// Errors related to malformed requests or invalid responses
 	#[error("Config error: {0}")]
-	ConfigError(ErrorContext),
+	ConfigError(Box<ErrorContext>),
 
 	/// Errors related to internal processing errors
 	#[error("Internal error: {0}")]
-	InternalError(ErrorContext),
+	InternalError(Box<ErrorContext>),
 
 	/// Errors related to script execution
 	#[error("Script execution error: {0}")]
-	ExecutionError(ErrorContext),
+	ExecutionError(Box<ErrorContext>),
 
 	/// Other errors that don't fit into the categories above
 	#[error(transparent)]
@@ -39,7 +39,7 @@ impl NotificationError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		Self::NetworkError(ErrorContext::new_with_log(msg, source, metadata))
+		Self::NetworkError(Box::new(ErrorContext::new_with_log(msg, source, metadata)))
 	}
 
 	// Config error
@@ -48,7 +48,7 @@ impl NotificationError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		Self::ConfigError(ErrorContext::new_with_log(msg, source, metadata))
+		Self::ConfigError(Box::new(ErrorContext::new_with_log(msg, source, metadata)))
 	}
 
 	// Internal error
@@ -57,7 +57,7 @@ impl NotificationError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		Self::InternalError(ErrorContext::new_with_log(msg, source, metadata))
+		Self::InternalError(Box::new(ErrorContext::new_with_log(msg, source, metadata)))
 	}
 
 	// Execution error
@@ -66,7 +66,7 @@ impl NotificationError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		Self::ExecutionError(ErrorContext::new_with_log(msg, source, metadata))
+		Self::ExecutionError(Box::new(ErrorContext::new_with_log(msg, source, metadata)))
 	}
 }
 
@@ -193,7 +193,7 @@ mod tests {
 		let original_trace_id = error_context.trace_id.clone();
 
 		// Wrap it in a NotificationError
-		let notification_error = NotificationError::NetworkError(error_context);
+		let notification_error = NotificationError::NetworkError(Box::new(error_context));
 
 		// Verify the trace ID is preserved
 		assert_eq!(notification_error.trace_id(), original_trace_id);
@@ -203,7 +203,7 @@ mod tests {
 		let error_context = ErrorContext::new("Middle error", Some(Box::new(source_error)), None);
 		let original_trace_id = error_context.trace_id.clone();
 
-		let notification_error = NotificationError::NetworkError(error_context);
+		let notification_error = NotificationError::NetworkError(Box::new(error_context));
 		assert_eq!(notification_error.trace_id(), original_trace_id);
 
 		// Test Other variant

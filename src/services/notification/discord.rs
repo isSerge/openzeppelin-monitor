@@ -80,7 +80,7 @@ impl DiscordNotifier {
 		url: String,
 		title: String,
 		body_template: String,
-	) -> Result<Self, Box<NotificationError>> {
+	) -> Result<Self, NotificationError> {
 		Ok(Self {
 			inner: WebhookNotifier::new(WebhookConfig {
 				url,

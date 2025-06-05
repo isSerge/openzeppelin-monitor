@@ -88,7 +88,7 @@ impl EmailNotifier<SmtpTransport> {
 	pub fn new(
 		smtp_config: SmtpConfig,
 		email_content: EmailContent,
-	) -> Result<Self, Box<NotificationError>> {
+	) -> Result<Self, NotificationError> {
 		let client = SmtpTransport::relay(&smtp_config.host)
 			.map_err(|e| {
 				NotificationError::internal_error(
