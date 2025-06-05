@@ -162,39 +162,40 @@ impl TelegramNotifier {
 	/// * `config` - Trigger configuration containing Telegram parameters
 	///
 	/// # Returns
-	/// * `Option<Self>` - Notifier instance if config is Telegram type
-	pub fn from_config(config: &TriggerTypeConfig) -> Option<Self> {
-		match config {
-			TriggerTypeConfig::Telegram {
-				token,
-				chat_id,
-				message,
-				disable_web_preview,
-			} => {
-				let mut url_params = HashMap::new();
-				url_params.insert("chat_id".to_string(), chat_id.clone());
-				url_params.insert("parse_mode".to_string(), "MarkdownV2".to_string());
+	/// * `Result<Self, NotificationError>` - Notifier instance if config is Telegram type
+	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+		if let TriggerTypeConfig::Telegram {
+			token,
+			chat_id,
+			disable_web_preview,
+			message,
+		} = config
+		{
+			let mut url_params = HashMap::new();
+			url_params.insert("chat_id".to_string(), chat_id.clone());
+			url_params.insert("parse_mode".to_string(), "MarkdownV2".to_string());
 
-				WebhookNotifier::new(WebhookConfig {
-					url: format!("https://api.telegram.org/bot{}/sendMessage", token),
-					url_params: Some(url_params),
-					title: message.title.clone(),
-					body_template: message.body.clone(),
-					method: Some("GET".to_string()),
-					secret: None,
-					headers: Some(HashMap::from([(
-						"Content-Type".to_string(),
-						"application/json".to_string(),
-					)])),
-					payload_fields: None,
-				})
-				.ok()
-				.map(|inner| Self {
-					inner,
-					disable_web_preview: disable_web_preview.unwrap_or(false),
-				})
-			}
-			_ => None,
+			let webhook_config = WebhookConfig {
+				url: format!("https://api.telegram.org/bot{}/sendMessage", token),
+				url_params: Some(url_params),
+				title: message.title.clone(),
+				body_template: message.body.clone(),
+				method: Some("GET".to_string()),
+				secret: None,
+				headers: None,
+				payload_fields: None,
+			};
+
+			Ok(Self {
+				inner: WebhookNotifier::new(webhook_config)?,
+				disable_web_preview: disable_web_preview.unwrap_or(false),
+			})
+		} else {
+			Err(NotificationError::config_error(
+				format!("Invalid telegram configuration: {:?}", config),
+				None,
+				None,
+			))
 		}
 	}
 }
@@ -312,7 +313,7 @@ mod tests {
 		let config = create_test_telegram_config();
 
 		let notifier = TelegramNotifier::from_config(&config);
-		assert!(notifier.is_some());
+		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
 		assert_eq!(

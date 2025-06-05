@@ -6,6 +6,8 @@ use crate::{
 	services::trigger::ScriptExecutorFactory,
 };
 
+use super::NotificationError;
+
 /// A notification handler that executes scripts when triggered
 ///
 /// This notifier takes a script configuration and executes the specified script
@@ -17,12 +19,14 @@ pub struct ScriptNotifier {
 
 impl ScriptNotifier {
 	/// Creates a Script notifier from a trigger configuration
-	pub fn from_config(config: &TriggerTypeConfig) -> Option<Self> {
-		match config {
-			TriggerTypeConfig::Script { .. } => Some(Self {
+	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+		if let TriggerTypeConfig::Script { .. } = config {
+			Ok(Self {
 				config: config.clone(),
-			}),
-			_ => None,
+			})
+		} else {
+			let msg = format!("Invalid script configuration: {:?}", config);
+			Err(NotificationError::config_error(msg, None, None))
 		}
 	}
 }
@@ -118,7 +122,7 @@ mod tests {
 	fn test_from_config_with_script_config() {
 		let config = create_test_script_config();
 		let notifier = ScriptNotifier::from_config(&config);
-		assert!(notifier.is_some());
+		assert!(notifier.is_ok());
 	}
 
 	#[tokio::test]

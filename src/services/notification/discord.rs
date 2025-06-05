@@ -113,13 +113,14 @@ impl DiscordNotifier {
 	/// * `config` - Trigger configuration containing Discord parameters
 	///
 	/// # Returns
-	/// * `Option<Self>` - Notifier instance if config is Discord type
-	pub fn from_config(config: &TriggerTypeConfig) -> Option<Self> {
-		match config {
-			TriggerTypeConfig::Discord {
-				discord_url,
-				message,
-			} => WebhookNotifier::new(WebhookConfig {
+	/// * `Result<Self, NotificationError>` - Notifier instance if config is Discord type
+	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+		if let TriggerTypeConfig::Discord {
+			discord_url,
+			message,
+		} = config
+		{
+			let webhook_config = WebhookConfig {
 				url: discord_url.as_ref().to_string(),
 				url_params: None,
 				title: message.title.clone(),
@@ -128,10 +129,14 @@ impl DiscordNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
+			};
+
+			Ok(Self {
+				inner: WebhookNotifier::new(webhook_config)?,
 			})
-			.ok()
-			.map(|inner| Self { inner }),
-			_ => None,
+		} else {
+			let msg = format!("Invalid discord configuration: {:?}", config);
+			Err(NotificationError::config_error(msg, None, None))
 		}
 	}
 }
@@ -238,7 +243,7 @@ mod tests {
 		let config = create_test_discord_config();
 
 		let notifier = DiscordNotifier::from_config(&config);
-		assert!(notifier.is_some());
+		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
 		assert_eq!(notifier.inner.url, "https://discord.example.com");

@@ -109,38 +109,22 @@ impl NotificationService {
 	) -> Result<(), NotificationError> {
 		match &trigger.trigger_type {
 			TriggerType::Slack => {
-				let notifier = SlackNotifier::from_config(&trigger.config);
-				if let Some(notifier) = notifier {
-					notifier
-						.notify(&notifier.format_message(&variables))
-						.await
-						.with_context(|| {
-							format!("Failed to execute notification {}", trigger.name)
-						})?;
-				} else {
-					return Err(NotificationError::config_error(
-						"Invalid slack configuration",
-						None,
-						None,
-					));
-				}
+				let notifier = SlackNotifier::from_config(&trigger.config)?;
+
+				// TODO: throw specific error
+				notifier
+					.notify(&notifier.format_message(&variables))
+					.await
+					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
 			}
 			TriggerType::Email => {
-				let notifier = EmailNotifier::from_config(&trigger.config);
-				if let Some(notifier) = notifier {
-					notifier
-						.notify(&notifier.format_message(&variables))
-						.await
-						.with_context(|| {
-							format!("Failed to execute notification {}", trigger.name)
-						})?;
-				} else {
-					return Err(NotificationError::config_error(
-						"Invalid email configuration",
-						None,
-						None,
-					));
-				}
+				let notifier = EmailNotifier::from_config(&trigger.config)?;
+
+				// TODO: throw specific error
+				notifier
+					.notify(&notifier.format_message(&variables))
+					.await
+					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
 			}
 			TriggerType::Webhook => {
 				let notifier = WebhookNotifier::from_config(&trigger.config);
@@ -160,86 +144,60 @@ impl NotificationService {
 				}
 			}
 			TriggerType::Discord => {
-				let notifier = DiscordNotifier::from_config(&trigger.config);
+				let notifier = DiscordNotifier::from_config(&trigger.config)?;
 
-				if let Some(notifier) = notifier {
-					notifier
-						.notify(&notifier.format_message(&variables))
-						.await
-						.with_context(|| {
-							format!("Failed to execute notification {}", trigger.name)
-						})?;
-				} else {
-					return Err(NotificationError::config_error(
-						"Invalid discord configuration",
-						None,
-						None,
-					));
-				}
+				// TODO: throw specific error
+				notifier
+					.notify(&notifier.format_message(&variables))
+					.await
+					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
 			}
 			TriggerType::Telegram => {
-				let notifier = TelegramNotifier::from_config(&trigger.config);
-				if let Some(notifier) = notifier {
-					notifier
-						.notify(&notifier.format_message(&variables))
-						.await
-						.with_context(|| {
-							format!("Failed to execute notification {}", trigger.name)
-						})?;
-				} else {
-					return Err(NotificationError::config_error(
-						"Invalid telegram configuration",
-						None,
-						None,
-					));
-				}
+				let notifier = TelegramNotifier::from_config(&trigger.config)?;
+
+				// TODO: throw specific error
+				notifier
+					.notify(&notifier.format_message(&variables))
+					.await
+					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
 			}
 			TriggerType::Script => {
-				let notifier = ScriptNotifier::from_config(&trigger.config);
-				if let Some(notifier) = notifier {
-					let monitor_name = match monitor_match {
-						MonitorMatch::EVM(evm_match) => &evm_match.monitor.name,
-						MonitorMatch::Stellar(stellar_match) => &stellar_match.monitor.name,
-					};
-					let script_path = match &trigger.config {
-						TriggerTypeConfig::Script { script_path, .. } => script_path,
-						_ => {
-							return Err(NotificationError::config_error(
-								"Invalid script configuration".to_string(),
-								None,
-								None,
-							))
-						}
-					};
-					let script = trigger_scripts
-						.get(&format!("{}|{}", monitor_name, script_path))
-						.ok_or_else(|| {
-							NotificationError::config_error(
-								"Script content not found".to_string(),
-								None,
-								None,
-							)
-						});
-					let script_content = match &script {
-						Ok(content) => content,
-						Err(e) => {
-							return Err(NotificationError::config_error(e.to_string(), None, None))
-						}
-					};
+				let notifier = ScriptNotifier::from_config(&trigger.config)?;
+				let monitor_name = match monitor_match {
+					MonitorMatch::EVM(evm_match) => &evm_match.monitor.name,
+					MonitorMatch::Stellar(stellar_match) => &stellar_match.monitor.name,
+				};
+				let script_path = match &trigger.config {
+					TriggerTypeConfig::Script { script_path, .. } => script_path,
+					_ => {
+						return Err(NotificationError::config_error(
+							"Invalid script configuration".to_string(),
+							None,
+							None,
+						))
+					}
+				};
+				let script = trigger_scripts
+					.get(&format!("{}|{}", monitor_name, script_path))
+					.ok_or_else(|| {
+						NotificationError::config_error(
+							"Script content not found".to_string(),
+							None,
+							None,
+						)
+					});
+				let script_content = match &script {
+					Ok(content) => content,
+					Err(e) => {
+						return Err(NotificationError::config_error(e.to_string(), None, None))
+					}
+				};
 
-					notifier
-						.script_notify(monitor_match, script_content)
-						.await
-						.with_context(|| {
-							format!("Failed to execute notification {}", trigger.name)
-						})?;
-				} else {
-					return Err(NotificationError::config_error(
-						"Invalid script configuration".to_string(),
-						None,
-						None,
-					));
-				}
+				// TODO: throw specific error
+				notifier
+					.script_notify(monitor_match, script_content)
+					.await
+					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
 			}
 		}
 		Ok(())

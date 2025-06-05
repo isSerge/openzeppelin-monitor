@@ -60,27 +60,29 @@ impl SlackNotifier {
 	/// * `config` - Trigger configuration containing Slack parameters
 	///
 	/// # Returns
-	/// * `Option<Self>` - Notifier instance if config is Slack type
-	pub fn from_config(config: &TriggerTypeConfig) -> Option<Self> {
-		match config {
-			TriggerTypeConfig::Slack { slack_url, message } => {
-				let mut headers = HashMap::new();
-				headers.insert("Content-Type".to_string(), "application/json".to_string());
+	/// * `Result<Self, NotificationError>` - Notifier instance if config is Slack type
+	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+		if let TriggerTypeConfig::Slack { slack_url, message } = config {
+			let webhook_config = WebhookConfig {
+				url: slack_url.as_ref().to_string(),
+				url_params: None,
+				title: message.title.clone(),
+				body_template: message.body.clone(),
+				method: Some("POST".to_string()),
+				secret: None,
+				headers: None,
+				payload_fields: None,
+			};
 
-				WebhookNotifier::new(WebhookConfig {
-					url: slack_url.as_ref().to_string(),
-					url_params: None,
-					title: message.title.clone(),
-					body_template: message.body.clone(),
-					method: Some("POST".to_string()),
-					secret: None,
-					headers: Some(headers),
-					payload_fields: None,
-				})
-				.ok()
-				.map(|inner| Self { inner })
-			}
-			_ => None,
+			Ok(Self {
+				inner: WebhookNotifier::new(webhook_config)?,
+			})
+		} else {
+			Err(NotificationError::config_error(
+				format!("Invalid slack configuration: {:?}", config),
+				None,
+				None,
+			))
 		}
 	}
 }
@@ -186,7 +188,7 @@ mod tests {
 		let config = create_test_slack_config();
 
 		let notifier = SlackNotifier::from_config(&config);
-		assert!(notifier.is_some());
+		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
 		assert_eq!(notifier.inner.url, "https://slack.example.com");
