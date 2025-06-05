@@ -6,7 +6,6 @@
 use crate::utils::logging::error::{ErrorContext, TraceableError};
 use std::collections::HashMap;
 use thiserror::Error as ThisError;
-use uuid::Uuid;
 
 /// Represents errors that can occur during notification operations
 #[derive(ThisError, Debug)]
@@ -27,9 +26,9 @@ pub enum NotificationError {
 	#[error("Script execution error: {0}")]
 	ExecutionError(Box<ErrorContext>),
 
-	/// Other errors that don't fit into the categories above
-	#[error(transparent)]
-	Other(#[from] anyhow::Error),
+	/// Error when Notifier `notify`` method fails (e.g., webhook failure, parsing error, invalid signature)
+	#[error("Notification failed: {0}")]
+	NotifyFailed(Box<ErrorContext>),
 }
 
 impl NotificationError {
@@ -68,6 +67,15 @@ impl NotificationError {
 	) -> Self {
 		Self::ExecutionError(Box::new(ErrorContext::new_with_log(msg, source, metadata)))
 	}
+
+	// Notify failed error
+	pub fn notify_failed(
+		msg: impl Into<String>,
+		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+		metadata: Option<HashMap<String, String>>,
+	) -> Self {
+		Self::NotifyFailed(Box::new(ErrorContext::new_with_log(msg, source, metadata)))
+	}
 }
 
 impl TraceableError for NotificationError {
@@ -77,7 +85,7 @@ impl TraceableError for NotificationError {
 			Self::ConfigError(ctx) => ctx.trace_id.clone(),
 			Self::InternalError(ctx) => ctx.trace_id.clone(),
 			Self::ExecutionError(ctx) => ctx.trace_id.clone(),
-			Self::Other(_) => Uuid::new_v4().to_string(),
+			Self::NotifyFailed(ctx) => ctx.trace_id.clone(),
 		}
 	}
 }
@@ -150,11 +158,20 @@ mod tests {
 	}
 
 	#[test]
-	fn test_from_anyhow_error() {
-		let anyhow_error = anyhow::anyhow!("test anyhow error");
-		let notification_error: NotificationError = anyhow_error.into();
-		assert!(matches!(notification_error, NotificationError::Other(_)));
-		assert_eq!(notification_error.to_string(), "test anyhow error");
+	fn test_notify_failed_error_formatting() {
+		let error = NotificationError::notify_failed("test error", None, None);
+		assert_eq!(error.to_string(), "Notification failed: test error");
+
+		let source_error = IoError::new(ErrorKind::NotFound, "test source");
+		let error = NotificationError::notify_failed(
+			"test error",
+			Some(Box::new(source_error)),
+			Some(HashMap::from([("key1".to_string(), "value1".to_string())])),
+		);
+		assert_eq!(
+			error.to_string(),
+			"Notification failed: test error [key1=value1]"
+		);
 	}
 
 	#[test]
@@ -205,12 +222,5 @@ mod tests {
 
 		let notification_error = NotificationError::NetworkError(Box::new(error_context));
 		assert_eq!(notification_error.trace_id(), original_trace_id);
-
-		// Test Other variant
-		let anyhow_error = anyhow::anyhow!("Test anyhow error");
-		let notification_error: NotificationError = anyhow_error.into();
-
-		// Other variant should generate a new UUID
-		assert!(!notification_error.trace_id().is_empty());
 	}
 }

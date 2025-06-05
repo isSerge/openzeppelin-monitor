@@ -3,7 +3,6 @@
 //! This module provides functionality to send notifications through various channels
 //! Supports variable substitution in message templates.
 
-use anyhow::Context;
 use async_trait::async_trait;
 
 use std::collections::HashMap;
@@ -38,8 +37,8 @@ pub trait Notifier {
 	/// * `message` - The formatted message to send
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), anyhow::Error>;
+	/// * `Result<(), NotificationError>` - Success or error
+	async fn notify(&self, message: &str) -> Result<(), NotificationError>;
 
 	/// Sends a notification with custom payload fields
 	///
@@ -48,12 +47,12 @@ pub trait Notifier {
 	/// * `payload_fields` - Additional fields to include in the payload
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error
+	/// * `Result<(), NotificationError>` - Success or error
 	async fn notify_with_payload(
 		&self,
 		message: &str,
 		_payload_fields: HashMap<String, serde_json::Value>,
-	) -> Result<(), anyhow::Error> {
+	) -> Result<(), NotificationError> {
 		// Default implementation just calls notify
 		self.notify(message).await
 	}
@@ -72,12 +71,12 @@ pub trait ScriptExecutor {
 	/// * `script_content` - The script content to execute
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error
+	/// * `Result<(), NotificationError>` - Success or error
 	async fn script_notify(
 		&self,
 		monitor_match: &MonitorMatch,
 		script_content: &(ScriptLanguage, String),
-	) -> Result<(), anyhow::Error>;
+	) -> Result<(), NotificationError>;
 }
 
 /// Service for managing notifications across different channels
@@ -111,30 +110,23 @@ impl NotificationService {
 			TriggerType::Slack => {
 				let notifier = SlackNotifier::from_config(&trigger.config)?;
 
-				// TODO: throw specific error
 				notifier
 					.notify(&notifier.format_message(&variables))
-					.await
-					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
+					.await?;
 			}
 			TriggerType::Email => {
 				let notifier = EmailNotifier::from_config(&trigger.config)?;
 
-				// TODO: throw specific error
 				notifier
 					.notify(&notifier.format_message(&variables))
-					.await
-					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
+					.await?;
 			}
 			TriggerType::Webhook => {
 				let notifier = WebhookNotifier::from_config(&trigger.config);
 				if let Some(notifier) = notifier {
 					notifier
 						.notify(&notifier.format_message(&variables))
-						.await
-						.with_context(|| {
-							format!("Failed to execute notification {}", trigger.name)
-						})?;
+						.await?;
 				} else {
 					return Err(NotificationError::config_error(
 						"Invalid webhook configuration",
@@ -146,20 +138,16 @@ impl NotificationService {
 			TriggerType::Discord => {
 				let notifier = DiscordNotifier::from_config(&trigger.config)?;
 
-				// TODO: throw specific error
 				notifier
 					.notify(&notifier.format_message(&variables))
-					.await
-					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
+					.await?;
 			}
 			TriggerType::Telegram => {
 				let notifier = TelegramNotifier::from_config(&trigger.config)?;
 
-				// TODO: throw specific error
 				notifier
 					.notify(&notifier.format_message(&variables))
-					.await
-					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
+					.await?;
 			}
 			TriggerType::Script => {
 				let notifier = ScriptNotifier::from_config(&trigger.config)?;
@@ -193,11 +181,9 @@ impl NotificationService {
 					}
 				};
 
-				// TODO: throw specific error
 				notifier
 					.script_notify(monitor_match, script_content)
-					.await
-					.with_context(|| format!("Failed to execute notification {}", trigger.name))?;
+					.await?;
 			}
 		}
 		Ok(())

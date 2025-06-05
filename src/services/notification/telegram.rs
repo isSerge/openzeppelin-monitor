@@ -208,8 +208,8 @@ impl Notifier for TelegramNotifier {
 	/// * `message` - The formatted message to send
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), anyhow::Error> {
+	/// * `Result<(), NotificationError>` - Success or error
+	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
 		// Add message and disable_web_preview to URL parameters
 		let mut url_params = self.inner.url_params.clone().unwrap_or_default();
 		url_params.insert("text".to_string(), message.to_string());

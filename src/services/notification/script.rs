@@ -38,7 +38,7 @@ impl ScriptExecutor for ScriptNotifier {
 		&self,
 		monitor_match: &MonitorMatch,
 		script_content: &(ScriptLanguage, String),
-	) -> Result<(), anyhow::Error> {
+	) -> Result<(), NotificationError> {
 		match &self.config {
 			TriggerTypeConfig::Script {
 				script_path: _,
@@ -59,14 +59,24 @@ impl ScriptExecutor for ScriptNotifier {
 
 				match result {
 					Ok(true) => Ok(()),
-					Ok(false) => Err(anyhow::anyhow!("Trigger script execution failed")),
+					Ok(false) => Err(NotificationError::execution_error(
+						"Trigger script execution failed",
+						None,
+						None,
+					)),
 					Err(e) => {
-						return Err(anyhow::anyhow!("Trigger script execution error: {}", e));
+						return Err(NotificationError::execution_error(
+							format!("Trigger script execution error: {}", e),
+							None,
+							None,
+						));
 					}
 				}
 			}
-			_ => Err(anyhow::anyhow!(
-				"Invalid configuration type for ScriptNotifier"
+			_ => Err(NotificationError::config_error(
+				"Invalid configuration type for ScriptNotifier",
+				None,
+				None,
 			)),
 		}
 	}

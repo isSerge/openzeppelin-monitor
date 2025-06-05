@@ -192,8 +192,8 @@ where
 	/// * `message` - The formatted message to send
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), anyhow::Error> {
+	/// * `Result<(), NotificationError>` - Success or error
+	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
 		let recipients_str = self
 			.recipients
 			.iter()
@@ -201,33 +201,45 @@ where
 			.collect::<Vec<_>>()
 			.join(", ");
 
-		let mailboxes: Mailboxes = recipients_str
-			.parse::<Mailboxes>()
-			.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+		let mailboxes: Mailboxes = recipients_str.parse::<Mailboxes>().map_err(|e| {
+			NotificationError::notify_failed(
+				format!("Failed to parse recipients: {}", e),
+				None,
+				None,
+			)
+		})?;
 		let recipients_header: header::To = mailboxes.into();
 
 		let email = Message::builder()
 			.mailbox(recipients_header)
-			.from(
-				self.sender
-					.to_string()
-					.parse::<Mailbox>()
-					.map_err(|e| anyhow::anyhow!(e.to_string()))?,
-			)
-			.reply_to(
-				self.sender
-					.to_string()
-					.parse::<Mailbox>()
-					.map_err(|e| anyhow::anyhow!(e.to_string()))?,
-			)
+			.from(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to parse sender: {}", e),
+					None,
+					None,
+				)
+			})?)
+			.reply_to(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to parse reply-to: {}", e),
+					None,
+					None,
+				)
+			})?)
 			.subject(&self.subject)
 			.header(ContentType::TEXT_HTML)
 			.body(message.to_owned())
-			.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+			.map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to build email message: {}", e),
+					None,
+					None,
+				)
+			})?;
 
-		self.client
-			.send(&email)
-			.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+		self.client.send(&email).map_err(|e| {
+			NotificationError::notify_failed(format!("Failed to send email: {}", e), None, None)
+		})?;
 
 		Ok(())
 	}

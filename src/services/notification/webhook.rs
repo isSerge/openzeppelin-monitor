@@ -174,8 +174,8 @@ impl Notifier for WebhookNotifier {
 	/// * `message` - The formatted message to send
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), anyhow::Error> {
+	/// * `Result<(), NotificationError>` - Success or error
+	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
 		// Default payload with title and body
 		let mut payload_fields = HashMap::new();
 		payload_fields.insert("title".to_string(), serde_json::json!(self.title));
@@ -191,12 +191,12 @@ impl Notifier for WebhookNotifier {
 	/// * `payload_fields` - Additional fields to include in the payload
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error
+	/// * `Result<(), NotificationError>` - Success or error
 	async fn notify_with_payload(
 		&self,
 		message: &str,
 		mut payload_fields: HashMap<String, serde_json::Value>,
-	) -> Result<(), anyhow::Error> {
+	) -> Result<(), NotificationError> {
 		let mut url = self.url.clone();
 		// Add URL parameters if present
 		if let Some(params) = &self.url_params {
@@ -238,30 +238,52 @@ impl Notifier for WebhookNotifier {
 				body: message.to_string(),
 			};
 
-			let (signature, timestamp) = self
-				.sign_request(secret, &payload_for_signing)
-				.map_err(|e| NotificationError::internal_error(e.to_string(), None, None))?;
+			let (signature, timestamp) =
+				self.sign_request(secret, &payload_for_signing)
+					.map_err(|e| {
+						NotificationError::internal_error(e.to_string(), Some(Box::new(e)), None)
+					})?;
 
 			// Add signature headers
 			headers.insert(
 				HeaderName::from_static("x-signature"),
-				HeaderValue::from_str(&signature)
-					.map_err(|_| anyhow::anyhow!("Invalid signature value"))?,
+				HeaderValue::from_str(&signature).map_err(|e| {
+					NotificationError::notify_failed(
+						"Invalid signature value".to_string(),
+						Some(Box::new(e)),
+						None,
+					)
+				})?,
 			);
 			headers.insert(
 				HeaderName::from_static("x-timestamp"),
-				HeaderValue::from_str(&timestamp)
-					.map_err(|_| anyhow::anyhow!("Invalid timestamp value"))?,
+				HeaderValue::from_str(&timestamp).map_err(|e| {
+					NotificationError::notify_failed(
+						"Invalid timestamp value".to_string(),
+						Some(Box::new(e)),
+						None,
+					)
+				})?,
 			);
 		}
 
 		// Add custom headers
 		if let Some(headers_map) = &self.headers {
 			for (key, value) in headers_map {
-				let header_name = HeaderName::from_bytes(key.as_bytes())
-					.map_err(|_| anyhow::anyhow!("Invalid header name: {}", key))?;
-				let header_value = HeaderValue::from_str(value)
-					.map_err(|_| anyhow::anyhow!("Invalid header value for key: {}", key))?;
+				let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|e| {
+					NotificationError::notify_failed(
+						format!("Invalid header name: {}", key),
+						Some(Box::new(e)),
+						None,
+					)
+				})?;
+				let header_value = HeaderValue::from_str(value).map_err(|e| {
+					NotificationError::notify_failed(
+						format!("Invalid header value for {}: {}", key, value),
+						Some(Box::new(e)),
+						None,
+					)
+				})?;
 				headers.insert(header_name, header_value);
 			}
 		}
@@ -278,12 +300,22 @@ impl Notifier for WebhookNotifier {
 			.json(&payload)
 			.send()
 			.await
-			.map_err(|e| anyhow::anyhow!("Failed to send webhook notification: {}", e))?;
+			.map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to send webhook request: {}", e),
+					Some(Box::new(e)),
+					None,
+				)
+			})?;
 
 		let status = response.status();
 
 		if !status.is_success() {
-			return Err(anyhow::anyhow!("Webhook returned error status: {}", status));
+			return Err(NotificationError::notify_failed(
+				format!("Webhook request failed with status: {}", status),
+				None,
+				None,
+			));
 		}
 
 		Ok(())
