@@ -68,7 +68,7 @@ impl ScriptExecutor for ScriptNotifier {
 					Err(e) => {
 						return Err(NotificationError::execution_error(
 							format!("Trigger script execution error: {}", e),
-							None,
+							Some(e.into()),
 							None,
 						));
 					}

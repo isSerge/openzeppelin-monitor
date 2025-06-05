@@ -246,7 +246,7 @@ impl Notifier for WebhookNotifier {
 			let (signature, timestamp) =
 				self.sign_request(secret, &payload_for_signing)
 					.map_err(|e| {
-						NotificationError::internal_error(e.to_string(), Some(Box::new(e)), None)
+						NotificationError::internal_error(e.to_string(), Some(e.into()), None)
 					})?;
 
 			// Add signature headers
@@ -255,7 +255,7 @@ impl Notifier for WebhookNotifier {
 				HeaderValue::from_str(&signature).map_err(|e| {
 					NotificationError::notify_failed(
 						"Invalid signature value".to_string(),
-						Some(Box::new(e)),
+						Some(e.into()),
 						None,
 					)
 				})?,
@@ -265,7 +265,7 @@ impl Notifier for WebhookNotifier {
 				HeaderValue::from_str(&timestamp).map_err(|e| {
 					NotificationError::notify_failed(
 						"Invalid timestamp value".to_string(),
-						Some(Box::new(e)),
+						Some(e.into()),
 						None,
 					)
 				})?,
@@ -278,14 +278,14 @@ impl Notifier for WebhookNotifier {
 				let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|e| {
 					NotificationError::notify_failed(
 						format!("Invalid header name: {}", key),
-						Some(Box::new(e)),
+						Some(e.into()),
 						None,
 					)
 				})?;
 				let header_value = HeaderValue::from_str(value).map_err(|e| {
 					NotificationError::notify_failed(
 						format!("Invalid header value for {}: {}", key, value),
-						Some(Box::new(e)),
+						Some(e.into()),
 						None,
 					)
 				})?;
@@ -308,7 +308,7 @@ impl Notifier for WebhookNotifier {
 			.map_err(|e| {
 				NotificationError::notify_failed(
 					format!("Failed to send webhook request: {}", e),
-					Some(Box::new(e)),
+					Some(e.into()),
 					None,
 				)
 			})?;

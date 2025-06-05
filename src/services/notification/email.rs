@@ -205,7 +205,7 @@ where
 		let mailboxes: Mailboxes = recipients_str.parse::<Mailboxes>().map_err(|e| {
 			NotificationError::notify_failed(
 				format!("Failed to parse recipients: {}", e),
-				None,
+				Some(e.into()),
 				None,
 			)
 		})?;
@@ -216,14 +216,14 @@ where
 			.from(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
 				NotificationError::notify_failed(
 					format!("Failed to parse sender: {}", e),
-					None,
+					Some(e.into()),
 					None,
 				)
 			})?)
 			.reply_to(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
 				NotificationError::notify_failed(
 					format!("Failed to parse reply-to: {}", e),
-					None,
+					Some(e.into()),
 					None,
 				)
 			})?)
@@ -233,7 +233,7 @@ where
 			.map_err(|e| {
 				NotificationError::notify_failed(
 					format!("Failed to build email message: {}", e),
-					None,
+					Some(e.into()),
 					None,
 				)
 			})?;
