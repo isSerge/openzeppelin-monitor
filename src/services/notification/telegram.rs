@@ -345,6 +345,21 @@ mod tests {
 		assert!(matches!(error, NotificationError::ConfigError { .. }));
 	}
 
+	#[test]
+	fn test_from_config_disable_web_preview_default_in_config() {
+		let config = TriggerTypeConfig::Telegram {
+			token: SecretValue::Plain(SecretString::new("test-token".to_string())),
+			chat_id: "test-chat-id".to_string(),
+			disable_web_preview: None, // Test default within TriggerTypeConfig
+			message: NotificationMessage {
+				title: "Alert".to_string(),
+				body: "Test message ${value}".to_string(),
+			},
+		};
+		let notifier = TelegramNotifier::from_config(&config).unwrap();
+		assert!(!notifier.disable_web_preview);
+	}
+
 	////////////////////////////////////////////////////////////
 	// notify tests
 	////////////////////////////////////////////////////////////
