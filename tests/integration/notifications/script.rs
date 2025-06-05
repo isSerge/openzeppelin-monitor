@@ -60,7 +60,7 @@ async fn test_notification_service_script_execution() {
 
 	// Execute the notification
 	let result = notification_service
-		.execute(&trigger, HashMap::new(), &monitor_match, &trigger_scripts)
+		.execute(&trigger, &HashMap::new(), &monitor_match, &trigger_scripts)
 		.await;
 
 	assert!(result.is_ok());
@@ -82,7 +82,7 @@ async fn test_notification_service_script_execution_failure() {
 	let trigger_scripts = create_test_trigger_scripts();
 
 	let result = notification_service
-		.execute(&trigger, HashMap::new(), &monitor_match, &trigger_scripts)
+		.execute(&trigger, &HashMap::new(), &monitor_match, &trigger_scripts)
 		.await;
 
 	assert!(result.is_err());

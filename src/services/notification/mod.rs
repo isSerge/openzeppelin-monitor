@@ -102,45 +102,35 @@ impl NotificationService {
 	pub async fn execute(
 		&self,
 		trigger: &Trigger,
-		variables: HashMap<String, String>,
+		variables: &HashMap<String, String>,
 		monitor_match: &MonitorMatch,
 		trigger_scripts: &HashMap<String, (ScriptLanguage, String)>,
 	) -> Result<(), NotificationError> {
 		match &trigger.trigger_type {
 			TriggerType::Slack => {
 				let notifier = SlackNotifier::from_config(&trigger.config)?;
-
-				notifier
-					.notify(&notifier.format_message(&variables))
-					.await?;
+				let message = notifier.format_message(variables);
+				notifier.notify(&message).await?;
 			}
 			TriggerType::Email => {
 				let notifier = EmailNotifier::from_config(&trigger.config)?;
-
-				notifier
-					.notify(&notifier.format_message(&variables))
-					.await?;
+				let message = notifier.format_message(variables);
+				notifier.notify(&message).await?;
 			}
 			TriggerType::Webhook => {
 				let notifier = WebhookNotifier::from_config(&trigger.config)?;
-
-				notifier
-					.notify(&notifier.format_message(&variables))
-					.await?;
+				let message = notifier.format_message(variables);
+				notifier.notify(&message).await?;
 			}
 			TriggerType::Discord => {
 				let notifier = DiscordNotifier::from_config(&trigger.config)?;
-
-				notifier
-					.notify(&notifier.format_message(&variables))
-					.await?;
+				let message = notifier.format_message(variables);
+				notifier.notify(&message).await?;
 			}
 			TriggerType::Telegram => {
 				let notifier = TelegramNotifier::from_config(&trigger.config)?;
-
-				notifier
-					.notify(&notifier.format_message(&variables))
-					.await?;
+				let message = notifier.format_message(variables);
+				notifier.notify(&message).await?;
 			}
 			TriggerType::Script => {
 				let notifier = ScriptNotifier::from_config(&trigger.config)?;
@@ -264,7 +254,7 @@ mod tests {
 		let result = service
 			.execute(
 				&trigger,
-				variables,
+				&variables,
 				&create_mock_monitor_match(),
 				&HashMap::new(),
 			)
@@ -292,7 +282,7 @@ mod tests {
 		let result = service
 			.execute(
 				&trigger,
-				variables,
+				&variables,
 				&create_mock_monitor_match(),
 				&HashMap::new(),
 			)
@@ -320,7 +310,7 @@ mod tests {
 		let result = service
 			.execute(
 				&trigger,
-				variables,
+				&variables,
 				&create_mock_monitor_match(),
 				&HashMap::new(),
 			)
@@ -348,7 +338,7 @@ mod tests {
 		let result = service
 			.execute(
 				&trigger,
-				variables,
+				&variables,
 				&create_mock_monitor_match(),
 				&HashMap::new(),
 			)
@@ -376,7 +366,7 @@ mod tests {
 		let result = service
 			.execute(
 				&trigger,
-				variables,
+				&variables,
 				&create_mock_monitor_match(),
 				&HashMap::new(),
 			)
@@ -405,7 +395,7 @@ mod tests {
 		let result = service
 			.execute(
 				&trigger,
-				variables,
+				&variables,
 				&create_mock_monitor_match(),
 				&HashMap::new(),
 			)

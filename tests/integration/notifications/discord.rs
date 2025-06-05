@@ -116,7 +116,7 @@ async fn test_notification_service_discord_execution() {
 	let monitor_match = create_test_evm_match(create_test_monitor("test_monitor"));
 
 	let result = notification_service
-		.execute(&trigger, variables, &monitor_match, &HashMap::new())
+		.execute(&trigger, &variables, &monitor_match, &HashMap::new())
 		.await;
 
 	assert!(result.is_ok());
@@ -145,7 +145,7 @@ async fn test_notification_service_discord_execution_failure() {
 	let monitor_match = create_test_evm_match(create_test_monitor("test_monitor"));
 
 	let result = notification_service
-		.execute(&trigger, HashMap::new(), &monitor_match, &HashMap::new())
+		.execute(&trigger, &HashMap::new(), &monitor_match, &HashMap::new())
 		.await;
 
 	assert!(result.is_err());

@@ -268,7 +268,7 @@ mod tests {
 		let trigger_scripts = HashMap::new(); // Empty map, so script won't be found
 
 		let result = service
-			.execute(&trigger, variables, &monitor_match, &trigger_scripts)
+			.execute(&trigger, &variables, &monitor_match, &trigger_scripts)
 			.await;
 
 		assert!(result.is_err());
