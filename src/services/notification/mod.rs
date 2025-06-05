@@ -122,18 +122,11 @@ impl NotificationService {
 					.await?;
 			}
 			TriggerType::Webhook => {
-				let notifier = WebhookNotifier::from_config(&trigger.config);
-				if let Some(notifier) = notifier {
-					notifier
-						.notify(&notifier.format_message(&variables))
-						.await?;
-				} else {
-					return Err(NotificationError::config_error(
-						"Invalid webhook configuration",
-						None,
-						None,
-					));
-				}
+				let notifier = WebhookNotifier::from_config(&trigger.config)?;
+
+				notifier
+					.notify(&notifier.format_message(&variables))
+					.await?;
 			}
 			TriggerType::Discord => {
 				let notifier = DiscordNotifier::from_config(&trigger.config)?;

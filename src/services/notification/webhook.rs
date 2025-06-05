@@ -119,27 +119,31 @@ impl WebhookNotifier {
 	/// * `config` - Trigger configuration containing Webhook parameters
 	///
 	/// # Returns
-	/// * `Option<Self>` - Notifier instance if config is Webhook type
-	pub fn from_config(config: &TriggerTypeConfig) -> Option<Self> {
-		match config {
-			TriggerTypeConfig::Webhook {
-				url,
-				message,
-				method,
-				secret,
-				headers,
-			} => Some(Self {
+	/// * `Result<Self>` - Notifier instance if config is Webhook type
+	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+		if let TriggerTypeConfig::Webhook {
+			url,
+			message,
+			method,
+			secret,
+			headers,
+		} = config
+		{
+			let webhook_config = WebhookConfig {
 				url: url.as_ref().to_string(),
 				url_params: None,
 				title: message.title.clone(),
 				body_template: message.body.clone(),
-				client: Client::new(),
 				method: method.clone(),
 				secret: secret.as_ref().map(|s| s.as_ref().to_string()),
 				headers: headers.clone(),
 				payload_fields: None,
-			}),
-			_ => None,
+			};
+
+			WebhookNotifier::new(webhook_config)
+		} else {
+			let msg = format!("Invalid webhook configuration: {:?}", config);
+			Err(NotificationError::config_error(msg, None, None))
 		}
 	}
 
@@ -443,7 +447,7 @@ mod tests {
 		let config = create_test_webhook_config();
 
 		let notifier = WebhookNotifier::from_config(&config);
-		assert!(notifier.is_some());
+		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
 		assert_eq!(notifier.url, "https://webhook.example.com");
