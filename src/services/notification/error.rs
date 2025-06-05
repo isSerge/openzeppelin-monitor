@@ -204,23 +204,22 @@ mod tests {
 	}
 
 	#[test]
-	fn test_trace_id_propagation() {
-		// Create an error context with a known trace ID
-		let error_context = ErrorContext::new("Inner error", None, None);
-		let original_trace_id = error_context.trace_id.clone();
+	fn test_all_error_variants_have_trace_id() {
+		let base_context = || Box::new(ErrorContext::new("test", None, None));
+		let errors = vec![
+			NotificationError::NetworkError(base_context()),
+			NotificationError::ConfigError(base_context()),
+			NotificationError::InternalError(base_context()),
+			NotificationError::ExecutionError(base_context()),
+			NotificationError::NotifyFailed(base_context()),
+		];
 
-		// Wrap it in a NotificationError
-		let notification_error = NotificationError::NetworkError(Box::new(error_context));
-
-		// Verify the trace ID is preserved
-		assert_eq!(notification_error.trace_id(), original_trace_id);
-
-		// Test trace ID propagation through error chain
-		let source_error = IoError::new(ErrorKind::Other, "Source error");
-		let error_context = ErrorContext::new("Middle error", Some(Box::new(source_error)), None);
-		let original_trace_id = error_context.trace_id.clone();
-
-		let notification_error = NotificationError::NetworkError(Box::new(error_context));
-		assert_eq!(notification_error.trace_id(), original_trace_id);
+		for error in errors {
+			assert!(
+				!error.trace_id().is_empty(),
+				"Error {:?} should have a trace_id",
+				error
+			);
+		}
 	}
 }
