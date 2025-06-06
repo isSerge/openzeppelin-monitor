@@ -1,6 +1,8 @@
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, TriggerType},
-	services::notification::{NotificationService, Notifier, WebhookConfig, WebhookNotifier},
+	services::notification::{
+		NotificationError, NotificationService, Notifier, WebhookConfig, WebhookNotifier,
+	},
 	utils::tests::{
 		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
 		trigger::TriggerBuilder,
@@ -160,6 +162,10 @@ async fn test_notification_service_webhook_execution_failure() {
 		.await;
 
 	assert!(result.is_err());
+
+	let error = result.unwrap_err();
+	assert!(matches!(error, NotificationError::NotifyFailed(_)));
+
 	mock.assert();
 }
 

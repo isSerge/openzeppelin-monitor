@@ -1,6 +1,6 @@
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, ScriptLanguage},
-	services::notification::NotificationService,
+	services::notification::{NotificationError, NotificationService},
 	utils::tests::{
 		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
 		trigger::TriggerBuilder,
@@ -87,10 +87,16 @@ async fn test_notification_service_script_execution_failure() {
 		.await;
 
 	assert!(result.is_err());
-	assert!(result
-		.unwrap_err()
-		.to_string()
-		.contains("Script content not found"));
+
+	let error = result.unwrap_err();
+
+	println!("Error: {:?}", error);
+
+	if let NotificationError::ConfigError(ctx) = error {
+		assert!(ctx.to_string().contains("Script content not found"));
+	} else {
+		panic!("Expected NotificationError::ConfigError variant");
+	}
 }
 
 #[tokio::test]

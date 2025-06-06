@@ -1,4 +1,4 @@
-use openzeppelin_monitor::services::notification::{Notifier, TelegramNotifier};
+use openzeppelin_monitor::services::notification::{NotificationError, Notifier, TelegramNotifier};
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -82,5 +82,9 @@ async fn test_telegram_notification_failure() {
 	let result = notifier.notify("Test message").await;
 
 	assert!(result.is_err());
+
+	let error = result.unwrap_err();
+	assert!(matches!(error, NotificationError::NotifyFailed(_)));
+
 	mock.assert();
 }

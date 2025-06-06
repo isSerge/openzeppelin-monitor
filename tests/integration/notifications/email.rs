@@ -81,4 +81,7 @@ async fn test_email_notification_failure() {
 
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_err());
+
+	let error = result.unwrap_err();
+	assert!(matches!(error, NotificationError::NotifyFailed(_)));
 }

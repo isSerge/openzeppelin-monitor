@@ -1,6 +1,6 @@
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch},
-	services::notification::{DiscordNotifier, NotificationService, Notifier},
+	services::notification::{DiscordNotifier, NotificationError, NotificationService, Notifier},
 	utils::tests::{
 		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
 		trigger::TriggerBuilder,
@@ -149,5 +149,9 @@ async fn test_notification_service_discord_execution_failure() {
 		.await;
 
 	assert!(result.is_err());
+
+	let error = result.unwrap_err();
+	assert!(matches!(error, NotificationError::NotifyFailed(_)));
+
 	mock.assert();
 }
