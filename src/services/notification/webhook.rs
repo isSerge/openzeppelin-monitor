@@ -153,6 +153,15 @@ impl WebhookNotifier {
 		secret: &str,
 		payload: &WebhookMessage,
 	) -> Result<(String, String), NotificationError> {
+		// Explicitly reject empty secret, because `HmacSha256::new_from_slice` currently allows empty secrets
+		if secret.is_empty() {
+			return Err(NotificationError::notify_failed(
+				"Invalid secret: cannot be empty.".to_string(),
+				None,
+				None,
+			));
+		}
+
 		let timestamp = Utc::now().timestamp_millis();
 
 		// Create HMAC instance
@@ -437,6 +446,23 @@ mod tests {
 
 		assert!(!signature.is_empty());
 		assert!(!timestamp.is_empty());
+	}
+
+	#[test]
+	fn test_sign_request_fails_empty_secret() {
+		let notifier =
+			create_test_notifier("https://webhook.example.com", "Test message", None, None);
+		let payload = WebhookMessage {
+			title: "Test Title".to_string(),
+			body: "Test message".to_string(),
+		};
+		let empty_secret = "";
+
+		let result = notifier.sign_request(empty_secret, &payload);
+		assert!(result.is_err());
+
+		let error = result.unwrap_err();
+		assert!(matches!(error, NotificationError::NotifyFailed(_)));
 	}
 
 	////////////////////////////////////////////////////////////
@@ -842,5 +868,25 @@ mod tests {
 
 		let error = result.unwrap_err();
 		assert!(matches!(error, NotificationError::NotifyFailed { .. }));
+	}
+
+	#[tokio::test]
+	async fn test_notify_with_payload_failure() {
+		let mut server = mockito::Server::new_async().await;
+		let mock = server
+			.mock("POST", "/")
+			.with_status(500)
+			.with_body("Internal Server Error")
+			.create_async()
+			.await;
+
+		let notifier = create_test_notifier(server.url().as_str(), "Test message", None, None);
+
+		let result = notifier
+			.notify_with_payload("Test message", HashMap::new())
+			.await;
+
+		assert!(result.is_err());
+		mock.assert();
 	}
 }
