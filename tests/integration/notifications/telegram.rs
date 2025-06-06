@@ -127,7 +127,7 @@ async fn test_notification_service_telegram_execution_failure() {
 
 	let trigger = TriggerBuilder::new()
 		.name("test_trigger")
-		.telegram(&"random token", "random chat_id", true) // Should fail due to invalid token
+		.telegram("random token", "random chat_id", true) // Should fail due to invalid token
 		.trigger_type(TriggerType::Telegram)
 		.message("Test Alert", "Test message")
 		.build();
