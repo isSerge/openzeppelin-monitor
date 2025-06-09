@@ -12,6 +12,7 @@
 //! - monitor: Monitor utilities
 //! - parsing: Parsing utilities
 //! - tests: Test utilities
+//! - http: HTTP client utilities (i.e. creation retryable HTTP clients)
 
 mod cron_utils;
 mod expression;
@@ -23,9 +24,11 @@ pub mod metrics;
 pub mod monitor;
 pub mod parsing;
 pub mod tests;
+pub mod http;
 
 pub use constants::*;
 pub use cron_utils::*;
 pub use expression::*;
 pub use macros::*;
 pub use parsing::*;
+pub use http::*;
