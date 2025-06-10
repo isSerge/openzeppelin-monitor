@@ -9,9 +9,7 @@ use openzeppelin_monitor::{
 		BlockType, ContractSpec, StellarBlock, StellarEvent, StellarFormattedContractSpec,
 		StellarLedgerInfo, StellarTransaction, StellarTransactionInfo,
 	},
-	services::blockchain::{
-		BlockChainClient, StellarClient, StellarClientError, StellarClientTrait,
-	},
+	services::blockchain::{BlockChainClient, StellarClient, StellarClientTrait},
 };
 use serde_json::json;
 
