@@ -19,7 +19,7 @@ use crate::{
 		blockchain::{
 			client::{BlockChainClient, BlockFilterFactory},
 			transports::StellarTransportClient,
-			BlockchainTransport, TransportError,
+			BlockchainTransport,
 		},
 		filter::{
 			stellar_helpers::{
@@ -42,14 +42,12 @@ const RPC_METHOD_GET_LEDGER_ENTRIES: &str = "getLedgerEntries";
 /// Stellar client error type
 #[derive(Debug, thiserror::Error)]
 pub enum StellarClientError {
-	#[error("Data for '{ledger_info}' is before recorded history (HTTP {http_status}). Horizon Type: '{horizon_type}', Title: '{title}'. Detail: '{detail}'")]
-	BeforeHistory {
-		title: String,              // From Horizon JSON: "title"
-		detail: String,             // From Horizon JSON: "detail"
-		horizon_type: String,       // From Horizon JSON: "type"
-		ledger_info: String,        // Client-side context about the request
-		context: Box<ErrorContext>, // Internal tracing context
-		http_status: u16,           // HTTP status code (should be 410)
+	#[error("Data for '{ledger_info}' is outside of Stellar RPC retention window")]
+	OutsideRetentionWindow {
+		code: String,          // Code from RPC response
+		message: String,       // Message from RPC response
+		ledger_info: String,   // Client-side context about the request
+		context: ErrorContext, // Context for tracing
 	},
 	#[error("Stellar RPC request failed")]
 	RpcError {
@@ -82,114 +80,112 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 		Self { http_client }
 	}
 
-	/// Handles transport errors and converts them into StellarClientError
-	/// # Arguments
-	/// * `err` - The transport error encountered
-	/// * `ledger_info` - Contextual information about the ledger range or request
-	/// * `method_name` - The name of the RPC method that encountered the error
-	///
-	/// # Returns
-	/// * `StellarClientError` - The converted error with context
-	///
-	pub fn handle_transport_error(
-		&self,
-		err: TransportError,
-		ledger_info: String,
-		method_name: &'static str,
-	) -> StellarClientError {
-		match err {
-			TransportError::Http {
-				status_code,
-				body,
-				url,
-				context,
-			} => {
-				// Check if status code is 410 Gone, indicating before history error
-				if status_code == reqwest::StatusCode::GONE {
-					// Parse the body
-					match serde_json::from_str::<serde_json::Value>(&body) {
-						Ok(json_body) => {
-							// Check if the body contains a "type" field indicating a before history error
-							let is_history_type = json_body
-								.get("type")
-								.and_then(|t| t.as_str())
-								.is_some_and(|t| t.contains("before") && t.contains("history"));
+	// /// Handles transport errors and converts them into StellarClientError
+	// /// # Arguments
+	// /// * `err` - The transport error encountered
+	// /// * `ledger_info` - Contextual information about the ledger range or request
+	// /// * `method_name` - The name of the RPC method that encountered the error
+	// ///
+	// /// # Returns
+	// /// * `StellarClientError` - The converted error with context
+	// ///
+	// pub fn handle_transport_error(
+	// 	&self,
+	// 	err: TransportError,
+	// 	ledger_info: String,
+	// 	method_name: &'static str,
+	// ) -> StellarClientError {
+	// 	match err {
+	// 		TransportError::Http {
+	// 			status_code,
+	// 			body,
+	// 			url,
+	// 			context,
+	// 		} => {
+	// 			// Check if status code is 410 Gone, indicating before history error
+	// 			if status_code == reqwest::StatusCode::GONE {
+	// 				// Parse the body
+	// 				match serde_json::from_str::<serde_json::Value>(&body) {
+	// 					Ok(json_body) => {
+	// 						let error_code = json_body
+	// 							.get("code")
+	// 							.and_then(|c| c.as_str())
+	// 							.map_or_else(|| "Unknown".to_string(), |s| s.to_string());
 
-							let bh_ctx = ErrorContext::new(
-								format!(
-									"Before history error for method {} for ledger range {}",
-									method_name, ledger_info
-								),
-								None,
-								Some(context.metadata.unwrap_or_default()),
-							);
+	// 						println!("Error code: {}", error_code);
 
-							if is_history_type {
-								StellarClientError::BeforeHistory {
-									title: json_body
-										.get("title")
-										.and_then(|t| t.as_str())
-										.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
-									detail: json_body
-										.get("detail")
-										.and_then(|d| d.as_str())
-										.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
-									horizon_type: json_body
-										.get("type")
-										.and_then(|t| t.as_str())
-										.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
-									ledger_info,
-									context: Box::new(bh_ctx),
-									http_status: status_code.into(),
-								}
-							} else {
-								// HTTP 410, but not before history error
-								let source_err =
-									anyhow::anyhow!(
-									"HTTP 410 GONE from {} for method {} with unexpected body: {}",
-									url, method_name, body
-								);
+	// 						let error_message = json_body
+	// 							.get("message")
+	// 							.and_then(|m| m.as_str())
+	// 							.map_or_else(|| "Unknown".to_string(), |s| s.to_string());
 
-								StellarClientError::RpcError {
-									method_name,
-									source: source_err,
-								}
-							}
-						}
-						Err(parse_err) => {
-							let source_err = anyhow::Error::new(parse_err).context(format!(
-								"Failed to parse JSON body of HTTP 410 GONE from {} for method {}. Body: {}",
-								url, method_name, body
-							));
+	// 						println!("Error message: {}", error_message);
 
-							StellarClientError::RpcError {
-								source: source_err,
-								method_name,
-							}
-						}
-					}
-				} else {
-					// Other HTTP errors
-					let source_err = anyhow::anyhow!(
-						"HTTP error {} from {} for method {}: {}",
-						status_code,
-						url,
-						method_name,
-						body
-					);
+	// 						let is_outside_retention_window = error_code == "-32600".to_string()
+	// 							&& error_message
+	// 								.contains("data is outside of Stellar RPC retention window");
 
-					StellarClientError::RpcError {
-						source: source_err,
-						method_name,
-					}
-				}
-			}
-			_ => StellarClientError::RpcError {
-				source: anyhow::anyhow!(err),
-				method_name,
-			},
-		}
-	}
+	// 						if is_outside_retention_window {
+	// 							StellarClientError::OutsideRetentionWindow {
+	// 								code: json_body
+	// 									.get("code")
+	// 									.and_then(|c| c.as_str())
+	// 									.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
+	// 								message: json_body
+	// 									.get("message")
+	// 									.and_then(|m| m.as_str())
+	// 									.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
+	// 								ledger_info,
+	// 								context,
+	// 							}
+	// 						} else {
+	// 							// HTTP 410, but not before history error
+	// 							let source_err =
+	// 								anyhow::anyhow!(
+	// 								"HTTP 410 GONE from {} for method {} with unexpected body: {}",
+	// 								url, method_name, body
+	// 							);
+
+	// 							StellarClientError::RpcError {
+	// 								method_name,
+	// 								source: source_err,
+	// 							}
+	// 						}
+	// 					}
+	// 					Err(parse_err) => {
+	// 						let source_err = anyhow::Error::new(parse_err).context(format!(
+	// 							"Failed to parse JSON body of HTTP 410 GONE from {} for method {}. Body: {}",
+	// 							url, method_name, body
+	// 						));
+
+	// 						StellarClientError::RpcError {
+	// 							source: source_err,
+	// 							method_name,
+	// 						}
+	// 					}
+	// 				}
+	// 			} else {
+	// 				// Other HTTP errors
+	// 				let source_err = anyhow::anyhow!(
+	// 					"HTTP error {} from {} for method {}: {}",
+	// 					status_code,
+	// 					url,
+	// 					method_name,
+	// 					body
+	// 				);
+
+	// 				StellarClientError::RpcError {
+	// 					source: source_err,
+	// 					method_name,
+	// 				}
+	// 			}
+	// 		}
+	// 		_ => StellarClientError::RpcError {
+	// 			source: anyhow::anyhow!(err),
+	// 			method_name,
+	// 		},
+	// 	}
+	// }
 }
 
 impl StellarClient<StellarTransportClient> {
@@ -347,34 +343,33 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						start_sequence, end_sequence
 					);
 
-					// Handle transport error and convert to StellarClientError
-					let stellar_client_error = self.handle_transport_error(
-						transport_err,
-						ledger_info,
-						RPC_METHOD_GET_TRANSACTIONS,
-					);
+					// // Handle transport error and convert to StellarClientError
+					// let stellar_client_error = self.handle_transport_error(
+					// 	transport_err,
+					// 	ledger_info,
+					// 	RPC_METHOD_GET_TRANSACTIONS,
+					// );
 
-					// Log Before History error if applicable
-					if let StellarClientError::BeforeHistory {
-						ledger_info,
-						title,
-						detail,
-						context,
-						..
-					} = &stellar_client_error
-					{
-						tracing::warn!(
-							trace_id = context.trace_id,
-							%ledger_info,
-							%title,
-							%detail,
-							"Stellar RPC returned before history error",
-						);
-					}
+					// Log OutsideRetentionWindow error if applicable
+					// if let StellarClientError::OutsideRetentionWindow {
+					// 	ledger_info,
+					// 	code,
+					// 	message,
+					// 	context,
+					// } = &stellar_client_error
+					// {
+					// 	tracing::warn!(
+					// 		trace_id = context.trace_id,
+					// 		%ledger_info,
+					// 		%code,
+					// 		%message,
+					// 		"Stellar RPC returned outside of retention window error",
+					// 	);
+					// }
 
-					return Err(anyhow::anyhow!(stellar_client_error)).context(format!(
-						"Failed to {} from Stellar RPC",
-						RPC_METHOD_GET_TRANSACTIONS
+					return Err(anyhow::anyhow!(transport_err)).context(format!(
+						"Failed to {} from Stellar RPC for ledger: {}",
+						RPC_METHOD_GET_TRANSACTIONS, ledger_info
 					));
 				}
 			}
@@ -491,34 +486,33 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						start_sequence, end_sequence
 					);
 
-					// Handle transport error and convert to StellarClientError
-					let stellar_client_error = self.handle_transport_error(
-						transport_err,
-						ledger_info,
-						RPC_METHOD_GET_EVENTS,
-					);
+					// // Handle transport error and convert to StellarClientError
+					// let stellar_client_error = self.handle_transport_error(
+					// 	transport_err,
+					// 	ledger_info,
+					// 	RPC_METHOD_GET_EVENTS,
+					// );
 
-					// Log Before History error if applicable
-					if let StellarClientError::BeforeHistory {
-						ledger_info,
-						title,
-						detail,
-						context,
-						..
-					} = &stellar_client_error
-					{
-						tracing::warn!(
-							trace_id = context.trace_id,
-							%ledger_info,
-							%title,
-							%detail,
-							"Stellar RPC returned before history error",
-						);
-					}
+					// Log OutsideRetentionWindow error if applicable
+					// if let StellarClientError::OutsideRetentionWindow {
+					// 	ledger_info,
+					// 	code,
+					// 	message,
+					// 	context,
+					// } = &stellar_client_error
+					// {
+					// 	tracing::warn!(
+					// 		trace_id = context.trace_id,
+					// 		%ledger_info,
+					// 		%code,
+					// 		%message,
+					// 		"Stellar RPC returned outside of retention window error",
+					// 	);
+					// }
 
-					return Err(anyhow::anyhow!(stellar_client_error)).context(format!(
-						"Failed to {} from Stellar RPC",
-						RPC_METHOD_GET_EVENTS,
+					return Err(anyhow::anyhow!(transport_err)).context(format!(
+						"Failed to {} from Stellar RPC for ledger: {}",
+						RPC_METHOD_GET_EVENTS, ledger_info,
 					));
 				}
 			}
@@ -667,34 +661,33 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 					let ledger_info =
 						format!("start_block: {}, end_block: {:?}", start_block, end_block);
 
-					// Handle transport error and convert to StellarClientError
-					let stellar_client_error = self.handle_transport_error(
-						transport_err,
-						ledger_info,
-						RPC_METHOD_GET_LEDGERS,
-					);
+					// // Handle transport error and convert to StellarClientError
+					// let stellar_client_error = self.handle_transport_error(
+					// 	transport_err,
+					// 	ledger_info,
+					// 	RPC_METHOD_GET_LEDGERS,
+					// );
 
-					// Log Before History error if applicable
-					if let StellarClientError::BeforeHistory {
-						ledger_info,
-						title,
-						detail,
-						context,
-						..
-					} = &stellar_client_error
-					{
-						tracing::warn!(
-							trace_id = context.trace_id,
-							%ledger_info,
-							%title,
-							%detail,
-							"Stellar RPC returned before history error",
-						);
-					}
+					// // Log OutsideRetentionWindow error if applicable
+					// if let StellarClientError::OutsideRetentionWindow {
+					// 	ledger_info,
+					// 	code,
+					// 	message,
+					// 	context,
+					// } = &stellar_client_error
+					// {
+					// 	tracing::warn!(
+					// 		trace_id = context.trace_id,
+					// 		%ledger_info,
+					// 		%code,
+					// 		%message,
+					// 		"Stellar RPC returned outside of retention window error",
+					// 	);
+					// }
 
-					return Err(anyhow::anyhow!(stellar_client_error)).context(format!(
-						"Failed to {} from Stellar RPC",
-						RPC_METHOD_GET_LEDGERS,
+					return Err(anyhow::anyhow!(transport_err)).context(format!(
+						"Failed to {} from Stellar RPC for ledger: {}",
+						RPC_METHOD_GET_LEDGERS, ledger_info,
 					));
 				}
 			}
