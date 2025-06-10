@@ -1,7 +1,9 @@
 use mockall::predicate;
 use openzeppelin_monitor::{
 	models::{BlockType, ContractSpec, StellarFormattedContractSpec},
-	services::blockchain::{BlockChainClient, StellarClient, StellarClientTrait},
+	services::blockchain::{
+		BlockChainClient, StellarClient, StellarClientError, StellarClientTrait,
+	},
 };
 use serde_json::{json, Value};
 
@@ -74,12 +76,17 @@ async fn test_get_transactions_invalid_sequence_range() {
 	let result = client.get_transactions(2, Some(1)).await;
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("start_sequence 2 cannot be greater than end_sequence 1"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Invalid input parameters for Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::InvalidInput(ctx)) if ctx.contains("start_sequence 2 cannot be greater than end_sequence 1")
+	),);
 }
 
 #[tokio::test]
@@ -111,12 +118,18 @@ async fn test_get_transactions_failed_to_parse_transaction() {
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("Failed to parse transaction response"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Failed to parse transaction response"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::ResponseParseError { .. })
+	),);
 }
 
 #[tokio::test]
@@ -189,12 +202,17 @@ async fn test_get_events_invalid_sequence_range() {
 	let result = client.get_events(2, Some(1)).await;
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("start_sequence 2 cannot be greater than end_sequence 1"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Invalid input parameters for Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::InvalidInput(ctx)) if ctx.contains("start_sequence 2 cannot be greater than end_sequence 1")
+	),);
 }
 
 #[tokio::test]
@@ -223,11 +241,16 @@ async fn test_get_events_failed_to_parse_event() {
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string().contains("Failed to parse event response"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err.to_string().contains("Failed to parse event response"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::ResponseParseError { .. })
+	),);
 }
 
 #[tokio::test]
@@ -361,11 +384,16 @@ async fn test_get_blocks_failed_to_parse() {
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string().contains("Failed to parse ledger response"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err.to_string().contains("Failed to parse ledger response"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::ResponseParseError { .. })
+	),);
 }
 
 #[tokio::test]
@@ -377,12 +405,17 @@ async fn test_get_blocks_invalid_sequence_range() {
 	assert!(result.is_err());
 
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("start_block 2 cannot be greater than end_block 1"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Invalid input parameters for Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::InvalidInput(ctx)) if ctx.contains("start_block 2 cannot be greater than end_block 1")
+	),);
 }
 
 #[tokio::test]
