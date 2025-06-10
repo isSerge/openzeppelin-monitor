@@ -44,7 +44,7 @@ const RPC_METHOD_GET_LEDGER_ENTRIES: &str = "getLedgerEntries";
 pub enum StellarClientError {
 	#[error("Data for '{ledger_info}' is outside of Stellar RPC retention window")]
 	OutsideRetentionWindow {
-		code: String,          // Code from RPC response
+		code: i64,             // Code from RPC response
 		message: String,       // Message from RPC response
 		ledger_info: String,   // Client-side context about the request
 		context: ErrorContext, // Context for tracing
@@ -80,112 +80,65 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 		Self { http_client }
 	}
 
-	// /// Handles transport errors and converts them into StellarClientError
-	// /// # Arguments
-	// /// * `err` - The transport error encountered
-	// /// * `ledger_info` - Contextual information about the ledger range or request
-	// /// * `method_name` - The name of the RPC method that encountered the error
-	// ///
-	// /// # Returns
-	// /// * `StellarClientError` - The converted error with context
-	// ///
-	// pub fn handle_transport_error(
-	// 	&self,
-	// 	err: TransportError,
-	// 	ledger_info: String,
-	// 	method_name: &'static str,
-	// ) -> StellarClientError {
-	// 	match err {
-	// 		TransportError::Http {
-	// 			status_code,
-	// 			body,
-	// 			url,
-	// 			context,
-	// 		} => {
-	// 			// Check if status code is 410 Gone, indicating before history error
-	// 			if status_code == reqwest::StatusCode::GONE {
-	// 				// Parse the body
-	// 				match serde_json::from_str::<serde_json::Value>(&body) {
-	// 					Ok(json_body) => {
-	// 						let error_code = json_body
-	// 							.get("code")
-	// 							.and_then(|c| c.as_str())
-	// 							.map_or_else(|| "Unknown".to_string(), |s| s.to_string());
+	/// Checks a successfully received JSON RPC response body for an "error" field.
+	/// If an error field is present, it attempts to identify specific conditions like
+	/// "outside of retention window" or handles it as a generic RPC error.
+	fn check_and_handle_rpc_error(
+		&self,
+		response_body: &serde_json::Value,
+		start_sequence: u32,
+		target_sequence: u32,
+		method_name: &'static str,
+	) -> Result<(), StellarClientError> {
+		if let Some(json_rpc_error) = response_body.get("error") {
+			let code = json_rpc_error
+				.get("code")
+				.and_then(|c| c.as_i64())
+				.unwrap_or(0);
+			let message = json_rpc_error
+				.get("message")
+				.and_then(|m| m.as_str())
+				.unwrap_or("Unknown RPC error")
+				.to_string();
 
-	// 						println!("Error code: {}", error_code);
+			// Specifically check for out-of-retention (code -32600 for Soroban RPC)
+			if code == -32600
+				&& (message.to_lowercase().contains("ledger range")
+					|| message.to_lowercase().contains("oldest ledger"))
+			{
+				let ledger_info_str = format!(
+					"start_sequence: {}, target_sequence: {}",
+					start_sequence, target_sequence
+				);
+				let context = ErrorContext::new(
+					&format!("OutsideRetentionWindow for {}", ledger_info_str),
+					None,
+					None,
+				);
 
-	// 						let error_message = json_body
-	// 							.get("message")
-	// 							.and_then(|m| m.as_str())
-	// 							.map_or_else(|| "Unknown".to_string(), |s| s.to_string());
-
-	// 						println!("Error message: {}", error_message);
-
-	// 						let is_outside_retention_window = error_code == "-32600".to_string()
-	// 							&& error_message
-	// 								.contains("data is outside of Stellar RPC retention window");
-
-	// 						if is_outside_retention_window {
-	// 							StellarClientError::OutsideRetentionWindow {
-	// 								code: json_body
-	// 									.get("code")
-	// 									.and_then(|c| c.as_str())
-	// 									.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
-	// 								message: json_body
-	// 									.get("message")
-	// 									.and_then(|m| m.as_str())
-	// 									.map_or_else(|| "Unknown".to_string(), |s| s.to_string()),
-	// 								ledger_info,
-	// 								context,
-	// 							}
-	// 						} else {
-	// 							// HTTP 410, but not before history error
-	// 							let source_err =
-	// 								anyhow::anyhow!(
-	// 								"HTTP 410 GONE from {} for method {} with unexpected body: {}",
-	// 								url, method_name, body
-	// 							);
-
-	// 							StellarClientError::RpcError {
-	// 								method_name,
-	// 								source: source_err,
-	// 							}
-	// 						}
-	// 					}
-	// 					Err(parse_err) => {
-	// 						let source_err = anyhow::Error::new(parse_err).context(format!(
-	// 							"Failed to parse JSON body of HTTP 410 GONE from {} for method {}. Body: {}",
-	// 							url, method_name, body
-	// 						));
-
-	// 						StellarClientError::RpcError {
-	// 							source: source_err,
-	// 							method_name,
-	// 						}
-	// 					}
-	// 				}
-	// 			} else {
-	// 				// Other HTTP errors
-	// 				let source_err = anyhow::anyhow!(
-	// 					"HTTP error {} from {} for method {}: {}",
-	// 					status_code,
-	// 					url,
-	// 					method_name,
-	// 					body
-	// 				);
-
-	// 				StellarClientError::RpcError {
-	// 					source: source_err,
-	// 					method_name,
-	// 				}
-	// 			}
-	// 		}
-	// 		_ => StellarClientError::RpcError {
-	// 			source: anyhow::anyhow!(err),
-	// 			method_name,
-	// 		},
-	// 	}
-	// }
+				let orw_error = StellarClientError::OutsideRetentionWindow {
+					ledger_info: ledger_info_str,
+					code,
+					message,
+					context,
+				};
+				return Err(orw_error);
+			} else {
+				// Other JSON-RPC error reported by the server
+				let source = anyhow::anyhow!(
+					"Soroban RPC error (code: {}, message: {}) for method {}",
+					code,
+					message,
+					method_name
+				);
+				return Err(StellarClientError::RpcError {
+					method_name,
+					source,
+				});
+			}
+		}
+		Ok(())
+	}
 }
 
 impl StellarClient<StellarTransportClient> {
@@ -292,6 +245,38 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 
 			match http_response {
 				Ok(response_body) => {
+					if let Err(rpc_error) = self.check_and_handle_rpc_error(
+						&response_body,
+						start_sequence,
+						target_sequence,
+						RPC_METHOD_GET_EVENTS,
+					) {
+						match &rpc_error {
+							StellarClientError::OutsideRetentionWindow {
+								code,
+								message,
+								ledger_info,
+								context,
+							} => {
+								tracing::warn!(
+									trace_id = context.trace_id,
+									%ledger_info,
+									%code,
+									%message,
+									"Stellar RPC returned outside of retention window error",
+								);
+							}
+							_ => {
+								// TODO: Handle other types of RPC errors if needed
+							}
+						}
+						// A terminal JSON-RPC error was found, convert and return
+						return Err(anyhow::Error::new(rpc_error).context(format!(
+							"Soroban RPC reported an error during {}",
+							RPC_METHOD_GET_TRANSACTIONS,
+						)));
+					}
+
 					let raw_transactions = response_body
 						.get("result")
 						.and_then(|r| r.get("transactions"))
@@ -342,30 +327,6 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						"start_sequence: {}, end_sequence: {:?}",
 						start_sequence, end_sequence
 					);
-
-					// // Handle transport error and convert to StellarClientError
-					// let stellar_client_error = self.handle_transport_error(
-					// 	transport_err,
-					// 	ledger_info,
-					// 	RPC_METHOD_GET_TRANSACTIONS,
-					// );
-
-					// Log OutsideRetentionWindow error if applicable
-					// if let StellarClientError::OutsideRetentionWindow {
-					// 	ledger_info,
-					// 	code,
-					// 	message,
-					// 	context,
-					// } = &stellar_client_error
-					// {
-					// 	tracing::warn!(
-					// 		trace_id = context.trace_id,
-					// 		%ledger_info,
-					// 		%code,
-					// 		%message,
-					// 		"Stellar RPC returned outside of retention window error",
-					// 	);
-					// }
 
 					return Err(anyhow::anyhow!(transport_err)).context(format!(
 						"Failed to {} from Stellar RPC for ledger: {}",
@@ -439,6 +400,38 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 
 			match http_response {
 				Ok(response_body) => {
+					if let Err(rpc_error) = self.check_and_handle_rpc_error(
+						&response_body,
+						start_sequence,
+						target_sequence,
+						RPC_METHOD_GET_EVENTS,
+					) {
+						match &rpc_error {
+							StellarClientError::OutsideRetentionWindow {
+								code,
+								message,
+								ledger_info,
+								context,
+							} => {
+								tracing::warn!(
+									trace_id = context.trace_id,
+									%ledger_info,
+									%code,
+									%message,
+									"Stellar RPC returned outside of retention window error",
+								);
+							}
+							_ => {
+								// TODO: Handle other types of RPC errors if needed
+							}
+						}
+						// A terminal JSON-RPC error was found, convert and return
+						return Err(anyhow::Error::new(rpc_error).context(format!(
+							"Soroban RPC reported an error during {}",
+							RPC_METHOD_GET_EVENTS
+						)));
+					}
+
 					let raw_events = response_body
 						.get("result")
 						.and_then(|r| r.get("events"))
@@ -485,30 +478,6 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						"start_sequence: {}, end_sequence: {:?}",
 						start_sequence, end_sequence
 					);
-
-					// // Handle transport error and convert to StellarClientError
-					// let stellar_client_error = self.handle_transport_error(
-					// 	transport_err,
-					// 	ledger_info,
-					// 	RPC_METHOD_GET_EVENTS,
-					// );
-
-					// Log OutsideRetentionWindow error if applicable
-					// if let StellarClientError::OutsideRetentionWindow {
-					// 	ledger_info,
-					// 	code,
-					// 	message,
-					// 	context,
-					// } = &stellar_client_error
-					// {
-					// 	tracing::warn!(
-					// 		trace_id = context.trace_id,
-					// 		%ledger_info,
-					// 		%code,
-					// 		%message,
-					// 		"Stellar RPC returned outside of retention window error",
-					// 	);
-					// }
 
 					return Err(anyhow::anyhow!(transport_err)).context(format!(
 						"Failed to {} from Stellar RPC for ledger: {}",
