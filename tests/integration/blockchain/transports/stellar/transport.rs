@@ -133,6 +133,53 @@ async fn test_get_transactions_failed_to_parse_transaction() {
 }
 
 #[tokio::test]
+async fn test_get_transactions_outside_of_rpc_retention_window() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	let start_block = 57317319; // Example start block outside retention window
+	let end_block = 57369158; // Example end block within retention window
+
+	let mock_response = json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"error": {
+				"code": -32600,
+				"message": format!("start ledger must be between the oldest ledger: {} and the latest ledger: {} for this rpc instance",
+					start_block, end_block),
+			}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getTransactions"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+
+	let result = client.get_transactions(start_block, Some(end_block)).await;
+
+	assert!(result.is_err());
+
+	let err = result.unwrap_err();
+
+	println!("src Error: {}", err.source().unwrap());
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Soroban RPC reported an error during getTransactions"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::OutsideRetentionWindow { code, message, .. }) if
+			*code == -32600 &&
+			message.contains("must be between the oldest ledger")
+	),);
+}
+
+#[tokio::test]
 async fn test_get_events_success() {
 	let mut mock_stellar = MockStellarTransportClient::new();
 
@@ -250,6 +297,53 @@ async fn test_get_events_failed_to_parse_event() {
 		err.source()
 			.and_then(|e| e.downcast_ref::<StellarClientError>()),
 		Some(StellarClientError::ResponseParseError { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_events_outside_of_rpc_retention_window() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	let start_block = 57317319; // Example start block outside retention window
+	let end_block = 57369158; // Example end block within retention window
+
+	let mock_response = json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"error": {
+				"code": -32600,
+				"message": format!("startLedger must be within the ledger range: {} - {}",
+					start_block, end_block),
+			}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getEvents"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+
+	let result = client.get_events(start_block, Some(end_block)).await;
+
+	assert!(result.is_err());
+
+	let err = result.unwrap_err();
+
+	println!("src Error: {}", err.source().unwrap());
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Soroban RPC reported an error during getEvents"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::OutsideRetentionWindow { code, message, .. }) if
+			*code == -32600 &&
+			message.contains("must be within the ledger range")
 	),);
 }
 
@@ -417,6 +511,10 @@ async fn test_get_blocks_invalid_sequence_range() {
 		Some(StellarClientError::InvalidInput(ctx)) if ctx.contains("start_block 2 cannot be greater than end_block 1")
 	),);
 }
+
+#[tokio::test]
+#[ignore = "reason: Currently not possible to catch this error due to the current Stellar RPC behavior: https://github.com/stellar/stellar-rpc/issues/454"]
+async fn test_get_blocks_outside_of_rpc_retention_window() {}
 
 #[tokio::test]
 async fn test_get_contract_spec_success() {
