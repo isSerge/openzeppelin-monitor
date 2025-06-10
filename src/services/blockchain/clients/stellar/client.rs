@@ -102,18 +102,34 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 				.to_string();
 
 			// Specifically check for out-of-retention (code -32600 for Soroban RPC)
+			// There are two possible error messages that indicate this condition:
+			// - get transactions: "startLedger must be within the ledger range: 57317310 - 57369149"
+			// - get events: "start ledger must be between the oldest ledger: 57317319 and the latest ledger: 57369158 for this rpc instance"
 			if code == -32600
-				&& (message.to_lowercase().contains("ledger range")
-					|| message.to_lowercase().contains("oldest ledger"))
+				&& (message
+					.to_lowercase()
+					.contains("must be within the ledger range")
+					|| message
+						.to_lowercase()
+						.contains("must be between the oldest ledger"))
 			{
 				let ledger_info_str = format!(
 					"start_sequence: {}, target_sequence: {}",
 					start_sequence, target_sequence
 				);
 				let context = ErrorContext::new(
-					&format!("OutsideRetentionWindow for {}", ledger_info_str),
+					format!("OutsideRetentionWindow for {}", ledger_info_str),
 					None,
 					None,
+				);
+
+				// Log the error with tracing
+				tracing::error!(
+					trace_id = %context.trace_id,
+					ledger_info = %ledger_info_str,
+					rpc_code = %code,
+					rpc_message = %message,
+					"Soroban RPC indicates ledger is outside of retention window."
 				);
 
 				let orw_error = StellarClientError::OutsideRetentionWindow {
@@ -131,10 +147,22 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 					message,
 					method_name
 				);
-				return Err(StellarClientError::RpcError {
-					method_name,
+
+				let rpc_error = StellarClientError::RpcError {
 					source,
-				});
+					method_name,
+				};
+
+				// Log the error with tracing
+				tracing::error!(
+					trace_id = %ErrorContext::new("Stellar RPC Error", None, None).trace_id,
+					rpc_code = %code,
+					rpc_message = %message,
+					method_name = method_name,
+					"Stellar RPC reported an error"
+				);
+
+				return Err(rpc_error);
 			}
 		}
 		Ok(())
@@ -245,31 +273,13 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 
 			match http_response {
 				Ok(response_body) => {
+					// Check for RPC errors in the response
 					if let Err(rpc_error) = self.check_and_handle_rpc_error(
 						&response_body,
 						start_sequence,
 						target_sequence,
-						RPC_METHOD_GET_EVENTS,
+						RPC_METHOD_GET_TRANSACTIONS,
 					) {
-						match &rpc_error {
-							StellarClientError::OutsideRetentionWindow {
-								code,
-								message,
-								ledger_info,
-								context,
-							} => {
-								tracing::warn!(
-									trace_id = context.trace_id,
-									%ledger_info,
-									%code,
-									%message,
-									"Stellar RPC returned outside of retention window error",
-								);
-							}
-							_ => {
-								// TODO: Handle other types of RPC errors if needed
-							}
-						}
 						// A terminal JSON-RPC error was found, convert and return
 						return Err(anyhow::Error::new(rpc_error).context(format!(
 							"Soroban RPC reported an error during {}",
@@ -277,6 +287,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						)));
 					}
 
+					// Extract the transactions from the response
 					let raw_transactions = response_body
 						.get("result")
 						.and_then(|r| r.get("transactions"))
@@ -400,31 +411,13 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 
 			match http_response {
 				Ok(response_body) => {
+					// Check for RPC errors in the response
 					if let Err(rpc_error) = self.check_and_handle_rpc_error(
 						&response_body,
 						start_sequence,
 						target_sequence,
 						RPC_METHOD_GET_EVENTS,
 					) {
-						match &rpc_error {
-							StellarClientError::OutsideRetentionWindow {
-								code,
-								message,
-								ledger_info,
-								context,
-							} => {
-								tracing::warn!(
-									trace_id = context.trace_id,
-									%ledger_info,
-									%code,
-									%message,
-									"Stellar RPC returned outside of retention window error",
-								);
-							}
-							_ => {
-								// TODO: Handle other types of RPC errors if needed
-							}
-						}
 						// A terminal JSON-RPC error was found, convert and return
 						return Err(anyhow::Error::new(rpc_error).context(format!(
 							"Soroban RPC reported an error during {}",
@@ -432,6 +425,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						)));
 					}
 
+					// Extract the events from the response
 					let raw_events = response_body
 						.get("result")
 						.and_then(|r| r.get("events"))
@@ -577,6 +571,25 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 
 			match http_response {
 				Ok(response_body) => {
+					// Check for RPC errors in the response
+					// Currently this won't catch OutsideRetentionWindow errors because RPC returns generic error message:
+					// "[-32003] request failed to process due to internal issue"
+					// but we can still handle it as generic RPC error
+					// TODO: revisit after this issue is resolved: https://github.com/stellar/stellar-rpc/issues/454
+					if let Err(rpc_error) = self.check_and_handle_rpc_error(
+						&response_body,
+						start_block as u32,
+						target_block as u32,
+						RPC_METHOD_GET_LEDGERS,
+					) {
+						// A terminal JSON-RPC error was found, convert and return
+						return Err(anyhow::Error::new(rpc_error).context(format!(
+							"Soroban RPC reported an error during {}",
+							RPC_METHOD_GET_LEDGERS,
+						)));
+					}
+
+					// Extract the ledgers from the response
 					let raw_ledgers = response_body
 						.get("result")
 						.and_then(|r| r.get("ledgers"))
@@ -629,30 +642,6 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 					// Ledger info for logging
 					let ledger_info =
 						format!("start_block: {}, end_block: {:?}", start_block, end_block);
-
-					// // Handle transport error and convert to StellarClientError
-					// let stellar_client_error = self.handle_transport_error(
-					// 	transport_err,
-					// 	ledger_info,
-					// 	RPC_METHOD_GET_LEDGERS,
-					// );
-
-					// // Log OutsideRetentionWindow error if applicable
-					// if let StellarClientError::OutsideRetentionWindow {
-					// 	ledger_info,
-					// 	code,
-					// 	message,
-					// 	context,
-					// } = &stellar_client_error
-					// {
-					// 	tracing::warn!(
-					// 		trace_id = context.trace_id,
-					// 		%ledger_info,
-					// 		%code,
-					// 		%message,
-					// 		"Stellar RPC returned outside of retention window error",
-					// 	);
-					// }
 
 					return Err(anyhow::anyhow!(transport_err)).context(format!(
 						"Failed to {} from Stellar RPC for ledger: {}",
