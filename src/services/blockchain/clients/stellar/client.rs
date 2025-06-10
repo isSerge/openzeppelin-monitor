@@ -307,7 +307,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						})
 						.map_err(|client_parse_error| {
 							anyhow::anyhow!(client_parse_error)
-								.context("Failed to parse transactions from response")
+								.context("Failed to parse transaction response")
 						})?;
 
 					let ledger_transactions: Vec<StellarTransactionInfo> =
@@ -317,7 +317,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 								method_name: RPC_METHOD_GET_TRANSACTIONS,
 							};
 							anyhow::anyhow!(sce_parse_error)
-								.context("Failed to parse transactions from response")
+								.context("Failed to parse transaction response")
 						})?;
 
 					if ledger_transactions.is_empty() {
@@ -455,7 +455,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						})
 						.map_err(|client_parse_error| {
 							anyhow::anyhow!(client_parse_error)
-								.context("Failed to parse events from response")
+								.context("Failed to parse event response")
 						})?;
 
 					let ledger_events: Vec<StellarEvent> =
@@ -465,12 +465,8 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 								method_name: RPC_METHOD_GET_EVENTS,
 							};
 							anyhow::anyhow!(sce_parse_error)
-								.context("Failed to parse events from response")
+								.context("Failed to parse event response")
 						})?;
-
-					if ledger_events.is_empty() {
-						break;
-					}
 
 					for event in ledger_events {
 						if event.ledger > target_sequence {
@@ -627,7 +623,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 								method_name: RPC_METHOD_GET_LEDGERS,
 							};
 							anyhow::anyhow!(sce_parse_error)
-								.context("Failed to parse ledgers from response")
+								.context("Failed to parse ledger response")
 						})?;
 
 					let ledgers: Vec<StellarBlock> = serde_json::from_value(raw_ledgers.clone())
@@ -637,7 +633,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 								method_name: RPC_METHOD_GET_LEDGERS,
 							};
 							anyhow::anyhow!(sce_parse_error)
-								.context("Failed to parse ledgers from response")
+								.context("Failed to parse ledger response")
 						})?;
 
 					if ledgers.is_empty() {
