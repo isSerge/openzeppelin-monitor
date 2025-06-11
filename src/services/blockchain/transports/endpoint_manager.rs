@@ -87,11 +87,11 @@ impl EndpointManager {
 	/// * `transport` - The transport client implementing the RotatingTransport trait
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - The result of the rotation operation
+	/// * `Result<(), TransportError>` - The result of the rotation operation
 	pub async fn rotate_url<T: RotatingTransport>(
 		&self,
 		transport: &T,
-	) -> Result<(), anyhow::Error> {
+	) -> Result<(), TransportError> {
 		// Acquire rotation lock first
 		let _guard = self.rotation_lock.lock().await;
 
@@ -101,7 +101,11 @@ impl EndpointManager {
 		let new_url = {
 			let mut fallback_urls = self.fallback_urls.write().await;
 			if fallback_urls.is_empty() {
-				return Err(anyhow::anyhow!("No fallback URLs available"));
+				let message = format!(
+					"No fallback URLs available for rotation. Current active URL: {}",
+					current_active
+				);
+				return Err(TransportError::url_rotation(message, None, None));
 			}
 
 			// Find first URL that's different from current
@@ -110,13 +114,23 @@ impl EndpointManager {
 			match idx {
 				Some(pos) => fallback_urls.remove(pos),
 				None => {
-					return Err(anyhow::anyhow!("No fallback URLs available"));
+					let message = format!(
+						"All fallback URLs are the same as the current active URL: {}",
+						current_active
+					);
+					return Err(TransportError::url_rotation(message, None, None));
 				}
 			}
 		};
 
 		if transport.try_connect(&new_url).await.is_ok() {
-			transport.update_client(&new_url).await?;
+			transport.update_client(&new_url).await.map_err(|e| {
+				TransportError::url_rotation(
+					"Failed to update transport client with new URL".to_string(),
+					Some(e.into()),
+					None,
+				)
+			})?;
 
 			// Update URLs
 			{
@@ -132,10 +146,14 @@ impl EndpointManager {
 			}
 			Ok(())
 		} else {
+			let message = format!(
+				"Failed to connect to new URL: {}. Retaining it in fallback list.",
+				&new_url
+			);
 			// Re-acquire lock to push back the failed URL
 			let mut fallback_urls = self.fallback_urls.write().await;
 			fallback_urls.push(new_url);
-			Err(anyhow::anyhow!("Failed to connect to fallback URL"))
+			Err(TransportError::url_rotation(message, None, None))
 		}
 	}
 
@@ -154,13 +172,13 @@ impl EndpointManager {
 	/// # Returns
 	/// * `Ok(true)` - Rotation was needed and succeeded, caller should retry the request
 	/// * `Ok(false)` - No rotation was needed or possible
-	/// * `Err` - Rotation was attempted but failed
+	/// * `TransportError` - Rotation was attempted but failed
 	async fn should_attempt_rotation<T: RotatingTransport>(
 		&self,
 		transport: &T,
 		should_check_status: bool,
 		status: Option<u16>,
-	) -> Result<bool, anyhow::Error> {
+	) -> Result<bool, TransportError> {
 		// Check fallback URLs availability without holding the lock
 		let should_rotate = {
 			let fallback_urls = self.fallback_urls.read().await;
@@ -172,7 +190,11 @@ impl EndpointManager {
 		if should_rotate {
 			match self.rotate_url(transport).await {
 				Ok(_) => Ok(true), // Rotation successful, continue loop
-				Err(e) => Err(e.context("Failed to rotate URL")),
+				Err(e) => {
+					let message =
+						format!("Rotation failed for URL: {}", self.active_url.read().await);
+					Err(TransportError::url_rotation(message, Some(e.into()), None))
+				}
 			}
 		} else {
 			Ok(false) // No rotation needed
