@@ -281,7 +281,13 @@ async fn test_rotate_url_no_fallbacks() {
 
 	// Verify we get the expected error
 	let err = result.unwrap_err();
-	assert!(err.to_string().contains("No fallback URLs available"));
+
+	match err {
+		TransportError::UrlRotation(ctx) => {
+			assert!(ctx.to_string().contains("No fallback URLs available"));
+		}
+		_ => panic!("Expected UrlRotation error"),
+	}
 
 	// Verify the active URL hasn't changed
 	assert_eq!(&*manager.active_url.read().await, &server.url());
@@ -305,7 +311,16 @@ async fn test_rotate_url_all_urls_match_active() {
 
 	// Verify we get the expected error
 	let err = result.unwrap_err();
-	assert!(err.to_string().contains("No fallback URLs available"));
+
+	match err {
+		TransportError::UrlRotation(ctx) => {
+			assert!(ctx
+				.to_string()
+				.contains("All fallback URLs are the same as the current active URL"));
+			assert!(ctx.to_string().contains(&active_url));
+		}
+		_ => panic!("Expected UrlRotation error"),
+	}
 
 	// Verify the active URL hasn't changed
 	assert_eq!(&*manager.active_url.read().await, &active_url);
@@ -335,9 +350,14 @@ async fn test_rotate_url_connection_failure() {
 
 	// Verify we get the expected error
 	let err = result.unwrap_err();
-	assert!(err
-		.to_string()
-		.contains("Failed to connect to fallback URL"));
+
+	match err {
+		TransportError::UrlRotation(ctx) => {
+			assert!(ctx.to_string().contains("Failed to connect to new URL"));
+			assert!(ctx.to_string().contains(invalid_url));
+		}
+		_ => panic!("Expected UrlRotation error"),
+	}
 
 	// Verify the active URL hasn't changed
 	assert_eq!(&*manager.active_url.read().await, &server.url());
