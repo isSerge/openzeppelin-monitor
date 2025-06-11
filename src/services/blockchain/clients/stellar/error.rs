@@ -62,7 +62,9 @@ impl StellarClientError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		Self::RpcError(Box::new(ErrorContext::new_with_log(message, source, metadata)))
+		Self::RpcError(Box::new(ErrorContext::new_with_log(
+			message, source, metadata,
+		)))
 	}
 
 	pub fn response_parse_error(
@@ -70,7 +72,9 @@ impl StellarClientError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		Self::ResponseParseError(Box::new(ErrorContext::new_with_log(message, source, metadata)))
+		Self::ResponseParseError(Box::new(ErrorContext::new_with_log(
+			message, source, metadata,
+		)))
 	}
 
 	pub fn invalid_input(
@@ -86,7 +90,9 @@ impl StellarClientError {
 		source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 		metadata: Option<HashMap<String, String>>,
 	) -> Self {
-		Self::UnexpectedResponseStructure(Box::new(ErrorContext::new_with_log(msg, source, metadata)))
+		Self::UnexpectedResponseStructure(Box::new(ErrorContext::new_with_log(
+			msg, source, metadata,
+		)))
 	}
 }
 
@@ -270,7 +276,10 @@ mod tests {
 			},
 			{
 				let (ctx, id) = create_context_with_id();
-				(StellarClientError::UnexpectedResponseStructure(Box::new(ctx)), id)
+				(
+					StellarClientError::UnexpectedResponseStructure(Box::new(ctx)),
+					id,
+				)
 			},
 		];
 
