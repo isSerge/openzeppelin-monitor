@@ -29,8 +29,9 @@ use crate::{
 			StellarBlockFilter,
 		},
 	},
-	utils::logging::error::ErrorContext,
 };
+
+use super::error::StellarClientError;
 
 /// Stellar RPC method constants
 const RPC_METHOD_GET_TRANSACTIONS: &str = "getTransactions";
@@ -38,32 +39,6 @@ const RPC_METHOD_GET_EVENTS: &str = "getEvents";
 const RPC_METHOD_GET_LATEST_LEDGER: &str = "getLatestLedger";
 const RPC_METHOD_GET_LEDGERS: &str = "getLedgers";
 const RPC_METHOD_GET_LEDGER_ENTRIES: &str = "getLedgerEntries";
-
-/// Stellar client error type
-#[derive(Debug, thiserror::Error)]
-pub enum StellarClientError {
-	#[error("Data for '{ledger_info}' is outside of Stellar RPC retention window")]
-	OutsideRetentionWindow {
-		code: i64,             // Code from RPC response
-		message: String,       // Message from RPC response
-		ledger_info: String,   // Client-side context about the request
-		context: ErrorContext, // Context for tracing
-	},
-	#[error("Stellar RPC request failed")]
-	RpcError {
-		#[source]
-		source: anyhow::Error,
-		method_name: &'static str,
-	},
-	#[error("Failed to parse Stellar RPC response")]
-	ResponseParseError {
-		#[source]
-		source: serde_json::Error,
-		method_name: &'static str,
-	},
-	#[error("Invalid input: {0}")]
-	InvalidInput(String),
-}
 
 /// Client implementation for the Stellar blockchain
 ///
@@ -91,11 +66,11 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 		method_name: &'static str,
 	) -> Result<(), StellarClientError> {
 		if let Some(json_rpc_error) = response_body.get("error") {
-			let code = json_rpc_error
+			let rpc_code = json_rpc_error
 				.get("code")
 				.and_then(|c| c.as_i64())
 				.unwrap_or(0);
-			let message = json_rpc_error
+			let rpc_message = json_rpc_error
 				.get("message")
 				.and_then(|m| m.as_str())
 				.unwrap_or("Unknown RPC error")
@@ -105,11 +80,11 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 			// There are two possible error messages that indicate this condition:
 			// - get transactions: "startLedger must be within the ledger range: 57317310 - 57369149"
 			// - get events: "start ledger must be between the oldest ledger: 57317319 and the latest ledger: 57369158 for this rpc instance"
-			if code == -32600
-				&& (message
+			if rpc_code == -32600
+				&& (rpc_message
 					.to_lowercase()
 					.contains("must be within the ledger range")
-					|| message
+					|| rpc_message
 						.to_lowercase()
 						.contains("must be between the oldest ledger"))
 			{
@@ -117,52 +92,22 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 					"start_sequence: {}, target_sequence: {}",
 					start_sequence, target_sequence
 				);
-				let context = ErrorContext::new(
-					format!("OutsideRetentionWindow for {}", ledger_info_str),
+
+				return Err(StellarClientError::outside_retention_window(
+					rpc_code,
+					rpc_message,
+					ledger_info_str,
 					None,
 					None,
-				);
-
-				// Log the error with tracing
-				tracing::error!(
-					trace_id = %context.trace_id,
-					ledger_info = %ledger_info_str,
-					rpc_code = %code,
-					rpc_message = %message,
-					"Soroban RPC indicates ledger is outside of retention window."
-				);
-
-				let orw_error = StellarClientError::OutsideRetentionWindow {
-					ledger_info: ledger_info_str,
-					code,
-					message,
-					context,
-				};
-				return Err(orw_error);
+				));
 			} else {
 				// Other JSON-RPC error reported by the server
-				let source = anyhow::anyhow!(
-					"Soroban RPC error (code: {}, message: {}) for method {}",
-					code,
-					message,
-					method_name
+				let message = format!(
+					"Stellar RPC request failed for method '{}': {} (code {})",
+					method_name, rpc_message, rpc_code
 				);
 
-				let rpc_error = StellarClientError::RpcError {
-					source,
-					method_name,
-				};
-
-				// Log the error with tracing
-				tracing::error!(
-					trace_id = %ErrorContext::new("Stellar RPC Error", None, None).trace_id,
-					rpc_code = %code,
-					rpc_message = %message,
-					method_name = method_name,
-					"Stellar RPC reported an error"
-				);
-
-				return Err(rpc_error);
+				return Err(StellarClientError::rpc_error(message, None, None));
 			}
 		}
 		Ok(())
@@ -231,10 +176,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 		// Validate input parameters
 		if let Some(end_sequence) = end_sequence {
 			if start_sequence > end_sequence {
-				let input_error = StellarClientError::InvalidInput(format!(
+				let message = format!(
 					"start_sequence {} cannot be greater than end_sequence {}",
 					start_sequence, end_sequence
-				));
+				);
+				let input_error = StellarClientError::invalid_input(message, None, None);
 				return Err(anyhow::anyhow!(input_error))
 					.context("Invalid input parameters for Stellar RPC");
 			}
@@ -281,7 +227,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						RPC_METHOD_GET_TRANSACTIONS,
 					) {
 						// A terminal JSON-RPC error was found, convert and return
-						return Err(anyhow::Error::new(rpc_error).context(format!(
+						return Err(anyhow::anyhow!(rpc_error).context(format!(
 							"Soroban RPC reported an error during {}",
 							RPC_METHOD_GET_TRANSACTIONS,
 						)));
@@ -292,10 +238,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						.get("result")
 						.and_then(|r| r.get("transactions"))
 						.ok_or_else(|| {
-							StellarClientError::ResponseParseError {
-								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
-								method_name: RPC_METHOD_GET_TRANSACTIONS,
-							}
+							let message = format!(
+								"Unexpected response structure for method '{}'",
+								RPC_METHOD_GET_TRANSACTIONS
+							);
+							StellarClientError::unexpected_response_structure(message, None, None)
 						})
 						.map_err(|client_parse_error| {
 							anyhow::anyhow!(client_parse_error)
@@ -304,10 +251,15 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 
 					let ledger_transactions: Vec<StellarTransactionInfo> =
 						serde_json::from_value(raw_transactions.clone()).map_err(|e| {
-							let sce_parse_error = StellarClientError::ResponseParseError {
-								source: e,
-								method_name: RPC_METHOD_GET_TRANSACTIONS,
-							};
+							let message = format!(
+								"Failed to parse transactions from response for method '{}': {}",
+								RPC_METHOD_GET_TRANSACTIONS, e
+							);
+							let sce_parse_error = StellarClientError::response_parse_error(
+								message,
+								Some(e.into()),
+								None,
+							);
 							anyhow::anyhow!(sce_parse_error)
 								.context("Failed to parse transaction response")
 						})?;
@@ -363,10 +315,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 		// Validate input parameters
 		if let Some(end_sequence) = end_sequence {
 			if start_sequence > end_sequence {
-				let input_error = StellarClientError::InvalidInput(format!(
+				let message = format!(
 					"start_sequence {} cannot be greater than end_sequence {}",
 					start_sequence, end_sequence
-				));
+				);
+				let input_error = StellarClientError::invalid_input(message, None, None);
 				return Err(anyhow::anyhow!(input_error))
 					.context("Invalid input parameters for Stellar RPC");
 			}
@@ -419,7 +372,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						RPC_METHOD_GET_EVENTS,
 					) {
 						// A terminal JSON-RPC error was found, convert and return
-						return Err(anyhow::Error::new(rpc_error).context(format!(
+						return Err(anyhow::anyhow!(rpc_error).context(format!(
 							"Soroban RPC reported an error during {}",
 							RPC_METHOD_GET_EVENTS
 						)));
@@ -430,10 +383,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 						.get("result")
 						.and_then(|r| r.get("events"))
 						.ok_or_else(|| {
-							StellarClientError::ResponseParseError {
-								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
-								method_name: RPC_METHOD_GET_EVENTS,
-							}
+							let message = format!(
+								"Unexpected response structure for method '{}'",
+								RPC_METHOD_GET_EVENTS
+							);
+							StellarClientError::unexpected_response_structure(message, None, None)
 						})
 						.map_err(|client_parse_error| {
 							anyhow::anyhow!(client_parse_error)
@@ -442,10 +396,15 @@ impl<T: Send + Sync + Clone + BlockchainTransport> StellarClientTrait for Stella
 
 					let ledger_events: Vec<StellarEvent> =
 						serde_json::from_value(raw_events.clone()).map_err(|e| {
-							let sce_parse_error = StellarClientError::ResponseParseError {
-								source: e,
-								method_name: RPC_METHOD_GET_EVENTS,
-							};
+							let message = format!(
+								"Failed to parse events from response for method '{}': {}",
+								RPC_METHOD_GET_EVENTS, e
+							);
+							let sce_parse_error = StellarClientError::response_parse_error(
+								message,
+								Some(e.into()),
+								None,
+							);
 							anyhow::anyhow!(sce_parse_error)
 								.context("Failed to parse event response")
 						})?;
@@ -531,10 +490,11 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 		// Validate input parameters
 		if let Some(end_block) = end_block {
 			if start_block > end_block {
-				let input_error = StellarClientError::InvalidInput(format!(
+				let message = format!(
 					"start_block {} cannot be greater than end_block {}",
 					start_block, end_block
-				));
+				);
+				let input_error = StellarClientError::invalid_input(message, None, None);
 				return Err(anyhow::anyhow!(input_error))
 					.context("Invalid input parameters for Stellar RPC");
 			}
@@ -583,7 +543,7 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 						RPC_METHOD_GET_LEDGERS,
 					) {
 						// A terminal JSON-RPC error was found, convert and return
-						return Err(anyhow::Error::new(rpc_error).context(format!(
+						return Err(anyhow::anyhow!(rpc_error).context(format!(
 							"Soroban RPC reported an error during {}",
 							RPC_METHOD_GET_LEDGERS,
 						)));
@@ -594,20 +554,28 @@ impl<T: Send + Sync + Clone + BlockchainTransport> BlockChainClient for StellarC
 						.get("result")
 						.and_then(|r| r.get("ledgers"))
 						.ok_or_else(|| {
-							let sce_parse_error = StellarClientError::ResponseParseError {
-								source: serde_json::from_str::<serde_json::Value>("").unwrap_err(), // Placeholder for actual error
-								method_name: RPC_METHOD_GET_LEDGERS,
-							};
+							let message = format!(
+								"Unexpected response structure for method '{}'",
+								RPC_METHOD_GET_LEDGERS
+							);
+							let sce_parse_error = StellarClientError::unexpected_response_structure(
+								message, None, None,
+							);
 							anyhow::anyhow!(sce_parse_error)
 								.context("Failed to parse ledger response")
 						})?;
 
 					let ledgers: Vec<StellarBlock> = serde_json::from_value(raw_ledgers.clone())
 						.map_err(|e| {
-							let sce_parse_error = StellarClientError::ResponseParseError {
-								source: e,
-								method_name: RPC_METHOD_GET_LEDGERS,
-							};
+							let message = format!(
+								"Failed to parse ledgers from response for method '{}': {}",
+								RPC_METHOD_GET_LEDGERS, e
+							);
+							let sce_parse_error = StellarClientError::response_parse_error(
+								message,
+								Some(e.into()),
+								None,
+							);
 							anyhow::anyhow!(sce_parse_error)
 								.context("Failed to parse ledger response")
 						})?;
