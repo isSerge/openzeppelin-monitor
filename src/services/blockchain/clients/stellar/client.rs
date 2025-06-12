@@ -60,15 +60,29 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 		Self { http_client }
 	}
 
-	/// Checks a successfully received JSON RPC response body for an "error" field.
-	/// If an error field is present, it attempts to identify specific conditions like
-	/// "outside of retention window" or handles it as a generic RPC error.
+	/// Checks a JSON-RPC response for error information and converts it into a `StellarClientError` if present.
+	/// 
+	/// This function inspects the given JSON response body for an "error" field.
+	/// If a known "outside of retention window" condition is detected (by code/message),
+	/// it returns a specific `StellarClientError::outside_retention_window`.
+	/// Otherwise, it returns a generic `StellarClientError::rpc_error` for any other error found.
+	/// If no error is present, it returns `Ok(())`.
+	///
+	/// # Arguments
+	/// * `response_body` - A reference to the JSON response body to inspect.
+	/// * `start_sequence` - The starting ledger sequence number relevant to the request.
+	/// * `target_sequence` - The target ledger sequence number relevant to the request.
+	/// * `method_name` - The name of the RPC method that was called (for error reporting).
+	///
+	/// # Returns
+	/// * `Ok(())` if no error is present in the response.
+	/// * `Err(StellarClientError)` if an error is detected.
 	fn check_and_handle_rpc_error(
 		&self,
-		response_body: &serde_json::Value,
-		start_sequence: u32,
-		target_sequence: u32,
-		method_name: &'static str,
+  		response_body: &serde_json::Value,
+ 		start_sequence: u32,
+ 		target_sequence: u32,
+ 		method_name: &'static str,
 	) -> Result<(), StellarClientError> {
 		if let Some(json_rpc_error) = response_body.get("error") {
 			let rpc_code = json_rpc_error
