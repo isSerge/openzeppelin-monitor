@@ -40,6 +40,11 @@ const RPC_METHOD_GET_LATEST_LEDGER: &str = "getLatestLedger";
 const RPC_METHOD_GET_LEDGERS: &str = "getLedgers";
 const RPC_METHOD_GET_LEDGER_ENTRIES: &str = "getLedgerEntries";
 
+const RETENTION_MESSAGES: [&str; 2] = [
+	"must be within the ledger range",
+	"must be between the oldest ledger",
+];
+
 /// Client implementation for the Stellar blockchain
 ///
 /// Provides high-level access to Stellar blockchain data and operations through HTTP transport.
@@ -76,17 +81,10 @@ impl<T: Send + Sync + Clone> StellarClient<T> {
 				.unwrap_or("Unknown RPC error")
 				.to_string();
 
-			// Specifically check for out-of-retention (code -32600 for Soroban RPC)
-			// There are two possible error messages that indicate this condition:
-			// - get transactions: "startLedger must be within the ledger range: 57317310 - 57369149"
-			// - get events: "start ledger must be between the oldest ledger: 57317319 and the latest ledger: 57369158 for this rpc instance"
 			if rpc_code == -32600
-				&& (rpc_message
-					.to_lowercase()
-					.contains("must be within the ledger range")
-					|| rpc_message
-						.to_lowercase()
-						.contains("must be between the oldest ledger"))
+				&& RETENTION_MESSAGES
+					.iter()
+					.any(|msg| rpc_message.to_lowercase().contains(msg))
 			{
 				let ledger_info_str = format!(
 					"start_sequence: {}, target_sequence: {}",
