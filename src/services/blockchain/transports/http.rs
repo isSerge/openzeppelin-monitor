@@ -11,8 +11,8 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use reqwest::Client;
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{policies::ExponentialBackoff, Jitter, RetryTransientMiddleware};
+use reqwest_middleware::ClientWithMiddleware;
+use reqwest_retry::policies::ExponentialBackoff;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
@@ -24,6 +24,7 @@ use crate::{
 		BlockchainTransport, EndpointManager, RotatingTransport, TransientErrorRetryStrategy,
 		TransportError,
 	},
+	utils::http::{create_retryable_http_client, HttpRetryConfig},
 };
 
 /// Basic HTTP transport client for blockchain interactions
@@ -70,30 +71,31 @@ impl HttpTransportClient {
 
 		rpc_urls.sort_by(|a, b| b.weight.cmp(&a.weight));
 
-		// Default retry policy
-		let retry_policy = ExponentialBackoff::builder()
-			.base(2)
-			.retry_bounds(Duration::from_millis(250), Duration::from_secs(10))
-			.jitter(Jitter::Full)
-			.build_with_max_retries(3);
+		// Create a retry policy with default settings
+		// Shared config for endpoint manager and test connection
+		let http_retry_config = HttpRetryConfig::default();
 
-		let http_client = reqwest::ClientBuilder::new()
-			.pool_idle_timeout(Duration::from_secs(90))
-			.pool_max_idle_per_host(32)
-			.timeout(Duration::from_secs(30))
-			.connect_timeout(Duration::from_secs(20))
-			.build()
-			.context("Failed to create HTTP client")?;
+		// Create the base HTTP client
+		// Shared across:
+		// - EndpointManager client
+		// - Test connection client
+		// - HttpTransportClient itself
+		let base_http_client = Arc::new(
+			reqwest::ClientBuilder::new()
+				.pool_idle_timeout(Duration::from_secs(90))
+				.pool_max_idle_per_host(32)
+				.timeout(Duration::from_secs(30))
+				.connect_timeout(Duration::from_secs(20))
+				.build()
+				.context("Failed to create base HTTP client")?,
+		);
 
-		// Clone it before using it to create the middleware client
-		let cloned_http_client = http_client.clone();
-
-		let client = ClientBuilder::new(cloned_http_client)
-			.with(RetryTransientMiddleware::new_with_policy_and_strategy(
-				retry_policy,
-				TransientErrorRetryStrategy,
-			))
-			.build();
+		// Create a retryable HTTP client with the base client and retry policy
+		let retryable_client = create_retryable_http_client(
+			&http_retry_config,
+			(*base_http_client).clone(),
+			None::<TransientErrorRetryStrategy>,
+		);
 
 		for rpc_url in rpc_urls.iter() {
 			let url = match Url::parse(rpc_url.url.as_ref()) {
@@ -113,9 +115,21 @@ impl HttpTransportClient {
 				})
 			};
 
-			let request = http_client.post(url.clone()).json(&test_request);
+			// Create a retryable HTTP client for testing the connection
+			let test_connection_client = create_retryable_http_client(
+				&http_retry_config,
+				(*base_http_client).clone(),
+				None::<TransientErrorRetryStrategy>,
+			);
+
 			// Attempt to connect to the endpoint
-			match request.send().await {
+			let request_result = test_connection_client
+				.post(url.clone())
+				.json(&test_request)
+				.send()
+				.await;
+
+			match request_result {
 				Ok(response) => {
 					// Check if the response indicates an error status (4xx or 5xx)
 					if !response.status().is_success() {
@@ -132,9 +146,9 @@ impl HttpTransportClient {
 
 					// Successfully connected - create and return the client
 					return Ok(Self {
-						client: Arc::new(http_client),
+						client: base_http_client,
 						endpoint_manager: EndpointManager::new(
-							client,
+							retryable_client,
 							rpc_url.url.as_ref(),
 							fallback_urls,
 						),
