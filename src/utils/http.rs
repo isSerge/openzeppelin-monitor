@@ -4,12 +4,13 @@ use reqwest_retry::{
 };
 use std::time::Duration;
 
-// TODO: move this struct to a more appropriate module
 /// Configuration for HTTP retry policies
 #[derive(Debug, Clone)]
 pub struct HttpRetryConfig {
 	/// Maximum number of retries for transient errors
 	pub max_retries: u32,
+	/// Base duration for exponential backoff calculations
+	pub base_for_backoff: u32,
 	/// Initial backoff duration before the first retry
 	pub initial_backoff: Duration,
 	/// Maximum backoff duration for retries
@@ -23,6 +24,7 @@ impl Default for HttpRetryConfig {
 	fn default() -> Self {
 		Self {
 			max_retries: 3,
+			base_for_backoff: 2,
 			initial_backoff: Duration::from_secs(1),
 			max_backoff: Duration::from_secs(10),
 			jitter: Jitter::Full,
@@ -50,6 +52,7 @@ where
 {
 	// Create the retry policy based on the provided configuration
 	let retry_policy = ExponentialBackoff::builder()
+		.base(config.base_for_backoff)
 		.retry_bounds(config.initial_backoff, config.max_backoff)
 		.jitter(config.jitter)
 		.build_with_max_retries(config.max_retries);
