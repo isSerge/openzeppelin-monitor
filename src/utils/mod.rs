@@ -18,17 +18,17 @@ mod cron_utils;
 mod expression;
 
 pub mod constants;
+pub mod http;
 pub mod logging;
 pub mod macros;
 pub mod metrics;
 pub mod monitor;
 pub mod parsing;
 pub mod tests;
-pub mod http;
 
 pub use constants::*;
 pub use cron_utils::*;
 pub use expression::*;
+pub use http::*;
 pub use macros::*;
 pub use parsing::*;
-pub use http::*;
