@@ -12,7 +12,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use reqwest::Client;
 use reqwest_middleware::ClientWithMiddleware;
-use reqwest_retry::policies::ExponentialBackoff;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
@@ -210,26 +209,6 @@ impl BlockchainTransport for HttpTransportClient {
 			.await?;
 
 		Ok(response)
-	}
-
-	/// Updates the retry policy configuration
-	///
-	/// # Arguments
-	/// * `retry_policy` - New retry policy to use for subsequent requests
-	/// * `retry_strategy` - Optional retry strategy to use for subsequent requests
-	///
-	/// # Returns
-	/// * `Result<(), anyhow::Error>` - Success or error status
-	fn set_retry_policy(
-		&mut self,
-		retry_policy: ExponentialBackoff,
-		retry_strategy: Option<TransientErrorRetryStrategy>,
-	) -> Result<(), anyhow::Error> {
-		self.endpoint_manager.set_retry_policy(
-			retry_policy,
-			retry_strategy.unwrap_or(TransientErrorRetryStrategy),
-		);
-		Ok(())
 	}
 
 	/// Update endpoint manager with a new client

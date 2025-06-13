@@ -1,8 +1,6 @@
 use mockito::Server;
 use openzeppelin_monitor::{
-	services::blockchain::{
-		BlockchainTransport, HttpTransportClient, RotatingTransport, TransientErrorRetryStrategy,
-	},
+	services::blockchain::{BlockchainTransport, HttpTransportClient, RotatingTransport},
 	utils::HttpRetryConfig,
 };
 use reqwest_middleware::ClientBuilder;
@@ -222,53 +220,6 @@ async fn test_send_raw_request() {
 	let response = result.unwrap();
 	assert_eq!(response["result"]["data"], "success");
 	no_params_mock.assert();
-}
-
-#[tokio::test]
-async fn test_set_retry_policy() {
-	let mut server = Server::new_async().await;
-	let mock = create_http_valid_server_mock_network_response(&mut server);
-
-	let network = create_evm_test_network_with_urls(vec![&server.url()]);
-	let mut client = HttpTransportClient::new(&network, None).await.unwrap();
-
-	// Set up a sequence of responses to test retry behavior
-	let retry_mock = server
-		.mock("POST", "/")
-		.with_status(429) // Too Many Requests
-		.with_body("Rate limited")
-		.expect(2) // Expect 2 retries
-		.create_async()
-		.await;
-
-	let success_mock = server
-		.mock("POST", "/")
-		.with_status(200)
-		.with_header("content-type", "application/json")
-		.with_body(r#"{"jsonrpc": "2.0", "result": "success_after_retry", "id": 1}"#)
-		.expect(1)
-		.create_async()
-		.await;
-
-	// Set a custom retry policy with exactly 2 retries
-	let retry_policy = ExponentialBackoff::builder().build_with_max_retries(2);
-	let result = client.set_retry_policy(retry_policy, Some(TransientErrorRetryStrategy));
-	assert!(result.is_ok());
-
-	// Make request that should trigger retries
-	let result = client
-		.send_raw_request("test_method", Some(json!(["param1"])))
-		.await;
-
-	// Verify success after retries
-	assert!(result.is_ok());
-	let response = result.unwrap();
-	assert_eq!(response["result"], "success_after_retry");
-
-	// Verify all mocks were called
-	mock.assert();
-	retry_mock.assert();
-	success_mock.assert();
 }
 
 #[tokio::test]
