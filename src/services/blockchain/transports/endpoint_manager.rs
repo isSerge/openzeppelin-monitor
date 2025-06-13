@@ -31,6 +31,19 @@ pub struct EndpointManager {
 	rotation_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
+/// Represents the outcome of a `EndpointManager::attempt_request_on_url` method call
+/// Used within the `EndpointManager::send_raw_request` method to handle different paths of request execution
+/// and response handling.
+#[derive(Debug)]
+enum SingleRequestAttemptOutcome {
+	/// Successfully got a response (status might still be error)
+	Success(reqwest::Response),
+	/// Error during send (e.g., connection, timeout)
+	NetworkError(reqwest_middleware::Error),
+	/// Error serializing the request body
+	SerializationError(TransportError),
+}
+
 impl EndpointManager {
 	/// Creates a new rotating URL client
 	///
@@ -87,11 +100,11 @@ impl EndpointManager {
 	/// * `transport` - The transport client implementing the RotatingTransport trait
 	///
 	/// # Returns
-	/// * `Result<(), anyhow::Error>` - The result of the rotation operation
+	/// * `Result<(), TransportError>` - The result of the rotation operation
 	pub async fn rotate_url<T: RotatingTransport>(
 		&self,
 		transport: &T,
-	) -> Result<(), anyhow::Error> {
+	) -> Result<(), TransportError> {
 		// Acquire rotation lock first
 		let _guard = self.rotation_lock.lock().await;
 
@@ -101,7 +114,11 @@ impl EndpointManager {
 		let new_url = {
 			let mut fallback_urls = self.fallback_urls.write().await;
 			if fallback_urls.is_empty() {
-				return Err(anyhow::anyhow!("No fallback URLs available"));
+				let message = format!(
+					"No fallback URLs available for rotation. Current active URL: {}",
+					current_active
+				);
+				return Err(TransportError::url_rotation(message, None, None));
 			}
 
 			// Find first URL that's different from current
@@ -110,13 +127,23 @@ impl EndpointManager {
 			match idx {
 				Some(pos) => fallback_urls.remove(pos),
 				None => {
-					return Err(anyhow::anyhow!("No fallback URLs available"));
+					let message = format!(
+						"All fallback URLs are the same as the current active URL: {}",
+						current_active
+					);
+					return Err(TransportError::url_rotation(message, None, None));
 				}
 			}
 		};
 
 		if transport.try_connect(&new_url).await.is_ok() {
-			transport.update_client(&new_url).await?;
+			transport.update_client(&new_url).await.map_err(|e| {
+				TransportError::url_rotation(
+					"Failed to update transport client with new URL".to_string(),
+					Some(e.into()),
+					None,
+				)
+			})?;
 
 			// Update URLs
 			{
@@ -132,10 +159,14 @@ impl EndpointManager {
 			}
 			Ok(())
 		} else {
+			let message = format!(
+				"Failed to connect to new URL: {}. Retaining it in fallback list.",
+				&new_url
+			);
 			// Re-acquire lock to push back the failed URL
 			let mut fallback_urls = self.fallback_urls.write().await;
 			fallback_urls.push(new_url);
-			Err(anyhow::anyhow!("Failed to connect to fallback URL"))
+			Err(TransportError::url_rotation(message, None, None))
 		}
 	}
 
@@ -154,13 +185,13 @@ impl EndpointManager {
 	/// # Returns
 	/// * `Ok(true)` - Rotation was needed and succeeded, caller should retry the request
 	/// * `Ok(false)` - No rotation was needed or possible
-	/// * `Err` - Rotation was attempted but failed
+	/// * `TransportError` - Rotation was attempted but failed
 	async fn should_attempt_rotation<T: RotatingTransport>(
 		&self,
 		transport: &T,
 		should_check_status: bool,
 		status: Option<u16>,
-	) -> Result<bool, anyhow::Error> {
+	) -> Result<bool, TransportError> {
 		// Check fallback URLs availability without holding the lock
 		let should_rotate = {
 			let fallback_urls = self.fallback_urls.read().await;
@@ -172,10 +203,70 @@ impl EndpointManager {
 		if should_rotate {
 			match self.rotate_url(transport).await {
 				Ok(_) => Ok(true), // Rotation successful, continue loop
-				Err(e) => Err(e.context("Failed to rotate URL")),
+				Err(e) => {
+					let message =
+						format!("Rotation failed for URL: {}", self.active_url.read().await);
+					Err(TransportError::url_rotation(message, Some(e.into()), None))
+				}
 			}
 		} else {
 			Ok(false) // No rotation needed
+		}
+	}
+
+	/// Attempts to send a request to the specified URL
+	/// # Arguments
+	/// * `url` - The URL to send the request to
+	/// * `transport` - The transport client implementing the RotatingTransport trait
+	/// * `method` - The HTTP method to use for the request (e.g., "POST")
+	/// * `params` - Optional parameters for the request, serialized to JSON
+	///
+	/// # Returns
+	/// * `SingleRequestAttemptOutcome` - The outcome of the request attempt
+	async fn attempt_request_on_url<P>(
+		&self,
+		url: &str,
+		transport: &impl RotatingTransport,
+		method: &str,
+		params: Option<P>,
+	) -> SingleRequestAttemptOutcome
+	where
+		P: Into<Value> + Send + Clone + Serialize,
+	{
+		// Create the request body using the transport's customization method
+		let request_body = transport.customize_request(method, params).await;
+
+		// Serialize the request body to JSON
+		let request_body_str = match serde_json::to_string(&request_body) {
+			Ok(body) => body,
+			Err(e) => {
+				tracing::error!("Failed to serialize request body: {}", e);
+				return SingleRequestAttemptOutcome::SerializationError(
+					TransportError::request_serialization(
+						"Failed to serialize request JSON",
+						Some(Box::new(e)),
+						None,
+					),
+				);
+			}
+		};
+
+		// Send the request to the specified URL
+		let response_result = self
+			.client
+			.post(url)
+			.header("Content-Type", "application/json")
+			.body(request_body_str)
+			.send()
+			.await;
+
+		// Handle the response
+		match response_result {
+			Ok(response) => SingleRequestAttemptOutcome::Success(response),
+			Err(network_error) => {
+				tracing::warn!("Network error while sending request: {}", network_error);
+				SingleRequestAttemptOutcome::NetworkError(network_error)
+			}
 		}
 	}
 
@@ -205,85 +296,94 @@ impl EndpointManager {
 	) -> Result<Value, TransportError> {
 		loop {
 			let current_url = self.active_url.read().await.clone();
-			let request_body = transport.customize_request(method, params.clone()).await;
 
-			let response_result = self
-				.client
-				.post(current_url.as_str())
-				.header("Content-Type", "application/json")
-				.body(serde_json::to_string(&request_body).map_err(|e| {
-					TransportError::request_serialization(
-						"Failed to serialize request JSON",
-						Some(Box::new(e)),
-						None,
-					)
-				})?)
-				.send()
+			// Attempt to send the request to the current active URL
+			let attempt_result = self
+				.attempt_request_on_url(&current_url, transport, method, params.clone())
 				.await;
 
-			let response = match response_result {
-				Ok(resp) => resp,
-				Err(network_error) => {
-					tracing::warn!("Network error while sending request: {}", network_error);
-					// Try rotation for network errors without status check
-					let should_rotate = self.should_attempt_rotation(transport, false, None).await;
+			match attempt_result {
+				// Handle successful response
+				SingleRequestAttemptOutcome::Success(response) => {
+					let status = response.status();
+					if status.is_success() {
+						// Successful response, parse JSON
+						return response.json().await.map_err(|e| {
+							TransportError::response_parse(
+								"Failed to parse JSON response".to_string(),
+								Some(Box::new(e)),
+								None,
+							)
+						});
+					} else {
+						// HTTP error
+						let error_body = response.text().await.unwrap_or_default();
+						tracing::warn!(
+							"Request to {} failed with status {}: {}",
+							current_url,
+							status,
+							error_body
+						);
 
-					match should_rotate {
-						Ok(true) => continue,
-						Ok(false) => {
-							return Err(TransportError::network(
-								"Failed to send request due to network error",
-								Some(network_error.into()),
+						// Check if we should rotate based on status code
+						let should_rotate = self
+							.should_attempt_rotation(transport, true, Some(status.as_u16()))
+							.await?;
+
+						if should_rotate {
+							tracing::debug!(
+								"Rotation successful after HTTP error status {}, retrying request.",
+								status
+							);
+							continue;
+						} else {
+							tracing::warn!("No rotation possible or needed after HTTP error status {}. Failing.", status);
+							return Err(TransportError::http(
+								status,
+								current_url.clone(),
+								error_body,
 								None,
-							))
-						}
-						Err(rotation_error) => {
-							let msg = "Failed to rotate URL after network error".to_string();
-							Err(TransportError::url_rotation(
-								msg,
-								Some(rotation_error.into()),
 								None,
-							))
+							));
 						}
 					}
-				}?,
-			};
+				}
+				// Handle network error, try rotation
+				SingleRequestAttemptOutcome::NetworkError(network_error) => {
+					tracing::warn!(
+						"Network error while sending request to {}: {}",
+						current_url,
+						network_error
+					);
 
-			let status = response.status();
-			if !status.is_success() {
-				let error_body = response.text().await.unwrap_or_default();
-				tracing::warn!("Request failed with status {}: {}", status, error_body);
+					// Check if we should rotate based on network error
+					let should_rotate =
+						self.should_attempt_rotation(transport, false, None).await?;
 
-				// Try rotation with status code check
-				let should_rotate = self
-					.should_attempt_rotation(transport, true, Some(status.as_u16()))
-					.await;
-
-				match should_rotate {
-					Ok(true) => continue,
-					Ok(false) => {
-						return Err(TransportError::http(
-							status,
-							current_url,
-							error_body.clone(),
-							None,
+					if should_rotate {
+						tracing::debug!(
+							"Rotation successful after network error, retrying request."
+						);
+						continue;
+					} else {
+						tracing::warn!(
+							"No rotation possible or needed after network error. Failing."
+						);
+						return Err(TransportError::network(
+							format!(
+								"Failed to send request to {} due to network error",
+								current_url
+							),
+							Some(network_error.into()),
 							None,
 						));
 					}
-					Err(e) => {
-						let msg = "Failed to rotate URL after HTTP error".to_string();
-						return Err(TransportError::url_rotation(msg, Some(e.into()), None));
-					}
+				}
+				// Non-retryable serialization error
+				SingleRequestAttemptOutcome::SerializationError(serialization_error) => {
+					return Err(serialization_error);
 				}
 			}
-
-			return response.json().await.map_err(|e| {
-				TransportError::response_parse(
-					"Failed to parse JSON response",
-					Some(Box::new(e)),
-					None,
-				)
-			});
 		}
 	}
 }

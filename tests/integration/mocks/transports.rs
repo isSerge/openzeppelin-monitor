@@ -1,7 +1,10 @@
 use mockall::mock;
 use reqwest_middleware::ClientWithMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
-use serde_json::Value;
+use serde::Serialize;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use openzeppelin_monitor::services::blockchain::{
 	BlockchainTransport, RotatingTransport, TransientErrorRetryStrategy, TransportError,
@@ -122,6 +125,142 @@ impl RotatingTransport for MockStellarTransportClient {
 	}
 
 	async fn update_client(&self, _url: &str) -> Result<(), anyhow::Error> {
+		Ok(())
+	}
+}
+
+// Mock transport that always fails to update the client
+// Used for testing URL update failure scenarios in rotating transports.
+#[derive(Clone)]
+pub struct AlwaysFailsToUpdateClientTransport {
+	pub current_url: Arc<RwLock<String>>,
+}
+
+#[async_trait::async_trait]
+impl BlockchainTransport for AlwaysFailsToUpdateClientTransport {
+	async fn get_current_url(&self) -> String {
+		self.current_url.read().await.clone()
+	}
+	async fn send_raw_request<P: Into<Value> + Send + Clone + Serialize>(
+		&self,
+		_method: &str,
+		_params: Option<P>,
+	) -> Result<serde_json::Value, TransportError> {
+		Ok(json!({"jsonrpc": "2.0", "result": "mocked_response", "id": 1}))
+	}
+	async fn customize_request<P: Into<Value> + Send + Clone + Serialize>(
+		&self,
+		method: &str,
+		params: Option<P>,
+	) -> Value {
+		json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"method": method,
+			"params": params
+		})
+	}
+	fn set_retry_policy(
+		&mut self,
+		_retry_policy: ExponentialBackoff,
+		_retry_strategy: Option<TransientErrorRetryStrategy>,
+	) -> Result<(), anyhow::Error> {
+		Ok(())
+	}
+	fn update_endpoint_manager_client(
+		&mut self,
+		_: ClientWithMiddleware,
+	) -> Result<(), anyhow::Error> {
+		Ok(())
+	}
+}
+
+#[async_trait::async_trait]
+impl RotatingTransport for AlwaysFailsToUpdateClientTransport {
+	async fn try_connect(&self, _url: &str) -> Result<(), anyhow::Error> {
+		Ok(())
+	}
+	async fn update_client(&self, _url: &str) -> Result<(), anyhow::Error> {
+		Err(anyhow::anyhow!("Simulated client update failure"))
+	}
+}
+
+// Mock transport implementation for testing
+// Used to simulate blockchain transport behavior without actual network calls in endpoint manager tests.
+#[derive(Clone)]
+pub struct MockTransport {
+	client: reqwest::Client,
+	current_url: Arc<RwLock<String>>,
+}
+
+impl MockTransport {
+	pub fn new() -> Self {
+		Self {
+			client: reqwest::Client::new(),
+			current_url: Arc::new(RwLock::new(String::new())),
+		}
+	}
+}
+
+#[async_trait::async_trait]
+impl BlockchainTransport for MockTransport {
+	async fn get_current_url(&self) -> String {
+		self.current_url.read().await.clone()
+	}
+
+	async fn send_raw_request<P: Into<Value> + Send + Clone + Serialize>(
+		&self,
+		_method: &str,
+		_params: Option<P>,
+	) -> Result<serde_json::Value, TransportError> {
+		Ok(json!({
+			"jsonrpc": "2.0",
+			"result": "mocked_response",
+			"id": 1
+		}))
+	}
+
+	async fn customize_request<P: Into<Value> + Send + Clone + Serialize>(
+		&self,
+		method: &str,
+		params: Option<P>,
+	) -> Value {
+		json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"method": method,
+			"params": params
+		})
+	}
+
+	fn set_retry_policy(
+		&mut self,
+		_retry_policy: ExponentialBackoff,
+		_retry_strategy: Option<TransientErrorRetryStrategy>,
+	) -> Result<(), anyhow::Error> {
+		Ok(())
+	}
+
+	fn update_endpoint_manager_client(
+		&mut self,
+		_: ClientWithMiddleware,
+	) -> Result<(), anyhow::Error> {
+		Ok(())
+	}
+}
+
+#[async_trait::async_trait]
+impl RotatingTransport for MockTransport {
+	async fn try_connect(&self, url: &str) -> Result<(), anyhow::Error> {
+		// Simulate connection attempt
+		match self.client.get(url).send().await {
+			Ok(_) => Ok(()),
+			Err(e) => Err(anyhow::anyhow!("Failed to connect: {}", e)),
+		}
+	}
+
+	async fn update_client(&self, url: &str) -> Result<(), anyhow::Error> {
+		*self.current_url.write().await = url.to_string();
 		Ok(())
 	}
 }

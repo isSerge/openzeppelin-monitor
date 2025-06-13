@@ -11,7 +11,7 @@ use crate::{
 };
 use serde_json::Value as JsonValue;
 
-type StellarArgs = [StellarMatchParamEntry];
+pub type StellarArgs = [StellarMatchParamEntry];
 
 pub struct StellarConditionEvaluator<'a> {
 	args: &'a StellarArgs,
@@ -24,7 +24,14 @@ impl<'a> StellarConditionEvaluator<'a> {
 
 	/// Helper to check if a serde_json::Value matches a target string.
 	/// Used by compare_vec for items within a JSON array.
-	fn check_json_value_matches_str(value_to_check: &JsonValue, target_str: &str) -> bool {
+	///
+	/// Arguments:
+	/// - value_to_check: The value to check if it matches the target string.
+	/// - target_str: The target string to match against.
+	///
+	/// Returns:
+	/// - true if the value matches the target string, false otherwise.
+	pub fn check_json_value_matches_str(value_to_check: &JsonValue, target_str: &str) -> bool {
 		match value_to_check {
 			JsonValue::String(s) => s.eq_ignore_ascii_case(target_str),
 			JsonValue::Object(nested_map) => {
@@ -59,7 +66,15 @@ impl<'a> StellarConditionEvaluator<'a> {
 	///     and checks if `rhs_literal` (as a string) is one of the values in the list.
 	///
 	/// For "Eq"/"Ne": compares `lhs_str` directly with `rhs_literal` (as string).
-	fn compare_vec(
+	///
+	/// Arguments:
+	/// - lhs_str: The left-hand side value as a string.
+	/// - operator: The operator to use for the comparison.
+	/// - rhs_literal: The right-hand side value.
+	///
+	/// Returns:
+	/// - true if the comparison is true, false otherwise.
+	pub fn compare_vec(
 		&self,
 		lhs_str: &str,
 		operator: &ComparisonOperator,
@@ -160,7 +175,15 @@ impl<'a> StellarConditionEvaluator<'a> {
 	}
 
 	/// Compares two boolean values (true/false) using the specified operator.
-	fn compare_bool(
+	///
+	/// Arguments:
+	/// - lhs_str: The left-hand side value as a string.
+	/// - operator: The operator to use for the comparison.
+	/// - rhs_literal: The right-hand side value.
+	///
+	/// Returns:
+	/// - true if the comparison is true, false otherwise.
+	pub fn compare_boolean(
 		&self,
 		lhs_str: &str,
 		operator: &ComparisonOperator,
@@ -198,6 +221,14 @@ impl<'a> StellarConditionEvaluator<'a> {
 	}
 
 	/// Compares two numeric values (u64/i64/u32/i32) using the specified operator.
+	///
+	/// Arguments:
+	/// - lhs_str: The left-hand side value as a string.
+	/// - operator: The operator to use for the comparison.
+	/// - rhs_literal: The right-hand side value.
+	///
+	/// Returns:
+	/// - true if the comparison is true, false otherwise.
 	fn compare_numeric<T: std::str::FromStr + Ord + std::fmt::Display>(
 		&self,
 		lhs_str: &str,
@@ -236,6 +267,14 @@ impl<'a> StellarConditionEvaluator<'a> {
 	}
 
 	/// Compares two large integers (u256/i256) as strings.
+	///
+	/// Arguments:
+	/// - lhs_str: The left-hand side value as a string.
+	/// - operator: The operator to use for the comparison.
+	/// - rhs_literal: The right-hand side value.
+	///
+	/// Returns:
+	/// - true if the comparison is true, false otherwise.
 	fn compare_large_int_as_string(
 		&self,
 		lhs_str: &str,
@@ -277,7 +316,16 @@ impl<'a> StellarConditionEvaluator<'a> {
 	/// The comparison is case-insensitive for string and address types.
 	/// For address, it normalizes both sides before comparison.
 	/// For symbol and bytes, it performs a case-insensitive comparison.
-	fn compare_string(
+	///
+	/// Arguments:
+	/// - lhs_kind: The kind of the left-hand side value.
+	/// - lhs_str: The left-hand side value as a string.
+	/// - operator: The operator to use for the comparison.
+	/// - rhs_literal: The right-hand side value.
+	///
+	/// Returns:
+	/// - true if the comparison is true, false otherwise.
+	pub fn compare_string(
 		&self,
 		lhs_kind: &str, // "string", "address", "symbol", "bytes"
 		lhs_str: &str,
@@ -336,7 +384,15 @@ impl<'a> StellarConditionEvaluator<'a> {
 	}
 
 	/// Compares a map (JSON object) value with a literal value.
-	fn compare_map(
+	///
+	/// Arguments:
+	/// - lhs_json_map_str: The left-hand side value as a JSON map string.
+	/// - operator: The operator to use for the comparison.
+	/// - rhs_literal: The right-hand side value.
+	///
+	/// Returns:
+	/// - true if the comparison is true, false otherwise.
+	pub fn compare_map(
 		&self,
 		lhs_json_map_str: &str,
 		operator: &ComparisonOperator,
@@ -441,6 +497,13 @@ impl<'a> StellarConditionEvaluator<'a> {
 }
 
 impl ConditionEvaluator for StellarConditionEvaluator<'_> {
+	/// This method is used to get the base parameter of the Stellar condition evaluator.
+	///
+	/// Arguments:
+	/// - name: The name of the parameter to get.
+	///
+	/// Returns:
+	/// - The base parameter.
 	fn get_base_param(&self, name: &str) -> Result<(&str, &str), EvaluationError> {
 		self.args
 			.iter()
@@ -452,10 +515,24 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 			})
 	}
 
+	/// This method is used to get the kind of the value from the JSON value.
+	///
+	/// Arguments:
+	/// - value: The JSON value to get the kind from.
+	///
+	/// Returns:
+	/// - The kind of the value.
 	fn get_kind_from_json_value(&self, value: &serde_json::Value) -> String {
 		helpers::get_kind_from_value(value)
 	}
 
+	/// This method is used to compare the final values of the Stellar condition evaluator.
+	///
+	/// Arguments:
+	/// - lhs_kind: The kind of the left-hand side value.
+	/// - lhs_str: The left-hand side value as a string.
+	/// - operator: The operator to use for the comparison.
+	/// - rhs_literal: The right-hand side value.
 	fn compare_final_values(
 		&self,
 		lhs_kind: &str,
@@ -464,7 +541,7 @@ impl ConditionEvaluator for StellarConditionEvaluator<'_> {
 		rhs_literal: &LiteralValue<'_>,
 	) -> Result<bool, EvaluationError> {
 		match lhs_kind.to_lowercase().as_str() {
-			"bool" => self.compare_bool(lhs_str, operator, rhs_literal),
+			"bool" => self.compare_boolean(lhs_str, operator, rhs_literal),
 			"u32" => self.compare_numeric::<u32>(lhs_str, operator, rhs_literal),
 			"u64" | "timepoint" | "duration" => {
 				self.compare_numeric::<u64>(lhs_str, operator, rhs_literal)
@@ -506,10 +583,10 @@ mod tests {
 		let evaluator = create_evaluator();
 
 		assert!(evaluator
-			.compare_bool("true", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
+			.compare_boolean("true", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
 			.unwrap());
 		assert!(!evaluator
-			.compare_bool("true", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
+			.compare_boolean("true", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
 			.unwrap());
 	}
 
@@ -518,10 +595,10 @@ mod tests {
 		let evaluator = create_evaluator();
 
 		assert!(!evaluator
-			.compare_bool("true", &ComparisonOperator::Ne, &LiteralValue::Bool(true))
+			.compare_boolean("true", &ComparisonOperator::Ne, &LiteralValue::Bool(true))
 			.unwrap());
 		assert!(evaluator
-			.compare_bool("true", &ComparisonOperator::Ne, &LiteralValue::Bool(false))
+			.compare_boolean("true", &ComparisonOperator::Ne, &LiteralValue::Bool(false))
 			.unwrap());
 	}
 
@@ -530,7 +607,7 @@ mod tests {
 		let evaluator = create_evaluator();
 
 		// Test TypeMismatch for RHS
-		let type_mismatch_result = evaluator.compare_bool(
+		let type_mismatch_result = evaluator.compare_boolean(
 			"true",
 			&ComparisonOperator::Eq,
 			&LiteralValue::Number("123"),
@@ -541,7 +618,7 @@ mod tests {
 		));
 
 		// Test ParseError for LHS
-		let parse_error_result = evaluator.compare_bool(
+		let parse_error_result = evaluator.compare_boolean(
 			"notabool",
 			&ComparisonOperator::Eq,
 			&LiteralValue::Bool(true),
@@ -552,7 +629,7 @@ mod tests {
 		));
 
 		// Test UnsupportedOperator
-		let unsupported_op_result = evaluator.compare_bool(
+		let unsupported_op_result = evaluator.compare_boolean(
 			"true",
 			&ComparisonOperator::Gt, // Gt is not supported for bool
 			&LiteralValue::Bool(false),
@@ -570,17 +647,17 @@ mod tests {
 
 		// Test TRUE (uppercase)
 		assert!(evaluator
-			.compare_bool("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
+			.compare_boolean("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
 			.is_err());
 
 		// Test False (mixed case)
 		assert!(evaluator
-			.compare_bool("False", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
+			.compare_boolean("False", &ComparisonOperator::Eq, &LiteralValue::Bool(false))
 			.is_err());
 
 		// Test TRUE == TRUE (both uppercase)
 		assert!(evaluator
-			.compare_bool("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
+			.compare_boolean("TRUE", &ComparisonOperator::Eq, &LiteralValue::Bool(true))
 			.is_err());
 	}
 

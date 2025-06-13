@@ -1,7 +1,9 @@
 use mockall::predicate;
 use openzeppelin_monitor::{
 	models::{BlockType, ContractSpec, StellarFormattedContractSpec},
-	services::blockchain::{BlockChainClient, StellarClient, StellarClientTrait},
+	services::blockchain::{
+		BlockChainClient, StellarClient, StellarClientError, StellarClientTrait, TransportError,
+	},
 };
 use serde_json::{json, Value};
 
@@ -74,12 +76,17 @@ async fn test_get_transactions_invalid_sequence_range() {
 	let result = client.get_transactions(2, Some(1)).await;
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("start_sequence 2 cannot be greater than end_sequence 1"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Invalid input parameters for Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::InvalidInput(ctx)) if ctx.to_string().contains("start_sequence 2 cannot be greater than end_sequence 1")
+	),);
 }
 
 #[tokio::test]
@@ -111,12 +118,171 @@ async fn test_get_transactions_failed_to_parse_transaction() {
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("Failed to parse transaction response"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Failed to parse transaction response"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::ResponseParseError { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_transactions_outside_of_rpc_retention_window() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	let start_block = 57317319; // Example start block outside retention window
+	let end_block = 57369158; // Example end block within retention window
+	const ERROR_CODE: i64 = -32600;
+
+	let mock_response = json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"error": {
+				"code": ERROR_CODE,
+				"message": format!("start ledger must be between the oldest ledger: {} and the latest ledger: {} for this rpc instance",
+					start_block, end_block),
+			}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getTransactions"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+
+	let result = client.get_transactions(start_block, Some(end_block)).await;
+
+	assert!(result.is_err());
+
+	let err = result.unwrap_err();
+
+	println!("src Error: {}", err.source().unwrap());
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Soroban RPC reported an error during getTransactions"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::OutsideRetentionWindow { rpc_code, rpc_message, .. }) if
+			*rpc_code == ERROR_CODE &&
+			rpc_message.contains("must be between the oldest ledger")
+	),);
+}
+
+#[tokio::test]
+async fn test_get_transactions_generic_rpc_error() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock response with a generic RPC error
+	let mock_response = json!({
+		"jsonrpc": "2.0",
+		"id": 1,
+		"error": {
+			"code": -32603,
+			"message": "Internal error"
+		}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getTransactions"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_transactions(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	assert!(err
+		.to_string()
+		.contains("Soroban RPC reported an error during getTransactions"));
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::RpcError { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_transactions_unexpected_response_structure() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock response with unexpected structure
+	let mock_response = json!({
+		"result": {
+			"unexpectedField": "This is not a valid transaction response"
+		}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getTransactions"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_transactions(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	assert!(err
+		.to_string()
+		.contains("Failed to parse transaction response"));
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::UnexpectedResponseStructure { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_transactions_transport_error() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock a transport error
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getTransactions"), predicate::always())
+		.times(1)
+		.returning(move |_, _| {
+			Err(TransportError::network(
+				"Network error".to_string(),
+				None,
+				None,
+			))
+		});
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_transactions(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Failed to getTransactions from Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<TransportError>()),
+		Some(TransportError::Network { .. })
+	),);
 }
 
 #[tokio::test]
@@ -189,12 +355,17 @@ async fn test_get_events_invalid_sequence_range() {
 	let result = client.get_events(2, Some(1)).await;
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("start_sequence 2 cannot be greater than end_sequence 1"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Invalid input parameters for Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::InvalidInput(ctx)) if ctx.to_string().contains("start_sequence 2 cannot be greater than end_sequence 1")
+	),);
 }
 
 #[tokio::test]
@@ -223,11 +394,167 @@ async fn test_get_events_failed_to_parse_event() {
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string().contains("Failed to parse event response"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err.to_string().contains("Failed to parse event response"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::ResponseParseError { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_events_outside_of_rpc_retention_window() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	let start_block = 57317319; // Example start block outside retention window
+	let end_block = 57369158; // Example end block within retention window
+	const ERROR_CODE: i64 = -32600;
+
+	let mock_response = json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"error": {
+				"code": ERROR_CODE,
+				"message": format!("startLedger must be within the ledger range: {} - {}",
+					start_block, end_block),
+			}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getEvents"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+
+	let result = client.get_events(start_block, Some(end_block)).await;
+
+	assert!(result.is_err());
+
+	let err = result.unwrap_err();
+
+	println!("src Error: {}", err.source().unwrap());
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Soroban RPC reported an error during getEvents"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::OutsideRetentionWindow { rpc_code, rpc_message, .. }) if
+			*rpc_code == ERROR_CODE  &&
+			rpc_message.contains("must be within the ledger range")
+	),);
+}
+
+#[tokio::test]
+async fn test_get_events_generic_rpc_error() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock response with a generic RPC error
+	let mock_response = json!({
+		"jsonrpc": "2.0",
+		"id": 1,
+		"error": {
+			"code": -32603,
+			"message": "Internal error"
+		}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getEvents"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_events(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	assert!(err
+		.to_string()
+		.contains("Soroban RPC reported an error during getEvents"));
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::RpcError { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_events_unexpected_response_structure() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock response with unexpected structure
+	let mock_response = json!({
+		"result": {
+			"unexpectedField": "This is not a valid event response"
+		}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getEvents"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_events(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	assert!(err.to_string().contains("Failed to parse event response"));
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::UnexpectedResponseStructure { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_events_transport_error() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock a transport error
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getEvents"), predicate::always())
+		.times(1)
+		.returning(move |_, _| {
+			Err(TransportError::network(
+				"Network error".to_string(),
+				None,
+				None,
+			))
+		});
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_events(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Failed to getEvents from Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<TransportError>()),
+		Some(TransportError::Network { .. })
+	),);
 }
 
 #[tokio::test]
@@ -361,11 +688,16 @@ async fn test_get_blocks_failed_to_parse() {
 
 	assert!(result.is_err());
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string().contains("Failed to parse ledger response"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err.to_string().contains("Failed to parse ledger response"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::ResponseParseError { .. })
+	),);
 }
 
 #[tokio::test]
@@ -377,12 +709,124 @@ async fn test_get_blocks_invalid_sequence_range() {
 	assert!(result.is_err());
 
 	let err = result.unwrap_err();
-	assert!(
-		err.to_string()
-			.contains("start_block 2 cannot be greater than end_block 1"),
-		"Expected RequestError, got: {}",
-		err
-	);
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Invalid input parameters for Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source().and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::InvalidInput(ctx)) if ctx.to_string().contains("start_block 2 cannot be greater than end_block 1")
+	),);
+}
+
+#[tokio::test]
+#[ignore = "reason: Currently not possible to catch this error due to the current Stellar RPC behavior: https://github.com/stellar/stellar-rpc/issues/454"]
+async fn test_get_blocks_outside_of_rpc_retention_window() {}
+
+#[tokio::test]
+async fn test_get_blocks_generic_rpc_error() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock response with a generic RPC error
+	let mock_response = json!({
+		"jsonrpc": "2.0",
+		"id": 1,
+		"error": {
+			"code": -32603,
+			"message": "Internal error"
+		}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getLedgers"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_blocks(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	assert!(err
+		.to_string()
+		.contains("Soroban RPC reported an error during getLedgers"));
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::RpcError { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_blocks_unexpected_response_structure() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock response with unexpected structure
+	let mock_response = json!({
+		"result": {
+			"unexpectedField": "This is not a valid ledger response"
+		}
+	});
+
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getLedgers"), predicate::always())
+		.times(1)
+		.returning(move |_, _| Ok(mock_response.clone()));
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_blocks(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	assert!(err.to_string().contains("Failed to parse ledger response"));
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<StellarClientError>()),
+		Some(StellarClientError::UnexpectedResponseStructure { .. })
+	),);
+}
+
+#[tokio::test]
+async fn test_get_blocks_transport_error() {
+	let mut mock_stellar = MockStellarTransportClient::new();
+
+	// Mock a transport error
+	mock_stellar
+		.expect_send_raw_request()
+		.with(predicate::eq("getLedgers"), predicate::always())
+		.times(1)
+		.returning(move |_, _| {
+			Err(TransportError::network(
+				"Network error".to_string(),
+				None,
+				None,
+			))
+		});
+
+	let client = StellarClient::new_with_transport(mock_stellar);
+	let result = client.get_blocks(1, Some(2)).await;
+
+	assert!(result.is_err());
+	let err = result.unwrap_err();
+
+	// Check anyhow context message
+	assert!(err
+		.to_string()
+		.contains("Failed to getLedgers from Stellar RPC"));
+
+	// Check source error
+	assert!(matches!(
+		err.source()
+			.and_then(|e| e.downcast_ref::<TransportError>()),
+		Some(TransportError::Network { .. })
+	),);
 }
 
 #[tokio::test]

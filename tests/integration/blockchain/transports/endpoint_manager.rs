@@ -1,94 +1,15 @@
 use mockito::Server;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
-use serde::Serialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use openzeppelin_monitor::services::blockchain::{
-	BlockchainTransport, EndpointManager, RotatingTransport, TransientErrorRetryStrategy,
-	TransportError,
+	BlockchainTransport, EndpointManager, TransientErrorRetryStrategy, TransportError,
 };
 
-// Mock transport implementation for testing
-#[derive(Clone)]
-struct MockTransport {
-	client: reqwest::Client,
-	current_url: Arc<RwLock<String>>,
-}
-
-impl MockTransport {
-	fn new() -> Self {
-		Self {
-			client: reqwest::Client::new(),
-			current_url: Arc::new(RwLock::new(String::new())),
-		}
-	}
-}
-
-#[async_trait::async_trait]
-impl BlockchainTransport for MockTransport {
-	async fn get_current_url(&self) -> String {
-		self.current_url.read().await.clone()
-	}
-
-	async fn send_raw_request<P: Into<Value> + Send + Clone + Serialize>(
-		&self,
-		_method: &str,
-		_params: Option<P>,
-	) -> Result<serde_json::Value, TransportError> {
-		Ok(json!({
-			"jsonrpc": "2.0",
-			"result": "mocked_response",
-			"id": 1
-		}))
-	}
-
-	async fn customize_request<P: Into<Value> + Send + Clone + Serialize>(
-		&self,
-		method: &str,
-		params: Option<P>,
-	) -> Value {
-		json!({
-			"jsonrpc": "2.0",
-			"id": 1,
-			"method": method,
-			"params": params
-		})
-	}
-
-	fn set_retry_policy(
-		&mut self,
-		_retry_policy: ExponentialBackoff,
-		_retry_strategy: Option<TransientErrorRetryStrategy>,
-	) -> Result<(), anyhow::Error> {
-		Ok(())
-	}
-
-	fn update_endpoint_manager_client(
-		&mut self,
-		_: ClientWithMiddleware,
-	) -> Result<(), anyhow::Error> {
-		Ok(())
-	}
-}
-
-#[async_trait::async_trait]
-impl RotatingTransport for MockTransport {
-	async fn try_connect(&self, url: &str) -> Result<(), anyhow::Error> {
-		// Simulate connection attempt
-		match self.client.get(url).send().await {
-			Ok(_) => Ok(()),
-			Err(e) => Err(anyhow::anyhow!("Failed to connect: {}", e)),
-		}
-	}
-
-	async fn update_client(&self, url: &str) -> Result<(), anyhow::Error> {
-		*self.current_url.write().await = url.to_string();
-		Ok(())
-	}
-}
+use crate::integration::mocks::{AlwaysFailsToUpdateClientTransport, MockTransport};
 
 fn get_mock_client_builder() -> ClientWithMiddleware {
 	ClientBuilder::new(reqwest::Client::new()).build()
@@ -281,7 +202,13 @@ async fn test_rotate_url_no_fallbacks() {
 
 	// Verify we get the expected error
 	let err = result.unwrap_err();
-	assert!(err.to_string().contains("No fallback URLs available"));
+
+	match err {
+		TransportError::UrlRotation(ctx) => {
+			assert!(ctx.to_string().contains("No fallback URLs available"));
+		}
+		_ => panic!("Expected UrlRotation error"),
+	}
 
 	// Verify the active URL hasn't changed
 	assert_eq!(&*manager.active_url.read().await, &server.url());
@@ -305,7 +232,16 @@ async fn test_rotate_url_all_urls_match_active() {
 
 	// Verify we get the expected error
 	let err = result.unwrap_err();
-	assert!(err.to_string().contains("No fallback URLs available"));
+
+	match err {
+		TransportError::UrlRotation(ctx) => {
+			assert!(ctx
+				.to_string()
+				.contains("All fallback URLs are the same as the current active URL"));
+			assert!(ctx.to_string().contains(&active_url));
+		}
+		_ => panic!("Expected UrlRotation error"),
+	}
 
 	// Verify the active URL hasn't changed
 	assert_eq!(&*manager.active_url.read().await, &active_url);
@@ -335,9 +271,14 @@ async fn test_rotate_url_connection_failure() {
 
 	// Verify we get the expected error
 	let err = result.unwrap_err();
-	assert!(err
-		.to_string()
-		.contains("Failed to connect to fallback URL"));
+
+	match err {
+		TransportError::UrlRotation(ctx) => {
+			assert!(ctx.to_string().contains("Failed to connect to new URL"));
+			assert!(ctx.to_string().contains(invalid_url));
+		}
+		_ => panic!("Expected UrlRotation error"),
+	}
 
 	// Verify the active URL hasn't changed
 	assert_eq!(&*manager.active_url.read().await, &server.url());
@@ -347,6 +288,35 @@ async fn test_rotate_url_connection_failure() {
 		&*manager.fallback_urls.read().await,
 		&vec![invalid_url.to_string()]
 	);
+}
+
+#[tokio::test]
+async fn test_rotate_url_update_client_failure() {
+	let server1 = Server::new_async().await;
+	let server2 = Server::new_async().await;
+
+	let manager = EndpointManager::new(
+		get_mock_client_builder(),
+		server1.url().as_ref(),
+		vec![server2.url()],
+	);
+	let transport = AlwaysFailsToUpdateClientTransport {
+		current_url: Arc::new(RwLock::new(server1.url())),
+	};
+
+	let result = manager.rotate_url(&transport).await;
+
+	assert!(result.is_err());
+	match result.unwrap_err() {
+		TransportError::UrlRotation(ctx) => {
+			assert!(ctx
+				.to_string()
+				.contains("Failed to update transport client with new URL"));
+		}
+		_ => panic!("Expected UrlRotation error"),
+	}
+	// The active URL should not have changed
+	assert_eq!(&*manager.active_url.read().await, &server1.url());
 }
 
 #[tokio::test]
