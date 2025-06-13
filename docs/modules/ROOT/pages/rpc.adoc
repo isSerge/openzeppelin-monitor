@@ -129,7 +129,7 @@ The default settings for `HttpRetryConfig` result in an `ExponentialBackoff` pol
 // and create_retryable_http_client.
 let http_retry_config = HttpRetryConfig::default();
 let retry_policy = ExponentialBackoff::builder()
-  .base(http_retry_config.base_for_backoff) // Assuming base_for_backoff is in HttpRetryConfig
+  .base(http_retry_config.base_for_backoff)
   .retry_bounds(http_retry_config.initial_backoff, http_retry_config.max_backoff)
   .jitter(http_retry_config.jitter)
   .build_with_max_retries(http_retry_config.max_retries);
