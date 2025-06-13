@@ -1,6 +1,9 @@
 use mockito::Server;
-use openzeppelin_monitor::services::blockchain::{
-	BlockchainTransport, EVMTransportClient, RotatingTransport, TransientErrorRetryStrategy,
+use openzeppelin_monitor::{
+	services::blockchain::{
+		BlockchainTransport, EVMTransportClient, RotatingTransport, TransientErrorRetryStrategy,
+	},
+	utils::HttpRetryConfig,
 };
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
@@ -42,11 +45,15 @@ async fn test_client_creation_with_fallback() {
 	let mut server = Server::new_async().await;
 	let mut server2 = Server::new_async().await;
 
+	// Use the default retry config to determine expected attempts
+	let expected_attempts = 1 + HttpRetryConfig::default().max_retries;
+
 	let mock = server
 		.mock("POST", "/")
 		.match_body(r#"{"id":1,"jsonrpc":"2.0","method":"net_version","params":[]}"#)
 		.with_header("content-type", "application/json")
 		.with_status(500)
+		.expect(expected_attempts as usize)
 		.create();
 
 	let mock2 = create_evm_valid_server_mock_network_response(&mut server2);
