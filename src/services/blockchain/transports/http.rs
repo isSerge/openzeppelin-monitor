@@ -10,7 +10,6 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
-use reqwest::Client;
 use reqwest_middleware::ClientWithMiddleware;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -37,8 +36,8 @@ use crate::{
 /// The client is thread-safe and can be shared across multiple tasks.
 #[derive(Clone, Debug)]
 pub struct HttpTransportClient {
-	/// HTTP client for making requests, wrapped in Arc for thread-safety
-	pub client: Arc<Client>,
+	/// Retryable HTTP client for making requests
+	pub client: ClientWithMiddleware,
 	/// Manages RPC endpoint rotation and request handling for high availability
 	endpoint_manager: EndpointManager,
 	/// The stringified JSON RPC payload to use for testing the connection
@@ -75,10 +74,6 @@ impl HttpTransportClient {
 		let http_retry_config = HttpRetryConfig::default();
 
 		// Create the base HTTP client
-		// Shared across:
-		// - EndpointManager client
-		// - Test connection client
-		// - HttpTransportClient itself
 		let base_http_client = Arc::new(
 			reqwest::ClientBuilder::new()
 				.pool_idle_timeout(Duration::from_secs(90))
@@ -90,6 +85,9 @@ impl HttpTransportClient {
 		);
 
 		// Create a retryable HTTP client with the base client and retry policy
+		// Shared across:
+		// - EndpointManager for handling endpoint rotation
+		// - Connection testing for verifying endpoint availability
 		let retryable_client = create_retryable_http_client(
 			&http_retry_config,
 			(*base_http_client).clone(),
@@ -114,15 +112,8 @@ impl HttpTransportClient {
 				})
 			};
 
-			// Create a retryable HTTP client for testing the connection
-			let test_connection_client = create_retryable_http_client(
-				&http_retry_config,
-				(*base_http_client).clone(),
-				None::<TransientErrorRetryStrategy>,
-			);
-
 			// Attempt to connect to the endpoint
-			let request_result = test_connection_client
+			let request_result = retryable_client
 				.post(url.clone())
 				.json(&test_request)
 				.send()
@@ -145,7 +136,7 @@ impl HttpTransportClient {
 
 					// Successfully connected - create and return the client
 					return Ok(Self {
-						client: base_http_client,
+						client: retryable_client.clone(),
 						endpoint_manager: EndpointManager::new(
 							retryable_client,
 							rpc_url.url.as_ref(),
