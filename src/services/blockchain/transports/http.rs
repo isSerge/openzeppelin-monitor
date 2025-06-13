@@ -91,7 +91,7 @@ impl HttpTransportClient {
 		let retryable_client = create_retryable_http_client(
 			&http_retry_config,
 			(*base_http_client).clone(),
-			None::<TransientErrorRetryStrategy>,
+			Some(TransientErrorRetryStrategy),
 		);
 
 		for rpc_url in rpc_urls.iter() {
