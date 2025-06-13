@@ -25,7 +25,7 @@ impl Default for HttpRetryConfig {
 		Self {
 			max_retries: 3,
 			base_for_backoff: 2,
-			initial_backoff: Duration::from_secs(1),
+			initial_backoff: Duration::from_millis(250),
 			max_backoff: Duration::from_secs(10),
 			jitter: Jitter::Full,
 		}
