@@ -84,57 +84,27 @@ impl EndpointManager {
 	) -> Result<String, TransportError> {
 		// Acquire the rotation lock to prevent concurrent rotations
 		let _guard = self.rotation_lock.lock().await;
-		let initial_active = self.active_url.read().await.clone();
-		let initial_fallbacks = self.fallback_urls.read().await.clone();
+		let initial_active_url = self.active_url.read().await.clone();
+		let current_fallbacks_snapshot = self.fallback_urls.read().await.clone();
 
 		tracing::debug!(
 			"Trying to rotate URL: Current Active: '{}', Fallbacks: {:?}",
-			initial_active,
-			initial_fallbacks
+			initial_active_url,
+			current_fallbacks_snapshot,
 		);
 
-		let current_active_url_snapshot = self.active_url.read().await.clone();
-
 		// --- Select a new URL ---
-		let new_url = {
-			let mut fallback_urls_guard = self.fallback_urls.write().await;
-			// Read active URL again to ensure we use the absolute latest if another thread somehow modified it
-			let current_active_for_selection = self.active_url.read().await.clone();
-
-			tracing::debug!(
-					"URL rotation: Selecting candidate. Active for selection: '{}', Current Fallbacks: {:?}",
-					current_active_for_selection,
-					*fallback_urls_guard
-			);
-
-			if fallback_urls_guard.is_empty() {
+		let new_url = match current_fallbacks_snapshot
+			.iter()
+			.find(|&url| *url != initial_active_url)
+		{
+			Some(url) => url.clone(),
+			None => {
 				let msg = format!(
-					"No fallback URLs available (list empty). Current active: {}",
-					current_active_for_selection
+					"No fallback URLs available. Current active: '{}', Fallbacks checked: {:?}",
+					initial_active_url, current_fallbacks_snapshot
 				);
 				return Err(TransportError::url_rotation(msg, None, None));
-			}
-
-			match fallback_urls_guard
-				.iter()
-				.position(|url| *url != current_active_for_selection)
-			{
-				Some(idx) => {
-					let candidate = fallback_urls_guard.remove(idx);
-					tracing::debug!(
-						"try_rotate_url: Selected candidate '{}'. Fallbacks after removal: {:?}",
-						candidate,
-						*fallback_urls_guard
-					);
-					candidate
-				}
-				None => {
-					let msg = format!(
-						"No suitable (distinct) fallback URLs available. Current active: '{}', Fallbacks checked: {:?}",
-						current_active_for_selection, *fallback_urls_guard
-					);
-					return Err(TransportError::url_rotation(msg, None, None));
-				}
 			}
 		};
 
@@ -144,52 +114,59 @@ impl EndpointManager {
 			new_url
 		);
 
-		if let Err(connect_err) = transport.try_connect(&new_url).await {
-			{
-				let mut fallback_urls_guard = self.fallback_urls.write().await;
-				// If the connection fails, we add the new URL to fallbacks
-				fallback_urls_guard.push(new_url.clone());
-			}
-
-			return Err(TransportError::url_rotation(
-				format!("Failed to connect to new URL '{}'", new_url),
-				Some(connect_err.into()),
-				None,
-			));
-		}
+		transport
+			.try_connect(&new_url)
+			.await
+			.map_err(|connect_err| {
+				TransportError::url_rotation(
+					format!("Failed to connect to new URL '{}'", new_url),
+					Some(connect_err.into()),
+					None,
+				)
+			})?;
 
 		tracing::debug!(
 			"Attempting update_client with new_url during rotation: '{}'",
 			new_url
 		);
 
-		if let Err(update_err) = transport.update_client(&new_url).await {
-			{
-				let mut fallback_urls_guard = self.fallback_urls.write().await;
-				// If the update fails, we add the new URL to fallbacks
-				fallback_urls_guard.push(new_url.clone());
-			}
+		transport
+			.update_client(&new_url)
+			.await
+			.map_err(|update_err| {
+				TransportError::url_rotation(
+					format!(
+						"Failed to update transport client with new URL '{}'",
+						new_url
+					),
+					Some(update_err.into()),
+					None,
+				)
+			})?;
 
-			return Err(TransportError::url_rotation(
-				format!(
-					"Failed to update transport client with new URL '{}'",
-					new_url
-				),
-				Some(update_err.into()),
-				None,
-			));
-		}
-
-		// --- Successfully rotated URL ---
+		// --- All checks passed, update shared state ---
 		{
 			let mut active_url_guard = self.active_url.write().await;
 			let mut fallback_urls_guard = self.fallback_urls.write().await;
+
+			// Construct the new fallbacks list:
+			// old fallbacks, MINUS the new_url_candidate, PLUS the initial_active_url.
+			let mut next_fallback_urls: Vec<String> = Vec::with_capacity(fallback_urls_guard.len());
+			for url in fallback_urls_guard.iter() {
+				if *url != new_url {
+					next_fallback_urls.push(url.clone());
+				}
+			}
+			next_fallback_urls.push(initial_active_url.clone()); // Add the previously active URL
+
 			tracing::debug!(
-				"Successful URL rotation - from: {}, to: {}",
-				current_active_url_snapshot,
-				new_url
+				"Successful URL rotation - from: '{}', to: '{}'. New Fallbacks: {:?}",
+				initial_active_url,
+				new_url,
+				next_fallback_urls
 			);
-			fallback_urls_guard.push(current_active_url_snapshot);
+
+			*fallback_urls_guard = next_fallback_urls;
 			*active_url_guard = new_url.clone();
 		}
 		Ok(new_url)
