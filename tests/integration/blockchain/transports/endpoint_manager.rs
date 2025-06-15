@@ -236,9 +236,7 @@ async fn test_rotate_url_all_urls_match_active() {
 
 	match err {
 		TransportError::UrlRotation(ctx) => {
-			assert!(ctx
-				.to_string()
-				.contains("No suitable fallback URLs available"));
+			assert!(ctx.to_string().contains("No fallback URLs available"));
 			assert!(ctx.to_string().contains(&active_url));
 		}
 		_ => panic!("Expected UrlRotation error"),
