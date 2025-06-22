@@ -1,23 +1,34 @@
 use crate::utils::client_storage::ClientStorage;
+use lettre::SmtpTransport;
 use reqwest::Client as ReqwestClient;
 use std::sync::Arc;
 use std::time::Duration;
+use thiserror::Error;
 
-/// Notification client pool that manages HTTP clients for sending notifications.
+#[derive(Debug, Error)]
+pub enum NotificationPoolError {
+  #[error("Failed to create HTTP client: {0}")]
+  HttpClientBuildError(String),
+  
+  #[error("Failed to create SMTP client: {0}")]
+  SmtpClientBuildError(String),
+}
+
+/// Notification client pool that manages HTTP and SMTP clients for sending notifications.
 ///
-/// Provides a thread-safe way to access and create HTTP clients
+/// Provides a thread-safe way to access and create HTTP and SMTP clients
 /// for sending notifications. It uses a `ClientStorage` to hold the clients,
-/// allowing for efficient reuse and management of HTTP connections.
+/// allowing for efficient reuse and management of HTTP and SMTP connections.
 pub struct NotificationClientPool {
 	http_clients: ClientStorage<ReqwestClient>,
-	// TODO: add SMTP clients
+	smtp_clients: ClientStorage<SmtpTransport>,
 }
 
 impl NotificationClientPool {
 	pub fn new() -> Self {
 		Self {
 			http_clients: ClientStorage::new(),
-			// TODO: add SMTP clients
+			smtp_clients: ClientStorage::new(),
 		}
 	}
 
@@ -29,7 +40,7 @@ impl NotificationClientPool {
 	///
 	/// This ensures thread-safety while maintaining good performance
 	/// for the common case of accessing existing clients.
-	pub async fn get_or_create_http_client(&self) -> Result<Arc<ReqwestClient>, anyhow::Error> {
+	pub async fn get_or_create_http_client(&self) -> Result<Arc<ReqwestClient>, NotificationPoolError> {
 		const DEFAULT_HTTP_CLIENT_KEY: &str = "default_notification_http_client";
 
 		// Fast path: Read lock
@@ -56,12 +67,16 @@ impl NotificationClientPool {
 			.pool_idle_timeout(Some(Duration::from_secs(90)))
 			.connect_timeout(Duration::from_secs(10))
 			.build()
-			.map_err(anyhow::Error::from)?;
+			.map_err(|e| NotificationPoolError::HttpClientBuildError(e.to_string()))?;
 
 		let arc_client = Arc::new(client);
 		clients.insert(DEFAULT_HTTP_CLIENT_KEY.to_string(), arc_client.clone());
 		Ok(arc_client)
 	}
+
+  pub async fn get_or_create_smtp_client(&self) -> Result<Arc<SmtpTransport>, NotificationPoolError> {
+    unimplemented!("SMTP client creation is not implemented yet");
+  }
 
 	/// Get the number of active HTTP clients in the pool,
 	/// only used for testing purposes since the pool currently
@@ -69,6 +84,12 @@ impl NotificationClientPool {
 	#[cfg(test)]
 	pub async fn get_active_http_client_count(&self) -> usize {
 		self.http_clients.clients.read().await.len()
+	}
+
+	/// Method to get or create SMTP client
+	#[cfg(test)]
+	pub async fn get_active_smtp_client_count(&self) -> usize {
+		self.smtp_clients.clients.read().await.len()
 	}
 }
 
@@ -89,8 +110,11 @@ mod tests {
 	#[tokio::test]
 	async fn test_pool_init_empty() {
 		let pool = create_pool();
-		let count = pool.get_active_http_client_count().await;
-		assert_eq!(count, 0, "Pool should be empty initially");
+		let http_count = pool.get_active_http_client_count().await;
+		let smtp_count = pool.get_active_smtp_client_count().await;
+
+		assert_eq!(http_count, 0, "Pool should be empty initially");
+		assert_eq!(smtp_count, 0, "Pool should be empty initially");
 	}
 
 	#[tokio::test]
@@ -158,6 +182,12 @@ mod tests {
 
 		assert_eq!(
 			pool.get_active_http_client_count().await,
+			0,
+			"Default pool should be empty initially"
+		);
+
+		assert_eq!(
+			pool.get_active_smtp_client_count().await,
 			0,
 			"Default pool should be empty initially"
 		);
