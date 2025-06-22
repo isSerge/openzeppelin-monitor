@@ -7,11 +7,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum NotificationPoolError {
-  #[error("Failed to create HTTP client: {0}")]
-  HttpClientBuildError(String),
-  
-  #[error("Failed to create SMTP client: {0}")]
-  SmtpClientBuildError(String),
+	#[error("Failed to create HTTP client: {0}")]
+	HttpClientBuildError(String),
+
+	#[error("Failed to create SMTP client: {0}")]
+	SmtpClientBuildError(String),
 }
 
 /// Notification client pool that manages HTTP and SMTP clients for sending notifications.
@@ -40,7 +40,9 @@ impl NotificationClientPool {
 	///
 	/// This ensures thread-safety while maintaining good performance
 	/// for the common case of accessing existing clients.
-	pub async fn get_or_create_http_client(&self) -> Result<Arc<ReqwestClient>, NotificationPoolError> {
+	pub async fn get_or_create_http_client(
+		&self,
+	) -> Result<Arc<ReqwestClient>, NotificationPoolError> {
 		const DEFAULT_HTTP_CLIENT_KEY: &str = "default_notification_http_client";
 
 		// Fast path: Read lock
@@ -74,9 +76,11 @@ impl NotificationClientPool {
 		Ok(arc_client)
 	}
 
-  pub async fn get_or_create_smtp_client(&self) -> Result<Arc<SmtpTransport>, NotificationPoolError> {
-    unimplemented!("SMTP client creation is not implemented yet");
-  }
+	pub async fn get_or_create_smtp_client(
+		&self,
+	) -> Result<Arc<SmtpTransport>, NotificationPoolError> {
+		unimplemented!("SMTP client creation is not implemented yet");
+	}
 
 	/// Get the number of active HTTP clients in the pool,
 	/// only used for testing purposes since the pool currently

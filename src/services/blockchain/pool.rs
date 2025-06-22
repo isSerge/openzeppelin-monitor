@@ -10,6 +10,7 @@
 //! The pool uses a fast path for existing clients and a slow path for
 //! creating new ones, optimizing performance while maintaining safety.
 
+use crate::utils::client_storage::ClientStorage;
 use crate::{
 	models::{BlockChainType, Network},
 	services::blockchain::{
@@ -21,7 +22,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::{any::Any, collections::HashMap, sync::Arc};
-use crate::utils::client_storage::ClientStorage;
 
 /// Trait for the client pool.
 #[async_trait]
