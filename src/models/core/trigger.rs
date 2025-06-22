@@ -59,6 +59,8 @@ pub enum TriggerTypeConfig {
 		slack_url: SecretValue,
 		/// Notification message
 		message: NotificationMessage,
+		/// Retry policy for HTTP requests
+		retry_policy: HttpRetryConfig,
 	},
 	/// Email notification configuration
 	Email {
@@ -89,6 +91,7 @@ pub enum TriggerTypeConfig {
 		headers: Option<std::collections::HashMap<String, String>>,
 		/// Notification message
 		message: NotificationMessage,
+		/// Retry policy for HTTP requests
 		retry_policy: HttpRetryConfig,
 	},
 	/// Telegram notification configuration
@@ -101,6 +104,8 @@ pub enum TriggerTypeConfig {
 		disable_web_preview: Option<bool>,
 		/// Notification message
 		message: NotificationMessage,
+		/// Retry policy for HTTP requests
+		retry_policy: HttpRetryConfig,
 	},
 	/// Discord notification configuration
 	Discord {
@@ -108,6 +113,8 @@ pub enum TriggerTypeConfig {
 		discord_url: SecretValue,
 		/// Notification message
 		message: NotificationMessage,
+		/// Retry policy for HTTP requests
+		retry_policy: HttpRetryConfig,
 	},
 	/// Script execution configuration
 	Script {

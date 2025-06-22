@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use crate::{
 	models::TriggerTypeConfig,
 	services::notification::{NotificationError, Notifier, WebhookConfig, WebhookNotifier},
+	utils::HttpRetryConfig,
 };
 
 /// Implementation of Slack notifications via webhooks
@@ -39,6 +40,7 @@ impl SlackNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
+				retry_policy: HttpRetryConfig::default(),
 			})?,
 		})
 	}
@@ -63,7 +65,12 @@ impl SlackNotifier {
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is Slack type
 	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
-		if let TriggerTypeConfig::Slack { slack_url, message } = config {
+		if let TriggerTypeConfig::Slack {
+			slack_url,
+			message,
+			retry_policy,
+		} = config
+		{
 			let webhook_config = WebhookConfig {
 				url: slack_url.as_ref().to_string(),
 				url_params: None,
@@ -73,6 +80,7 @@ impl SlackNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
+				retry_policy: retry_policy.clone(),
 			};
 
 			Ok(Self {
@@ -140,6 +148,7 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		}
 	}
 
@@ -208,6 +217,7 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 
 		let notifier = SlackNotifier::from_config(&config);

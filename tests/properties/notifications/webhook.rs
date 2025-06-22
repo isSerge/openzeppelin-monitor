@@ -5,7 +5,10 @@
 //! The tests ensure that the Webhook notification system handles template variables correctly
 //! and produces consistent, well-formed output across various input combinations.
 
-use openzeppelin_monitor::services::notification::{WebhookConfig, WebhookNotifier};
+use openzeppelin_monitor::{
+	services::notification::{WebhookConfig, WebhookNotifier},
+	utils::HttpRetryConfig,
+};
 use proptest::{prelude::*, test_runner::Config};
 use std::collections::HashMap;
 
@@ -42,6 +45,7 @@ proptest! {
 			secret: None,
 			headers: None,
 			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap();
 
@@ -71,6 +75,7 @@ proptest! {
 			secret: None,
 			headers: None,
 			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap();
 
@@ -99,6 +104,7 @@ proptest! {
 			secret: None,
 			headers: None,
 			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap();
 

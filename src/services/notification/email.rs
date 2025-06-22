@@ -370,6 +370,7 @@ mod tests {
 				title: "Test Slack".to_string(),
 				body: "This is a test message".to_string(),
 			},
+			retry_policy: Default::default(),
 		};
 
 		let notifier = EmailNotifier::from_config(&config);

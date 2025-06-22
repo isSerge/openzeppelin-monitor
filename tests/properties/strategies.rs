@@ -97,6 +97,7 @@ pub fn trigger_strategy() -> impl Strategy<Value = Trigger> {
 				.prop_map(|(slack_url, message)| TriggerTypeConfig::Slack {
 					slack_url: SecretValue::Plain(SecretString::new(slack_url)),
 					message,
+					retry_policy: HttpRetryConfig::default(),
 				})
 		)
 			.prop_map(|(name, trigger_type, config)| TriggerBuilder::new()

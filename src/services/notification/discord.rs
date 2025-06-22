@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use crate::{
 	models::TriggerTypeConfig,
 	services::notification::{NotificationError, Notifier, WebhookConfig, WebhookNotifier},
+	utils::HttpRetryConfig,
 };
 
 /// Implementation of Discord notifications via webhooks
@@ -92,6 +93,7 @@ impl DiscordNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
+				retry_policy: HttpRetryConfig::default(),
 			})?,
 		})
 	}
@@ -119,6 +121,7 @@ impl DiscordNotifier {
 		if let TriggerTypeConfig::Discord {
 			discord_url,
 			message,
+			retry_policy,
 		} = config
 		{
 			let webhook_config = WebhookConfig {
@@ -130,6 +133,7 @@ impl DiscordNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
+				retry_policy: retry_policy.clone(),
 			};
 
 			Ok(Self {
@@ -195,6 +199,7 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		}
 	}
 
@@ -261,6 +266,7 @@ mod tests {
 				title: "Test Slack".to_string(),
 				body: "This is a test message".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 
 		let notifier = DiscordNotifier::from_config(&config);

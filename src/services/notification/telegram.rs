@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use crate::{
 	models::TriggerTypeConfig,
 	services::notification::{NotificationError, Notifier, WebhookConfig, WebhookNotifier},
+	utils::HttpRetryConfig,
 };
 
 /// Implementation of Telegram notifications via webhooks
@@ -58,6 +59,7 @@ impl TelegramNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
+				retry_policy: HttpRetryConfig::default(),
 			})?,
 			disable_web_preview: disable_web_preview.unwrap_or(false),
 		})
@@ -170,6 +172,7 @@ impl TelegramNotifier {
 			chat_id,
 			disable_web_preview,
 			message,
+			retry_policy,
 		} = config
 		{
 			let mut url_params = HashMap::new();
@@ -185,6 +188,7 @@ impl TelegramNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
+				retry_policy: retry_policy.clone(),
 			};
 
 			Ok(Self {
@@ -229,6 +233,7 @@ impl Notifier for TelegramNotifier {
 			secret: None,
 			headers: self.inner.headers.clone(),
 			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
 		})?;
 
 		notifier.notify_with_payload(message, HashMap::new()).await
@@ -262,6 +267,7 @@ mod tests {
 				title: "Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		}
 	}
 
@@ -336,6 +342,7 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 
 		let notifier = TelegramNotifier::from_config(&config);
@@ -355,6 +362,7 @@ mod tests {
 				title: "Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 		let notifier = TelegramNotifier::from_config(&config).unwrap();
 		assert!(!notifier.disable_web_preview);

@@ -12,11 +12,12 @@ use reqwest::{
 };
 use serde::Serialize;
 use sha2::Sha256;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
 	models::TriggerTypeConfig,
-	services::notification::{NotificationError, Notifier},
+	services::notification::{pool::NotificationClientPool, NotificationError, Notifier},
+	utils::HttpRetryConfig,
 };
 
 /// HMAC SHA256 type alias
@@ -40,6 +41,7 @@ pub struct WebhookConfig {
 	pub secret: Option<String>,
 	pub headers: Option<HashMap<String, String>>,
 	pub payload_fields: Option<HashMap<String, serde_json::Value>>,
+	pub retry_policy: HttpRetryConfig,
 }
 
 /// Implementation of webhook notifications via webhooks
@@ -121,7 +123,10 @@ impl WebhookNotifier {
 	///
 	/// # Returns
 	/// * `Result<Self>` - Notifier instance if config is Webhook type
-	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+	pub fn from_config(
+		config: &TriggerTypeConfig,
+		client_pool: Arc<NotificationClientPool>,
+	) -> Result<Self, NotificationError> {
 		if let TriggerTypeConfig::Webhook {
 			url,
 			message,
@@ -140,6 +145,7 @@ impl WebhookNotifier {
 				secret: secret.as_ref().map(|s| s.as_ref().to_string()),
 				headers: headers.clone(),
 				payload_fields: None,
+				retry_policy: retry_policy.clone(),
 			};
 
 			WebhookNotifier::new(webhook_config)
@@ -363,6 +369,7 @@ mod tests {
 			secret: secret.map(|s| s.to_string()),
 			headers,
 			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap()
 	}
@@ -477,8 +484,9 @@ mod tests {
 	#[test]
 	fn test_from_config_with_webhook_config() {
 		let config = create_test_webhook_config();
+		let client_pool = Arc::new(NotificationClientPool::new());
 
-		let notifier = WebhookNotifier::from_config(&config);
+		let notifier = WebhookNotifier::from_config(&config, client_pool);
 		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
@@ -498,9 +506,11 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 
-		let notifier = WebhookNotifier::from_config(&config);
+		let client_pool = Arc::new(NotificationClientPool::new());
+		let notifier = WebhookNotifier::from_config(&config, client_pool);
 		assert!(notifier.is_err());
 
 		let error = notifier.unwrap_err();
@@ -735,6 +745,7 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap();
 
@@ -763,6 +774,7 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap();
 
@@ -804,6 +816,7 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: Some(default_fields),
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap();
 
@@ -848,6 +861,7 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: Some(default_fields),
+			retry_policy: HttpRetryConfig::default(),
 		})
 		.unwrap();
 

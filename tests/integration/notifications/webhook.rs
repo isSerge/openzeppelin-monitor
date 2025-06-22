@@ -3,9 +3,12 @@ use openzeppelin_monitor::{
 	services::notification::{
 		NotificationError, NotificationService, Notifier, WebhookConfig, WebhookNotifier,
 	},
-	utils::tests::{
-		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-		trigger::TriggerBuilder,
+	utils::{
+		tests::{
+			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+			trigger::TriggerBuilder,
+		},
+		HttpRetryConfig,
 	},
 };
 use serde_json::json;
@@ -59,6 +62,7 @@ async fn test_webhook_notification_success() {
 		secret: None,
 		headers: None,
 		payload_fields: None,
+		retry_policy: HttpRetryConfig::default(),
 	})
 	.unwrap();
 
@@ -93,6 +97,7 @@ async fn test_webhook_notification_failure() {
 		secret: None,
 		headers: None,
 		payload_fields: None,
+		retry_policy: HttpRetryConfig::default(),
 	})
 	.unwrap();
 
@@ -221,6 +226,7 @@ async fn test_notify_with_payload_merges_default_fields() {
 			"default_field".to_string(),
 			serde_json::json!("default_value"),
 		)])),
+		retry_policy: HttpRetryConfig::default(),
 	})
 	.unwrap();
 

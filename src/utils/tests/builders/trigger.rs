@@ -79,6 +79,7 @@ impl TriggerBuilder {
 				title: "Alert".to_string(),
 				body: "Test message".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 		self
 	}
@@ -91,6 +92,7 @@ impl TriggerBuilder {
 				title: "Alert".to_string(),
 				body: "Test message".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 		self
 	}
@@ -105,6 +107,7 @@ impl TriggerBuilder {
 				title: "Test title".to_string(),
 				body: "Test message".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 		self
 	}
@@ -257,16 +260,20 @@ impl TriggerBuilder {
 			TriggerTypeConfig::Discord {
 				discord_url: _,
 				message,
+				retry_policy,
 			} => TriggerTypeConfig::Discord {
 				discord_url: url,
 				message,
+				retry_policy,
 			},
 			TriggerTypeConfig::Slack {
 				slack_url: _,
 				message,
+				retry_policy,
 			} => TriggerTypeConfig::Slack {
 				slack_url: url,
 				message,
+				retry_policy,
 			},
 			config => config,
 		};
@@ -406,7 +413,11 @@ mod tests {
 
 		assert_eq!(trigger.trigger_type, TriggerType::Slack);
 		match trigger.config {
-			TriggerTypeConfig::Slack { slack_url, message } => {
+			TriggerTypeConfig::Slack {
+				slack_url,
+				message,
+				retry_policy: _,
+			} => {
 				assert_eq!(slack_url.as_ref().to_string(), "https://slack.webhook.com");
 				assert_eq!(message.title, "Alert");
 				assert_eq!(message.body, "Test message");
@@ -428,6 +439,7 @@ mod tests {
 			TriggerTypeConfig::Discord {
 				discord_url,
 				message,
+				retry_policy: _,
 			} => {
 				assert_eq!(
 					discord_url.as_ref().to_string(),
