@@ -255,7 +255,7 @@ impl TriggerBuilder {
 				headers,
 				secret,
 				message,
-				retry_policy: HttpRetryConfig::default(),
+				retry_policy,
 			},
 			TriggerTypeConfig::Discord {
 				discord_url: _,
@@ -387,7 +387,7 @@ mod tests {
 				secret,
 				headers: h,
 				message,
-				retry_policy,
+				retry_policy: _,
 			} => {
 				assert_eq!(url.as_ref().to_string(), "https://webhook.example.com");
 				assert_eq!(method, Some("POST".to_string()));
