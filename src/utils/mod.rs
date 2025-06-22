@@ -17,6 +17,7 @@
 mod cron_utils;
 mod expression;
 
+pub mod client_storage;
 pub mod constants;
 pub mod http;
 pub mod logging;
@@ -26,6 +27,7 @@ pub mod monitor;
 pub mod parsing;
 pub mod tests;
 
+pub use client_storage::ClientStorage;
 pub use constants::*;
 pub use cron_utils::*;
 pub use expression::*;
