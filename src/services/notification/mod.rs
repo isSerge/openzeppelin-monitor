@@ -5,16 +5,16 @@
 
 use async_trait::async_trait;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 mod discord;
 mod email;
 mod error;
+mod pool;
 mod script;
 mod slack;
 mod telegram;
 mod webhook;
-mod pool;
 
 use crate::{
 	models::{MonitorMatch, ScriptLanguage, Trigger, TriggerType, TriggerTypeConfig},
@@ -84,12 +84,17 @@ pub trait ScriptExecutor {
 }
 
 /// Service for managing notifications across different channels
-pub struct NotificationService;
+pub struct NotificationService {
+	/// Client pool for managing notification clients (HTTP, SMTP)
+	client_pool: Arc<pool::NotificationClientPool>,
+}
 
 impl NotificationService {
 	/// Creates a new notification service instance
 	pub fn new() -> Self {
-		NotificationService
+		NotificationService {
+			client_pool: Arc::new(pool::NotificationClientPool::new()),
+		}
 	}
 
 	/// Executes a notification based on the trigger configuration
@@ -122,7 +127,8 @@ impl NotificationService {
 				notifier.notify(&message).await?;
 			}
 			TriggerType::Webhook => {
-				let notifier = WebhookNotifier::from_config(&trigger.config)?;
+				let notifier =
+					WebhookNotifier::from_config(&trigger.config, self.client_pool.clone())?;
 				let message = notifier.format_message(variables);
 				notifier.notify(&message).await?;
 			}
