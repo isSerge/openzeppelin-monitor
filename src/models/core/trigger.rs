@@ -60,6 +60,7 @@ pub enum TriggerTypeConfig {
 		/// Notification message
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
+		#[serde(default)]
 		retry_policy: HttpRetryConfig,
 	},
 	/// Email notification configuration
@@ -92,6 +93,7 @@ pub enum TriggerTypeConfig {
 		/// Notification message
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
+		#[serde(default)]
 		retry_policy: HttpRetryConfig,
 	},
 	/// Telegram notification configuration
@@ -105,6 +107,7 @@ pub enum TriggerTypeConfig {
 		/// Notification message
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
+		#[serde(default)]
 		retry_policy: HttpRetryConfig,
 	},
 	/// Discord notification configuration
@@ -114,6 +117,7 @@ pub enum TriggerTypeConfig {
 		/// Notification message
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
+		#[serde(default)]
 		retry_policy: HttpRetryConfig,
 	},
 	/// Script execution configuration
