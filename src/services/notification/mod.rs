@@ -14,6 +14,7 @@ mod script;
 mod slack;
 mod telegram;
 mod webhook;
+mod pool;
 
 use crate::{
 	models::{MonitorMatch, ScriptLanguage, Trigger, TriggerType, TriggerTypeConfig},
