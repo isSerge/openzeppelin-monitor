@@ -150,7 +150,7 @@ proptest! {
 					}
 				}
 				TriggerType::Webhook => {
-					if let TriggerTypeConfig::Webhook { url: _, method: _, headers: _, secret: _, message: _ } = &trigger.config {
+					if let TriggerTypeConfig::Webhook { url: _, method: _, headers: _, secret: _, message: _, retry_policy: _ } = &trigger.config {
 						// Test invalid method
 						invalid_trigger = trigger.clone();
 						if let TriggerTypeConfig::Webhook { method: m, .. } = &mut invalid_trigger.config {

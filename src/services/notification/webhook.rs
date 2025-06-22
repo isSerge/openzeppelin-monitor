@@ -128,6 +128,7 @@ impl WebhookNotifier {
 			method,
 			secret,
 			headers,
+			retry_policy,
 		} = config
 		{
 			let webhook_config = WebhookConfig {
@@ -338,7 +339,10 @@ impl Notifier for WebhookNotifier {
 
 #[cfg(test)]
 mod tests {
-	use crate::models::{NotificationMessage, SecretString, SecretValue};
+	use crate::{
+		models::{NotificationMessage, SecretString, SecretValue},
+		utils::HttpRetryConfig,
+	};
 
 	use super::*;
 	use mockito::{Matcher, Mock};
@@ -373,6 +377,7 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		}
 	}
 

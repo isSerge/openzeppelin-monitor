@@ -2,9 +2,12 @@
 //!
 //! - `TriggerBuilder`: Builder for creating test Trigger instances
 
-use crate::models::{
-	NotificationMessage, ScriptLanguage, SecretString, SecretValue, Trigger, TriggerType,
-	TriggerTypeConfig,
+use crate::{
+	models::{
+		NotificationMessage, ScriptLanguage, SecretString, SecretValue, Trigger, TriggerType,
+		TriggerTypeConfig,
+	},
+	utils::HttpRetryConfig,
 };
 use email_address::EmailAddress;
 
@@ -31,6 +34,7 @@ impl Default for TriggerBuilder {
 					title: "Alert".to_string(),
 					body: "Test message".to_string(),
 				},
+				retry_policy: HttpRetryConfig::default(),
 			},
 		}
 	}
@@ -62,6 +66,7 @@ impl TriggerBuilder {
 				title: "Alert".to_string(),
 				body: "Test message".to_string(),
 			},
+			retry_policy: HttpRetryConfig::default(),
 		};
 		self
 	}
@@ -240,12 +245,14 @@ impl TriggerBuilder {
 				headers,
 				secret,
 				message,
+				retry_policy,
 			} => TriggerTypeConfig::Webhook {
 				url,
 				method,
 				headers,
 				secret,
 				message,
+				retry_policy: HttpRetryConfig::default(),
 			},
 			TriggerTypeConfig::Discord {
 				discord_url: _,
@@ -310,6 +317,7 @@ mod tests {
 					title: "Alert".to_string(),
 					body: "Test message".to_string(),
 				},
+				retry_policy: HttpRetryConfig::default(),
 			})
 			.build();
 
@@ -372,6 +380,7 @@ mod tests {
 				secret,
 				headers: h,
 				message,
+				retry_policy,
 			} => {
 				assert_eq!(url.as_ref().to_string(), "https://webhook.example.com");
 				assert_eq!(method, Some("POST".to_string()));

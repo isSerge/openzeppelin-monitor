@@ -1,4 +1,7 @@
-use crate::models::{core::ScriptLanguage, SecretValue};
+use crate::{
+	models::{core::ScriptLanguage, SecretValue},
+	utils::HttpRetryConfig,
+};
 use email_address::EmailAddress;
 use serde::{Deserialize, Serialize};
 
@@ -86,6 +89,7 @@ pub enum TriggerTypeConfig {
 		headers: Option<std::collections::HashMap<String, String>>,
 		/// Notification message
 		message: NotificationMessage,
+		retry_policy: HttpRetryConfig,
 	},
 	/// Telegram notification configuration
 	Telegram {

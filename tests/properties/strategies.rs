@@ -6,8 +6,9 @@ use openzeppelin_monitor::{
 		TransactionCondition, TransactionStatus, Trigger, TriggerConditions, TriggerType,
 		TriggerTypeConfig,
 	},
-	utils::tests::{
-		evm::monitor::MonitorBuilder, network::NetworkBuilder, trigger::TriggerBuilder,
+	utils::{
+		tests::{evm::monitor::MonitorBuilder, network::NetworkBuilder, trigger::TriggerBuilder},
+		HttpRetryConfig,
 	},
 };
 use proptest::{option, prelude::*};
@@ -160,6 +161,7 @@ pub fn trigger_strategy() -> impl Strategy<Value = Trigger> {
 						headers,
 						secret: secret.map(|s| SecretValue::Plain(SecretString::new(s))),
 						message,
+						retry_policy: HttpRetryConfig::default(),
 					}
 				})
 		)
