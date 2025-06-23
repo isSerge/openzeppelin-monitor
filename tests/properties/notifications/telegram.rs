@@ -7,7 +7,7 @@
 
 use openzeppelin_monitor::services::notification::TelegramNotifier;
 use proptest::{prelude::*, test_runner::Config};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 /// Generates a strategy for creating HashMaps containing template variable key-value pairs.
 /// Keys are alphanumeric strings of length 1-10, values are alphanumeric strings (with spaces) of
@@ -40,6 +40,7 @@ proptest! {
 			None,
 			"Test".to_string(),
 			template.clone(),
+			Arc::new(reqwest::Client::new()),
 		).unwrap();
 
 		let first_pass = notifier.format_message(&vars);
@@ -67,6 +68,7 @@ proptest! {
 			"Test".to_string(),
 
 			template.clone(),
+			Arc::new(reqwest::Client::new()),
 		).unwrap();
 
 		let formatted = notifier.format_message(&vars);
@@ -92,6 +94,7 @@ proptest! {
 			None,
 			"Test".to_string(),
 			template.clone(),
+			Arc::new(reqwest::Client::new()),
 		).unwrap();
 
 		let empty_vars = HashMap::new();

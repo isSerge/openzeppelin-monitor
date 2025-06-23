@@ -7,7 +7,7 @@ use openzeppelin_monitor::{
 	},
 };
 use serde_json::json;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::integration::mocks::{create_test_evm_logs, create_test_evm_transaction_receipt};
 
@@ -68,6 +68,7 @@ async fn test_slack_notification_success() {
 		server.url(),
 		"Test Alert".to_string(),
 		"Test message with value ${value}".to_string(),
+		Arc::new(reqwest::Client::new()),
 	)
 	.unwrap();
 
@@ -96,6 +97,7 @@ async fn test_slack_notification_failure() {
 		server.url(),
 		"Test Alert".to_string(),
 		"Test message".to_string(),
+		Arc::new(reqwest::Client::new()),
 	)
 	.unwrap();
 

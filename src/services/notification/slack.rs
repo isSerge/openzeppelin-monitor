@@ -4,7 +4,8 @@
 //! via incoming webhooks, supporting message templates with variable substitution.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
+use reqwest::Client;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
 	models::TriggerTypeConfig,
@@ -29,19 +30,22 @@ impl SlackNotifier {
 		url: String,
 		title: String,
 		body_template: String,
+		base_client: Arc<Client>,
 	) -> Result<Self, NotificationError> {
+		let config = WebhookConfig {
+			url,
+			url_params: None,
+			title,
+			body_template,
+			method: Some("POST".to_string()),
+			secret: None,
+			headers: None,
+			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
+		};
+
 		Ok(Self {
-			inner: WebhookNotifier::new(WebhookConfig {
-				url,
-				url_params: None,
-				title,
-				body_template,
-				method: Some("POST".to_string()),
-				secret: None,
-				headers: None,
-				payload_fields: None,
-				retry_policy: HttpRetryConfig::default(),
-			})?,
+			inner: WebhookNotifier::new(config, base_client)?,
 		})
 	}
 
@@ -64,7 +68,10 @@ impl SlackNotifier {
 	///
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is Slack type
-	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+	pub fn from_config(
+		config: &TriggerTypeConfig,
+		base_client: Arc<Client>,
+	) -> Result<Self, NotificationError> {
 		if let TriggerTypeConfig::Slack {
 			slack_url,
 			message,
@@ -84,7 +91,7 @@ impl SlackNotifier {
 			};
 
 			Ok(Self {
-				inner: WebhookNotifier::new(webhook_config)?,
+				inner: WebhookNotifier::new(webhook_config, base_client)?,
 			})
 		} else {
 			Err(NotificationError::config_error(
@@ -135,6 +142,7 @@ mod tests {
 			"https://non-existent-url-slack-webhook.com".to_string(),
 			"Alert".to_string(),
 			body_template.to_string(),
+			Arc::new(Client::new()),
 		)
 		.unwrap()
 	}
@@ -196,8 +204,8 @@ mod tests {
 	#[test]
 	fn test_from_config_with_slack_config() {
 		let config = create_test_slack_config();
-
-		let notifier = SlackNotifier::from_config(&config);
+		let base_client = Arc::new(Client::new());
+		let notifier = SlackNotifier::from_config(&config, base_client);
 		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
@@ -219,8 +227,8 @@ mod tests {
 			},
 			retry_policy: HttpRetryConfig::default(),
 		};
-
-		let notifier = SlackNotifier::from_config(&config);
+		let base_client = Arc::new(Client::new());
+		let notifier = SlackNotifier::from_config(&config, base_client);
 		assert!(notifier.is_err());
 
 		let error = notifier.unwrap_err();

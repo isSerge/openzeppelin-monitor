@@ -10,7 +10,7 @@ use openzeppelin_monitor::{
 	utils::HttpRetryConfig,
 };
 use proptest::{prelude::*, test_runner::Config};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 /// Generates a strategy for creating HashMaps containing template variable key-value pairs.
 /// Keys are alphanumeric strings of length 1-10, values are alphanumeric strings (with spaces) of
@@ -36,7 +36,7 @@ proptest! {
 		template in "[a-zA-Z0-9 ${}_]{1,100}",
 		vars in template_variables_strategy()
 	) {
-		let notifier = WebhookNotifier::new(WebhookConfig {
+		let config = WebhookConfig {
 			url: "https://webhook.com/test".to_string(),
 			url_params: None,
 			title: "Test".to_string(),
@@ -46,7 +46,9 @@ proptest! {
 			headers: None,
 			payload_fields: None,
 			retry_policy: HttpRetryConfig::default(),
-		})
+		};
+		let base_client = Arc::new(reqwest::Client::new());
+		let notifier = WebhookNotifier::new(config, base_client)
 		.unwrap();
 
 		let first_pass = notifier.format_message(&vars);
@@ -66,7 +68,7 @@ proptest! {
 		template in "[a-zA-Z0-9 ]{0,50}\\$\\{[a-z_]+\\}[a-zA-Z0-9 ]{0,50}",
 		vars in template_variables_strategy()
 	) {
-		let notifier = WebhookNotifier::new(WebhookConfig {
+		let config = WebhookConfig {
 			url: "https://webhook.com/test".to_string(),
 			url_params: None,
 			title: "Test".to_string(),
@@ -76,7 +78,9 @@ proptest! {
 			headers: None,
 			payload_fields: None,
 			retry_policy: HttpRetryConfig::default(),
-		})
+		};
+		let base_client = Arc::new(reqwest::Client::new());
+		let notifier = WebhookNotifier::new(config, base_client)
 		.unwrap();
 
 		let formatted = notifier.format_message(&vars);
@@ -95,7 +99,7 @@ proptest! {
 	fn test_notification_empty_variables(
 		template in "[a-zA-Z0-9 ${}_]{1,100}"
 	) {
-		let notifier = WebhookNotifier::new(WebhookConfig {
+		let config = WebhookConfig {
 			url: "https://webhook.com/test".to_string(),
 			url_params: None,
 			title: "Test".to_string(),
@@ -105,7 +109,9 @@ proptest! {
 			headers: None,
 			payload_fields: None,
 			retry_policy: HttpRetryConfig::default(),
-		})
+		};
+		let base_client = Arc::new(reqwest::Client::new());
+		let notifier = WebhookNotifier::new(config, base_client)
 		.unwrap();
 
 		let empty_vars = HashMap::new();

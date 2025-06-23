@@ -115,9 +115,21 @@ impl NotificationService {
 		monitor_match: &MonitorMatch,
 		trigger_scripts: &HashMap<String, (ScriptLanguage, String)>,
 	) -> Result<(), NotificationError> {
+		// Get or create the base HTTP client from the pool to be used by notifiers
+		let base_http_client = self
+			.client_pool
+			.get_or_create_http_client()
+			.await
+			.map_err(|e| {
+				NotificationError::execution_error(
+					"Failed to get HTTP client from pool".to_string(),
+					Some(e.into()),
+					None,
+				)
+			})?;
 		match &trigger.trigger_type {
 			TriggerType::Slack => {
-				let notifier = SlackNotifier::from_config(&trigger.config)?;
+				let notifier = SlackNotifier::from_config(&trigger.config, base_http_client)?;
 				let message = notifier.format_message(variables);
 				notifier.notify(&message).await?;
 			}
@@ -127,18 +139,17 @@ impl NotificationService {
 				notifier.notify(&message).await?;
 			}
 			TriggerType::Webhook => {
-				let notifier =
-					WebhookNotifier::from_config(&trigger.config, self.client_pool.clone())?;
+				let notifier = WebhookNotifier::from_config(&trigger.config, base_http_client)?;
 				let message = notifier.format_message(variables);
 				notifier.notify(&message).await?;
 			}
 			TriggerType::Discord => {
-				let notifier = DiscordNotifier::from_config(&trigger.config)?;
+				let notifier = DiscordNotifier::from_config(&trigger.config, base_http_client)?;
 				let message = notifier.format_message(variables);
 				notifier.notify(&message).await?;
 			}
 			TriggerType::Telegram => {
-				let notifier = TelegramNotifier::from_config(&trigger.config)?;
+				let notifier = TelegramNotifier::from_config(&trigger.config, base_http_client)?;
 				let message = notifier.format_message(variables);
 				notifier.notify(&message).await?;
 			}

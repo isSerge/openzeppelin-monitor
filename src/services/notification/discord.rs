@@ -4,9 +4,10 @@
 //! via incoming webhooks, supporting message templates with variable substitution.
 
 use async_trait::async_trait;
+use reqwest::Client;
 use serde::Serialize;
 use serde_json;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
 	models::TriggerTypeConfig,
@@ -82,19 +83,22 @@ impl DiscordNotifier {
 		url: String,
 		title: String,
 		body_template: String,
+		base_client: Arc<Client>,
 	) -> Result<Self, NotificationError> {
+		let config = WebhookConfig {
+			url,
+			url_params: None,
+			title,
+			body_template,
+			method: Some("POST".to_string()),
+			secret: None,
+			headers: None,
+			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
+		};
+
 		Ok(Self {
-			inner: WebhookNotifier::new(WebhookConfig {
-				url,
-				url_params: None,
-				title,
-				body_template,
-				method: Some("POST".to_string()),
-				secret: None,
-				headers: None,
-				payload_fields: None,
-				retry_policy: HttpRetryConfig::default(),
-			})?,
+			inner: WebhookNotifier::new(config, base_client)?,
 		})
 	}
 
@@ -117,7 +121,10 @@ impl DiscordNotifier {
 	///
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is Discord type
-	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+	pub fn from_config(
+		config: &TriggerTypeConfig,
+		base_client: Arc<Client>,
+	) -> Result<Self, NotificationError> {
 		if let TriggerTypeConfig::Discord {
 			discord_url,
 			message,
@@ -137,7 +144,7 @@ impl DiscordNotifier {
 			};
 
 			Ok(Self {
-				inner: WebhookNotifier::new(webhook_config)?,
+				inner: WebhookNotifier::new(webhook_config, base_client)?,
 			})
 		} else {
 			let msg = format!("Invalid discord configuration: {:?}", config);
@@ -186,6 +193,7 @@ mod tests {
 			"https://non-existent-url-discord-webhook.com".to_string(),
 			"Alert".to_string(),
 			body_template.to_string(),
+			Arc::new(Client::new()),
 		)
 		.unwrap()
 	}
@@ -247,8 +255,8 @@ mod tests {
 	#[test]
 	fn test_from_config_with_discord_config() {
 		let config = create_test_discord_config();
-
-		let notifier = DiscordNotifier::from_config(&config);
+		let base_client = Arc::new(Client::new());
+		let notifier = DiscordNotifier::from_config(&config, base_client);
 		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
@@ -268,8 +276,8 @@ mod tests {
 			},
 			retry_policy: HttpRetryConfig::default(),
 		};
-
-		let notifier = DiscordNotifier::from_config(&config);
+		let base_client = Arc::new(Client::new());
+		let notifier = DiscordNotifier::from_config(&config, base_client);
 		assert!(notifier.is_err());
 
 		let error = notifier.unwrap_err();

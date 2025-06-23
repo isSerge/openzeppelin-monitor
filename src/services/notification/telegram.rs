@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 use regex::Regex;
-use std::collections::HashMap;
+use reqwest::Client;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
 	models::TriggerTypeConfig,
@@ -37,6 +38,7 @@ impl TelegramNotifier {
 		disable_web_preview: Option<bool>,
 		title: String,
 		body_template: String,
+		base_client: Arc<Client>,
 	) -> Result<Self, NotificationError> {
 		let url = format!(
 			"{}/bot{}/sendMessage",
@@ -49,18 +51,20 @@ impl TelegramNotifier {
 		url_params.insert("chat_id".to_string(), chat_id);
 		url_params.insert("parse_mode".to_string(), "MarkdownV2".to_string());
 
+		let config = WebhookConfig {
+			url,
+			url_params: Some(url_params),
+			title,
+			body_template,
+			method: Some("GET".to_string()),
+			secret: None,
+			headers: None,
+			payload_fields: None,
+			retry_policy: HttpRetryConfig::default(),
+		};
+
 		Ok(Self {
-			inner: WebhookNotifier::new(WebhookConfig {
-				url,
-				url_params: Some(url_params),
-				title,
-				body_template,
-				method: Some("GET".to_string()),
-				secret: None,
-				headers: None,
-				payload_fields: None,
-				retry_policy: HttpRetryConfig::default(),
-			})?,
+			inner: WebhookNotifier::new(config, base_client)?,
 			disable_web_preview: disable_web_preview.unwrap_or(false),
 		})
 	}
@@ -166,7 +170,10 @@ impl TelegramNotifier {
 	///
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is Telegram type
-	pub fn from_config(config: &TriggerTypeConfig) -> Result<Self, NotificationError> {
+	pub fn from_config(
+		config: &TriggerTypeConfig,
+		base_client: Arc<Client>,
+	) -> Result<Self, NotificationError> {
 		if let TriggerTypeConfig::Telegram {
 			token,
 			chat_id,
@@ -192,7 +199,7 @@ impl TelegramNotifier {
 			};
 
 			Ok(Self {
-				inner: WebhookNotifier::new(webhook_config)?,
+				inner: WebhookNotifier::new(webhook_config, base_client)?,
 				disable_web_preview: disable_web_preview.unwrap_or(false),
 			})
 		} else {
@@ -223,8 +230,9 @@ impl Notifier for TelegramNotifier {
 			self.disable_web_preview.to_string(),
 		);
 
+		// TODO: this method should not create a new notifier every time.
 		// Create a new WebhookNotifier with updated URL parameters
-		let notifier = WebhookNotifier::new(WebhookConfig {
+		let config = WebhookConfig {
 			url: self.inner.url.clone(),
 			url_params: Some(url_params),
 			title: self.inner.title.clone(),
@@ -234,7 +242,9 @@ impl Notifier for TelegramNotifier {
 			headers: self.inner.headers.clone(),
 			payload_fields: None,
 			retry_policy: HttpRetryConfig::default(),
-		})?;
+		};
+		let base_client = self.inner.client.clone();
+		let notifier = WebhookNotifier::new(config, Arc::new(base_client))?;
 
 		notifier.notify_with_payload(message, HashMap::new()).await
 	}
@@ -254,6 +264,7 @@ mod tests {
 			Some(true),
 			"Alert".to_string(),
 			body_template.to_string(),
+			Arc::new(Client::new()),
 		)
 		.unwrap()
 	}
@@ -318,8 +329,8 @@ mod tests {
 	#[test]
 	fn test_from_config_with_telegram_config() {
 		let config = create_test_telegram_config();
-
-		let notifier = TelegramNotifier::from_config(&config);
+		let base_client = Arc::new(Client::new());
+		let notifier = TelegramNotifier::from_config(&config, base_client);
 		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
@@ -344,8 +355,8 @@ mod tests {
 			},
 			retry_policy: HttpRetryConfig::default(),
 		};
-
-		let notifier = TelegramNotifier::from_config(&config);
+		let base_client = Arc::new(Client::new());
+		let notifier = TelegramNotifier::from_config(&config, base_client);
 		assert!(notifier.is_err());
 
 		let error = notifier.unwrap_err();
@@ -364,7 +375,8 @@ mod tests {
 			},
 			retry_policy: HttpRetryConfig::default(),
 		};
-		let notifier = TelegramNotifier::from_config(&config).unwrap();
+		let base_client = Arc::new(Client::new());
+		let notifier = TelegramNotifier::from_config(&config, base_client).unwrap();
 		assert!(!notifier.disable_web_preview);
 	}
 
