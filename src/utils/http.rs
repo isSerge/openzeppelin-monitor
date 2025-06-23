@@ -5,8 +5,7 @@ use reqwest_retry::{
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// Default values for retry configuration settings
-
+/// --- Default values for retry configuration settings ---
 fn default_max_attempts() -> u32 {
 	3
 }
