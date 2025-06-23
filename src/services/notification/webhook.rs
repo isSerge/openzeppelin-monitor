@@ -10,14 +10,18 @@ use reqwest::{
 	header::{HeaderMap, HeaderName, HeaderValue},
 	Client, Method,
 };
+use reqwest_middleware::ClientWithMiddleware;
 use serde::Serialize;
 use sha2::Sha256;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
 	models::TriggerTypeConfig,
-	services::notification::{NotificationError, Notifier},
-	utils::HttpRetryConfig,
+	services::{
+		blockchain::TransientErrorRetryStrategy,
+		notification::{NotificationError, Notifier},
+	},
+	utils::{create_retryable_http_client, HttpRetryConfig},
 };
 
 /// HMAC SHA256 type alias
@@ -55,8 +59,8 @@ pub struct WebhookNotifier {
 	pub title: String,
 	/// Message template with variable placeholders
 	pub body_template: String,
-	/// HTTP client for webhook requests
-	pub client: Client,
+	/// Configured HTTP client for webhook requests with retry capabilities
+	pub client: ClientWithMiddleware,
 	/// HTTP method to use for the webhook request
 	pub method: Option<String>,
 	/// Secret to use for the webhook request
@@ -84,7 +88,12 @@ impl WebhookNotifier {
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is valid
 	pub fn new(config: WebhookConfig, base_client: Arc<Client>) -> Result<Self, NotificationError> {
-		let http_retry_config = config.retry_policy.clone();
+		// Create a retryable HTTP client with the provided configuration
+		let retryable_client = create_retryable_http_client(
+			&config.retry_policy,
+			(*base_client).clone(),
+			Some(TransientErrorRetryStrategy),
+		);
 
 		let mut headers = config.headers.unwrap_or_default();
 		if !headers.contains_key("Content-Type") {
@@ -95,7 +104,7 @@ impl WebhookNotifier {
 			url_params: config.url_params,
 			title: config.title,
 			body_template: config.body_template,
-			client: Client::new(),
+			client: retryable_client,
 			method: Some(config.method.unwrap_or("POST".to_string())),
 			secret: config.secret,
 			headers: Some(headers),

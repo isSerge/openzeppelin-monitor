@@ -243,7 +243,7 @@ impl Notifier for TelegramNotifier {
 			payload_fields: None,
 			retry_policy: HttpRetryConfig::default(),
 		};
-		let base_client = self.inner.client.clone();
+		let base_client = Client::new();
 		let notifier = WebhookNotifier::new(config, Arc::new(base_client))?;
 
 		notifier.notify_with_payload(message, HashMap::new()).await
