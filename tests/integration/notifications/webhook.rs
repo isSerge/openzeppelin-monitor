@@ -79,13 +79,46 @@ async fn test_webhook_notification_success() {
 }
 
 #[tokio::test]
-async fn test_webhook_notification_failure() {
+async fn test_webhook_notification_failure_retryable_error() {
 	// Setup async mock server to simulate failure
 	let mut server = mockito::Server::new_async().await;
 	let mock = server
 		.mock("GET", "/")
 		.with_status(500)
 		.with_body("Internal Server Error")
+		.expect(4) // 1 initial call + 3 default retries
+		.create_async()
+		.await;
+
+	let config = WebhookConfig {
+		url: server.url(),
+		url_params: None,
+		title: "Test Alert".to_string(),
+		body_template: "Test message".to_string(),
+		method: Some("GET".to_string()),
+		secret: None,
+		headers: None,
+		payload_fields: None,
+		retry_policy: HttpRetryConfig::default(),
+	};
+	let base_client = Arc::new(reqwest::Client::new());
+	let notifier = WebhookNotifier::new(config, base_client).unwrap();
+
+	let result = notifier.notify("Test message").await;
+
+	assert!(result.is_err());
+	mock.assert();
+}
+
+#[tokio::test]
+async fn test_webhook_notification_failure_non_retryable_error() {
+	// Setup async mock server to simulate failure
+	let mut server = mockito::Server::new_async().await;
+	let mock = server
+		.mock("GET", "/")
+		.with_status(400)
+		.with_body("Bad Request")
+		.expect(1) // 1 initial call, no retries for non-retryable
 		.create_async()
 		.await;
 
@@ -152,6 +185,7 @@ async fn test_notification_service_webhook_execution_failure() {
 		.mock("GET", "/")
 		.with_status(500)
 		.with_header("content-type", "application/json")
+		.expect(4) // 1 initial call + 3 default retries
 		.create_async()
 		.await;
 

@@ -84,7 +84,7 @@ async fn test_telegram_notification_success() {
 }
 
 #[tokio::test]
-async fn test_telegram_notification_failure() {
+async fn test_telegram_notification_failure_retryable_error() {
 	// Setup async mock server to simulate failure
 	let mut server = mockito::Server::new_async().await;
 	let mock = server
@@ -98,6 +98,48 @@ async fn test_telegram_notification_failure() {
 			"test_chat_id".to_string(),
 		))
 		.with_status(500)
+		.expect(4) // 1 initial call + 3 default retries
+		.with_body("Internal Server Error")
+		.create_async()
+		.await;
+
+	let notifier = TelegramNotifier::new(
+		Some(server.url()),
+		"test_token".to_string(),
+		"test_chat_id".to_string(),
+		None,
+		"Test Alert".to_string(),
+		"Test message with value ${value}".to_string(),
+		Arc::new(reqwest::Client::new()),
+	)
+	.unwrap();
+
+	let result = notifier.notify("Test message").await;
+
+	assert!(result.is_err());
+
+	let error = result.unwrap_err();
+	assert!(matches!(error, NotificationError::NotifyFailed(_)));
+
+	mock.assert();
+}
+
+#[tokio::test]
+async fn test_telegram_notification_failure_non_retryable_error() {
+	// Setup async mock server to simulate failure
+	let mut server = mockito::Server::new_async().await;
+	let mock = server
+		.mock("GET", "/bottest_token/sendMessage")
+		.match_query(mockito::Matcher::UrlEncoded(
+			"text".to_string(),
+			"*Test Alert* \n\nTest message with value 42".to_string(),
+		))
+		.match_query(mockito::Matcher::UrlEncoded(
+			"chat_id".to_string(),
+			"test_chat_id".to_string(),
+		))
+		.with_status(400)
+		.expect(1) // 1 initial call, no retries for non-retryable
 		.with_body("Internal Server Error")
 		.create_async()
 		.await;

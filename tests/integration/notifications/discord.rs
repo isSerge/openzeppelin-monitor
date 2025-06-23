@@ -69,13 +69,40 @@ async fn test_discord_notification_success() {
 }
 
 #[tokio::test]
-async fn test_discord_notification_failure() {
+async fn test_discord_notification_failure_retryable_error() {
 	// Setup async mock server to simulate failure
 	let mut server = mockito::Server::new_async().await;
 	let mock = server
 		.mock("POST", "/")
 		.with_status(500)
 		.with_body("Internal Server Error")
+		.expect(4) // 1 initial call + 3 default retries
+		.create_async()
+		.await;
+
+	let notifier = DiscordNotifier::new(
+		server.url(),
+		"Test Alert".to_string(),
+		"Test message".to_string(),
+		Arc::new(reqwest::Client::new()),
+	)
+	.unwrap();
+
+	let result = notifier.notify("Test message").await;
+
+	assert!(result.is_err());
+	mock.assert();
+}
+
+#[tokio::test]
+async fn test_discord_notification_failure_non_retryable_error() {
+	// Setup async mock server to simulate failure
+	let mut server = mockito::Server::new_async().await;
+	let mock = server
+		.mock("POST", "/")
+		.with_status(400)
+		.with_body("Bad Request")
+		.expect(1) // 1 initial call, no retries for non-retryable
 		.create_async()
 		.await;
 
@@ -135,6 +162,7 @@ async fn test_notification_service_discord_execution_failure() {
 		.mock("POST", "/")
 		.with_status(500)
 		.with_body("Internal Server Error")
+		.expect(4) // 1 initial call + 3 default retries
 		.create_async()
 		.await;
 
