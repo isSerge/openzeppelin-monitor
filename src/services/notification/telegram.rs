@@ -46,20 +46,20 @@ impl TelegramNotifier {
 			token
 		);
 
-		// Set up initial URL parameters
-		let mut url_params = HashMap::new();
-		url_params.insert("chat_id".to_string(), chat_id);
-		url_params.insert("parse_mode".to_string(), "MarkdownV2".to_string());
+		// Set up payload fields for the webhook
+		let mut payload_fields = HashMap::new();
+		payload_fields.insert("chat_id".to_string(), serde_json::json!(chat_id));
+		payload_fields.insert("parse_mode".to_string(), serde_json::json!("MarkdownV2"));
 
 		let config = WebhookConfig {
 			url,
-			url_params: Some(url_params),
+			url_params: None,
 			title,
 			body_template,
-			method: Some("GET".to_string()),
+			method: Some("POST".to_string()),
 			secret: None,
 			headers: None,
-			payload_fields: None,
+			payload_fields: Some(payload_fields),
 			retry_policy: HttpRetryConfig::default(),
 		};
 
@@ -182,19 +182,20 @@ impl TelegramNotifier {
 			retry_policy,
 		} = config
 		{
-			let mut url_params = HashMap::new();
-			url_params.insert("chat_id".to_string(), chat_id.clone());
-			url_params.insert("parse_mode".to_string(), "MarkdownV2".to_string());
+			// Set up payload fields for the webhook
+			let mut payload_fields = HashMap::new();
+			payload_fields.insert("chat_id".to_string(), serde_json::json!(chat_id));
+			payload_fields.insert("parse_mode".to_string(), serde_json::json!("MarkdownV2"));
 
 			let webhook_config = WebhookConfig {
 				url: format!("https://api.telegram.org/bot{}/sendMessage", token),
-				url_params: Some(url_params),
+				url_params: None,
 				title: message.title.clone(),
 				body_template: message.body.clone(),
-				method: Some("GET".to_string()),
+				method: Some("POST".to_string()),
 				secret: None,
 				headers: None,
-				payload_fields: None,
+				payload_fields: Some(payload_fields),
 				retry_policy: retry_policy.clone(),
 			};
 
@@ -222,31 +223,21 @@ impl Notifier for TelegramNotifier {
 	/// # Returns
 	/// * `Result<(), NotificationError>` - Success or error
 	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
-		// Add message and disable_web_preview to URL parameters
-		let mut url_params = self.inner.url_params.clone().unwrap_or_default();
-		url_params.insert("text".to_string(), message.to_string());
-		url_params.insert(
+		// Get default payload fields
+		let mut payload_fields = self.inner.payload_fields.clone().unwrap_or_default();
+
+		// Add the dynamic fields for this specific notification.
+		payload_fields.insert("text".to_string(), serde_json::json!(message));
+		payload_fields.insert(
 			"disable_web_page_preview".to_string(),
-			self.disable_web_preview.to_string(),
+			serde_json::json!(self.disable_web_preview),
 		);
 
-		// TODO: this method should not create a new notifier every time.
-		// Create a new WebhookNotifier with updated URL parameters
-		let config = WebhookConfig {
-			url: self.inner.url.clone(),
-			url_params: Some(url_params),
-			title: self.inner.title.clone(),
-			body_template: self.inner.body_template.clone(),
-			method: Some("GET".to_string()),
-			secret: None,
-			headers: self.inner.headers.clone(),
-			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
-		};
-		let base_client = Client::new();
-		let notifier = WebhookNotifier::new(config, Arc::new(base_client))?;
-
-		notifier.notify_with_payload(message, HashMap::new()).await
+		// Send the notification using the inner Webhook notifier
+		self.inner
+			// TODO: message parameter is duplicated in payload_fields, consider better design
+			.notify_with_payload(message, payload_fields)
+			.await
 	}
 }
 
