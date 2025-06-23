@@ -134,7 +134,43 @@ impl NotificationService {
 				notifier.notify(&message).await?;
 			}
 			TriggerType::Email => {
-				let notifier = EmailNotifier::from_config(&trigger.config)?;
+				// Extract SMTP configuration from the trigger
+				let smtp_config = match &trigger.config {
+					TriggerTypeConfig::Email {
+						host,
+						port,
+						username,
+						password,
+						..
+					} => SmtpConfig {
+						host: host.clone(),
+						port: port.unwrap_or(465),
+						username: username.as_ref().to_string(),
+						password: password.as_ref().to_string(),
+					},
+					_ => {
+						return Err(NotificationError::config_error(
+							"Invalid email configuration".to_string(),
+							None,
+							None,
+						))
+					}
+				};
+
+				// Get or create the SMTP client from the pool
+				let smtp_client = self
+					.client_pool
+					.get_or_create_smtp_client(&smtp_config)
+					.await
+					.map_err(|e| {
+						NotificationError::execution_error(
+							"Failed to get SMTP client from pool".to_string(),
+							Some(e.into()),
+							None,
+						)
+					})?;
+
+				let notifier = EmailNotifier::from_config(&trigger.config, smtp_client)?;
 				let message = notifier.format_message(variables);
 				notifier.notify(&message).await?;
 			}

@@ -1,3 +1,4 @@
+use crate::services::notification::SmtpConfig;
 use crate::utils::client_storage::ClientStorage;
 use lettre::SmtpTransport;
 use reqwest::Client as ReqwestClient;
@@ -78,6 +79,7 @@ impl NotificationClientPool {
 
 	pub async fn get_or_create_smtp_client(
 		&self,
+		_smtp_config: &SmtpConfig,
 	) -> Result<Arc<SmtpTransport>, NotificationPoolError> {
 		unimplemented!("SMTP client creation is not implemented yet");
 	}
