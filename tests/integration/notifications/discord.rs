@@ -3,12 +3,13 @@ use openzeppelin_monitor::{
 	services::notification::{DiscordNotifier, NotificationError, NotificationService, Notifier},
 	utils::tests::{
 		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+		get_http_client_from_notification_pool,
 		trigger::TriggerBuilder,
 	},
 };
 
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::integration::mocks::{create_test_evm_logs, create_test_evm_transaction_receipt};
 
@@ -53,7 +54,7 @@ async fn test_discord_notification_success() {
 		server.url(),
 		"Test Alert".to_string(),
 		"Test message with value ${value}".to_string(),
-		Arc::new(reqwest::Client::new()),
+		get_http_client_from_notification_pool().await,
 	)
 	.unwrap();
 
@@ -84,7 +85,7 @@ async fn test_discord_notification_failure_retryable_error() {
 		server.url(),
 		"Test Alert".to_string(),
 		"Test message".to_string(),
-		Arc::new(reqwest::Client::new()),
+		get_http_client_from_notification_pool().await,
 	)
 	.unwrap();
 
@@ -110,7 +111,7 @@ async fn test_discord_notification_failure_non_retryable_error() {
 		server.url(),
 		"Test Alert".to_string(),
 		"Test message".to_string(),
-		Arc::new(reqwest::Client::new()),
+		get_http_client_from_notification_pool().await,
 	)
 	.unwrap();
 

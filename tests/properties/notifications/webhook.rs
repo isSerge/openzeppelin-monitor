@@ -7,10 +7,10 @@
 
 use openzeppelin_monitor::{
 	services::notification::{WebhookConfig, WebhookNotifier},
-	utils::HttpRetryConfig,
+	utils::tests::create_test_http_client,
 };
 use proptest::{prelude::*, test_runner::Config};
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 /// Generates a strategy for creating HashMaps containing template variable key-value pairs.
 /// Keys are alphanumeric strings of length 1-10, values are alphanumeric strings (with spaces) of
@@ -45,10 +45,9 @@ proptest! {
 			secret: None,
 			headers: None,
 			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
 		};
-		let base_client = Arc::new(reqwest::Client::new());
-		let notifier = WebhookNotifier::new(config, base_client)
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::new(config, http_client)
 		.unwrap();
 
 		let first_pass = notifier.format_message(&vars);
@@ -77,10 +76,9 @@ proptest! {
 			secret: None,
 			headers: None,
 			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
 		};
-		let base_client = Arc::new(reqwest::Client::new());
-		let notifier = WebhookNotifier::new(config, base_client)
+		let http_client =create_test_http_client();
+		let notifier = WebhookNotifier::new(config, http_client)
 		.unwrap();
 
 		let formatted = notifier.format_message(&vars);
@@ -108,10 +106,9 @@ proptest! {
 			secret: None,
 			headers: None,
 			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
 		};
-		let base_client = Arc::new(reqwest::Client::new());
-		let notifier = WebhookNotifier::new(config, base_client)
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::new(config, http_client)
 		.unwrap();
 
 		let empty_vars = HashMap::new();

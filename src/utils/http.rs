@@ -23,7 +23,7 @@ fn default_base_for_backoff() -> u32 {
 }
 
 /// Serializable setting for jitter in retry policies
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 enum JitterSetting {
 	/// No jitter applied to the backoff duration
@@ -34,7 +34,7 @@ enum JitterSetting {
 }
 
 /// Configuration for HTTP retry policies
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct HttpRetryConfig {
 	/// Maximum number of retries for transient errors
 	#[serde(default = "default_max_attempts")]

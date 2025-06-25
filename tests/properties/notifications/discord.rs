@@ -5,9 +5,11 @@
 //! The tests ensure that the Discord notification system handles template variables correctly
 //! and produces consistent, well-formed output across various input combinations.
 
-use openzeppelin_monitor::services::notification::DiscordNotifier;
+use openzeppelin_monitor::{
+	services::notification::DiscordNotifier, utils::tests::create_test_http_client,
+};
 use proptest::{prelude::*, test_runner::Config};
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 /// Generates a strategy for creating HashMaps containing template variable key-value pairs.
 /// Keys are alphanumeric strings of length 1-10, values are alphanumeric strings (with spaces) of
@@ -37,7 +39,7 @@ proptest! {
 			"https://discord.com/test".to_string(),
 			"Test".to_string(),
 			template.clone(),
-			Arc::new(reqwest::Client::new())
+			create_test_http_client(),
 		).unwrap();
 
 		let first_pass = notifier.format_message(&vars);
@@ -61,7 +63,7 @@ proptest! {
 			"https://discord.com/test".to_string(),
 			"Test".to_string(),
 			template.clone(),
-			Arc::new(reqwest::Client::new()),
+			create_test_http_client(),
 		).unwrap();
 
 		let formatted = notifier.format_message(&vars);
@@ -84,7 +86,7 @@ proptest! {
 			"https://discord.com/test".to_string(),
 			"Test".to_string(),
 			template.clone(),
-			Arc::new(reqwest::Client::new()),
+			create_test_http_client(),
 		).unwrap();
 
 		let empty_vars = HashMap::new();

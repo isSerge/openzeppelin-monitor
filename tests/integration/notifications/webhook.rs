@@ -3,16 +3,14 @@ use openzeppelin_monitor::{
 	services::notification::{
 		NotificationError, NotificationService, Notifier, WebhookConfig, WebhookNotifier,
 	},
-	utils::{
-		tests::{
-			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-			trigger::TriggerBuilder,
-		},
-		HttpRetryConfig,
+	utils::tests::{
+		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+		get_http_client_from_notification_pool,
+		trigger::TriggerBuilder,
 	},
 };
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::integration::mocks::{create_test_evm_logs, create_test_evm_transaction_receipt};
 
@@ -62,10 +60,9 @@ async fn test_webhook_notification_success() {
 		secret: None,
 		headers: None,
 		payload_fields: None,
-		retry_policy: HttpRetryConfig::default(),
 	};
-	let base_client = Arc::new(reqwest::Client::new());
-	let notifier = WebhookNotifier::new(config, base_client).unwrap();
+	let http_client = get_http_client_from_notification_pool().await;
+	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 	// Prepare and send test message
 	let mut variables = HashMap::new();
@@ -99,10 +96,9 @@ async fn test_webhook_notification_failure_retryable_error() {
 		secret: None,
 		headers: None,
 		payload_fields: None,
-		retry_policy: HttpRetryConfig::default(),
 	};
-	let base_client = Arc::new(reqwest::Client::new());
-	let notifier = WebhookNotifier::new(config, base_client).unwrap();
+	let http_client = get_http_client_from_notification_pool().await;
+	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 	let result = notifier.notify("Test message").await;
 
@@ -131,10 +127,9 @@ async fn test_webhook_notification_failure_non_retryable_error() {
 		secret: None,
 		headers: None,
 		payload_fields: None,
-		retry_policy: HttpRetryConfig::default(),
 	};
-	let base_client = Arc::new(reqwest::Client::new());
-	let notifier = WebhookNotifier::new(config, base_client).unwrap();
+	let http_client = get_http_client_from_notification_pool().await;
+	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 	let result = notifier.notify("Test message").await;
 
@@ -262,10 +257,9 @@ async fn test_notify_with_payload_merges_default_fields() {
 			"default_field".to_string(),
 			serde_json::json!("default_value"),
 		)])),
-		retry_policy: HttpRetryConfig::default(),
 	};
-	let base_client = Arc::new(reqwest::Client::new());
-	let notifier = WebhookNotifier::new(config, base_client).unwrap();
+	let http_client = get_http_client_from_notification_pool().await;
+	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 	let mut payload = HashMap::new();
 	payload.insert(
