@@ -87,14 +87,14 @@ pub trait ScriptExecutor {
 /// Service for managing notifications across different channels
 pub struct NotificationService {
 	/// Client pool for managing notification clients (HTTP, SMTP)
-	client_pool: Arc<pool::NotificationClientPool>,
+	client_pool: Arc<NotificationClientPool>,
 }
 
 impl NotificationService {
 	/// Creates a new notification service instance
 	pub fn new() -> Self {
 		NotificationService {
-			client_pool: Arc::new(pool::NotificationClientPool::new()),
+			client_pool: Arc::new(NotificationClientPool::new()),
 		}
 	}
 
@@ -343,7 +343,9 @@ mod tests {
 		assert!(result.is_err());
 		match result {
 			Err(NotificationError::ConfigError(ctx)) => {
-				assert!(ctx.message.contains("Invalid slack configuration"));
+				assert!(ctx
+					.message
+					.contains("Could not find retry policy for trigger"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -399,7 +401,9 @@ mod tests {
 		assert!(result.is_err());
 		match result {
 			Err(NotificationError::ConfigError(ctx)) => {
-				assert!(ctx.message.contains("Invalid webhook configuration"));
+				assert!(ctx
+					.message
+					.contains("Could not find retry policy for trigger"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -427,7 +431,9 @@ mod tests {
 		assert!(result.is_err());
 		match result {
 			Err(NotificationError::ConfigError(ctx)) => {
-				assert!(ctx.message.contains("Invalid discord configuration"));
+				assert!(ctx
+					.message
+					.contains("Could not find retry policy for trigger"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -455,7 +461,9 @@ mod tests {
 		assert!(result.is_err());
 		match result {
 			Err(NotificationError::ConfigError(ctx)) => {
-				assert!(ctx.message.contains("Invalid telegram configuration"));
+				assert!(ctx
+					.message
+					.contains("Could not find retry policy for trigger"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}

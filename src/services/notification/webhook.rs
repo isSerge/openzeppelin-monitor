@@ -892,12 +892,34 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_notify_with_payload_failure() {
+	async fn test_notify_with_payload_failure_with_retryable_error() {
 		let mut server = mockito::Server::new_async().await;
 		let mock = server
 			.mock("POST", "/")
 			.with_status(500)
 			.with_body("Internal Server Error")
+			.expect(4) // 1 attempt, 3 retries
+			.create_async()
+			.await;
+
+		let notifier = create_test_notifier(server.url().as_str(), "Test message", None, None);
+
+		let result = notifier
+			.notify_with_payload("Test message", HashMap::new())
+			.await;
+
+		assert!(result.is_err());
+		mock.assert();
+	}
+
+	#[tokio::test]
+	async fn test_notify_with_payload_failure_with_non_retryable_error() {
+		let mut server = mockito::Server::new_async().await;
+		let mock = server
+			.mock("POST", "/")
+			.with_status(400)
+			.with_body("Bad Request")
+			.expect(1)
 			.create_async()
 			.await;
 
