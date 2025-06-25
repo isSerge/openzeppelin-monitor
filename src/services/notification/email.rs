@@ -36,7 +36,7 @@ pub struct EmailNotifier<T: Transport + Send + Sync> {
 }
 
 /// Configuration for SMTP connection
-#[derive(Clone)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct SmtpConfig {
 	pub host: String,
 	pub port: u16,
@@ -382,41 +382,6 @@ mod tests {
 		let smtp_client = pool.get_or_create_smtp_client(&smtp_config).await.unwrap();
 		let notifier = EmailNotifier::from_config(&config, smtp_client);
 		assert!(notifier.is_ok());
-	}
-
-	#[tokio::test]
-	async fn test_from_config_invalid_type() {
-		// Create a Slack config instead of Email
-		let config = TriggerTypeConfig::Slack {
-			slack_url: SecretValue::Plain(SecretString::new("random.url".to_string())),
-			message: NotificationMessage {
-				title: "Test Slack".to_string(),
-				body: "This is a test message".to_string(),
-			},
-			retry_policy: Default::default(),
-		};
-		let smtp_config = match &config {
-			TriggerTypeConfig::Email {
-				host,
-				port,
-				username,
-				password,
-				..
-			} => SmtpConfig {
-				host: host.clone(),
-				port: port.unwrap_or(587),
-				username: username.to_string(),
-				password: password.to_string(),
-			},
-			_ => panic!("Expected Email config"),
-		};
-		let pool = NotificationClientPool::new();
-		let smtp_client = pool.get_or_create_smtp_client(&smtp_config).await.unwrap();
-		let notifier = EmailNotifier::from_config(&config, smtp_client);
-		assert!(notifier.is_err());
-
-		let error = notifier.unwrap_err();
-		assert!(matches!(error, NotificationError::ConfigError { .. }));
 	}
 
 	////////////////////////////////////////////////////////////

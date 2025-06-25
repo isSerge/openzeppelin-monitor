@@ -2,6 +2,7 @@ use crate::services::blockchain::TransientErrorRetryStrategy;
 use crate::services::notification::SmtpConfig;
 use crate::utils::client_storage::ClientStorage;
 use crate::utils::{create_retryable_http_client, HttpRetryConfig};
+use lettre::transport::smtp::authentication::Credentials;
 use lettre::SmtpTransport;
 use reqwest::Client as ReqwestClient;
 use reqwest_middleware::ClientWithMiddleware;
@@ -55,7 +56,8 @@ impl NotificationClientPool {
 		&self,
 		retry_policy: &HttpRetryConfig,
 	) -> Result<Arc<ClientWithMiddleware>, NotificationPoolError> {
-		let key = format!("{:?}", retry_policy); // Use retry config hash as key
+		// Generate a unique key for the retry policy based on its configuration.
+		let key = format!("{:?}", retry_policy);
 
 		// Fast path: Read lock
 		if let Some(client) = self.http_clients.clients.read().await.get(key.as_str()) {
@@ -91,9 +93,36 @@ impl NotificationClientPool {
 
 	pub async fn get_or_create_smtp_client(
 		&self,
-		_smtp_config: &SmtpConfig,
+		smtp_config: &SmtpConfig,
 	) -> Result<Arc<SmtpTransport>, NotificationPoolError> {
-		unimplemented!("SMTP client creation is not implemented yet");
+		// Generate a unique key for the retry policy based on its configuration.
+		let key = format!("{:?}", smtp_config);
+
+		// Fast path: Read lock to check for an existing client.
+		if let Some(client) = self.smtp_clients.clients.read().await.get(&key) {
+			return Ok(client.clone());
+		}
+
+		// Slow path: Write lock to create a new client if needed.
+		let mut clients = self.smtp_clients.clients.write().await;
+		// Double-check in case another thread created it while we waited for the lock.
+		if let Some(client) = clients.get(&key) {
+			return Ok(client.clone());
+		}
+
+		// Create the new SMTP client using the provided configuration.
+		let creds = Credentials::new(smtp_config.username.clone(), smtp_config.password.clone());
+		let client = SmtpTransport::relay(&smtp_config.host)
+			.map_err(|e| NotificationPoolError::SmtpClientBuildError(e.to_string()))?
+			.port(smtp_config.port)
+			.credentials(creds)
+			.build();
+
+		// Store the new client in the pool.
+		let arc_client = Arc::new(client);
+		clients.insert(key, arc_client.clone());
+
+		Ok(arc_client)
 	}
 
 	/// Get the number of active HTTP clients in the pool,
