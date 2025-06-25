@@ -135,6 +135,7 @@ pub enum TriggerTypeConfig {
 }
 
 impl TriggerTypeConfig {
+	/// Get the retry policy for the trigger type, if applicable.
 	pub fn get_retry_policy(&self) -> Option<HttpRetryConfig> {
 		match self {
 			Self::Slack { retry_policy, .. } => Some(retry_policy.clone()),

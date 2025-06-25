@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 ///
 /// Clients are stored in a thread-safe way using a HashMap and an RwLock.
 /// The HashMap is indexed by the network slug and the value is an Arc of the client.
+#[derive(Default)]
 pub struct ClientStorage<T> {
 	pub clients: Arc<RwLock<HashMap<String, Arc<T>>>>,
 }
