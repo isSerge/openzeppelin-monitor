@@ -94,7 +94,7 @@ impl EmailNotifier<SmtpTransport> {
 			body_template: email_content.body_template,
 			sender: email_content.sender,
 			recipients: email_content.recipients,
-			client: (*smtp_client).clone(),
+			client: smtp_client.as_ref().clone(),
 		})
 	}
 
@@ -246,13 +246,6 @@ mod tests {
 		};
 
 		let client = SmtpTransport::relay(&smtp_config.host)
-			.map_err(|e| {
-				NotificationError::internal_error(
-					format!("Failed to create SMTP relay: {}", e),
-					None,
-					None,
-				)
-			})
 			.unwrap()
 			.port(smtp_config.port)
 			.credentials(Credentials::new(smtp_config.username, smtp_config.password))

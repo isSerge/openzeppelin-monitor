@@ -133,3 +133,15 @@ pub enum TriggerTypeConfig {
 		timeout_ms: u32,
 	},
 }
+
+impl TriggerTypeConfig {
+	pub fn get_retry_policy(&self) -> Option<HttpRetryConfig> {
+		match self {
+			Self::Slack { retry_policy, .. } => Some(retry_policy.clone()),
+			Self::Discord { retry_policy, .. } => Some(retry_policy.clone()),
+			Self::Webhook { retry_policy, .. } => Some(retry_policy.clone()),
+			Self::Telegram { retry_policy, .. } => Some(retry_policy.clone()),
+			_ => None,
+		}
+	}
+}

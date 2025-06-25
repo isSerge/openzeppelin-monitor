@@ -24,6 +24,7 @@ use crate::{
 pub use discord::DiscordNotifier;
 pub use email::{EmailContent, EmailNotifier, SmtpConfig};
 pub use error::NotificationError;
+pub use pool::NotificationClientPool;
 pub use script::ScriptNotifier;
 pub use slack::SlackNotifier;
 pub use telegram::TelegramNotifier;
@@ -115,23 +116,57 @@ impl NotificationService {
 		monitor_match: &MonitorMatch,
 		trigger_scripts: &HashMap<String, (ScriptLanguage, String)>,
 	) -> Result<(), NotificationError> {
-		// Get or create the base HTTP client from the pool to be used by notifiers
-		let base_http_client = self
-			.client_pool
-			.get_or_create_http_client()
-			.await
-			.map_err(|e| {
-				NotificationError::execution_error(
-					"Failed to get HTTP client from pool".to_string(),
-					Some(e.into()),
-					None,
-				)
-			})?;
 		match &trigger.trigger_type {
-			TriggerType::Slack => {
-				let notifier = SlackNotifier::from_config(&trigger.config, base_http_client)?;
-				let message = notifier.format_message(variables);
-				notifier.notify(&message).await?;
+			// Match Webhook-based triggers
+			TriggerType::Slack
+			| TriggerType::Discord
+			| TriggerType::Webhook
+			| TriggerType::Telegram => {
+				// Extract retry policy from the trigger configuration
+				let retry_policy = trigger.config.get_retry_policy().ok_or_else(|| {
+					NotificationError::config_error(
+						"Could not find retry policy for trigger",
+						None,
+						None,
+					)
+				})?;
+
+				// Get or create the HTTP client from the pool
+				let http_client = self
+					.client_pool
+					.get_or_create_http_client(&retry_policy)
+					.await
+					.map_err(|e| {
+						NotificationError::execution_error(
+							"Failed to get HTTP client from pool".to_string(),
+							Some(e.into()),
+							None,
+						)
+					})?;
+
+				match &trigger.trigger_type {
+					TriggerType::Webhook => {
+						let notifier = WebhookNotifier::from_config(&trigger.config, http_client)?;
+						let message = notifier.format_message(variables);
+						notifier.notify(&message).await?;
+					}
+					TriggerType::Discord => {
+						let notifier = DiscordNotifier::from_config(&trigger.config, http_client)?;
+						let message = notifier.format_message(variables);
+						notifier.notify(&message).await?;
+					}
+					TriggerType::Telegram => {
+						let notifier = TelegramNotifier::from_config(&trigger.config, http_client)?;
+						let message = notifier.format_message(variables);
+						notifier.notify(&message).await?;
+					}
+					TriggerType::Slack => {
+						let notifier = SlackNotifier::from_config(&trigger.config, http_client)?;
+						let message = notifier.format_message(variables);
+						notifier.notify(&message).await?;
+					}
+					_ => unreachable!(),
+				}
 			}
 			TriggerType::Email => {
 				// Extract SMTP configuration from the trigger
@@ -171,21 +206,6 @@ impl NotificationService {
 					})?;
 
 				let notifier = EmailNotifier::from_config(&trigger.config, smtp_client)?;
-				let message = notifier.format_message(variables);
-				notifier.notify(&message).await?;
-			}
-			TriggerType::Webhook => {
-				let notifier = WebhookNotifier::from_config(&trigger.config, base_http_client)?;
-				let message = notifier.format_message(variables);
-				notifier.notify(&message).await?;
-			}
-			TriggerType::Discord => {
-				let notifier = DiscordNotifier::from_config(&trigger.config, base_http_client)?;
-				let message = notifier.format_message(variables);
-				notifier.notify(&message).await?;
-			}
-			TriggerType::Telegram => {
-				let notifier = TelegramNotifier::from_config(&trigger.config, base_http_client)?;
 				let message = notifier.format_message(variables);
 				notifier.notify(&message).await?;
 			}

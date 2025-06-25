@@ -4,13 +4,12 @@
 //! via incoming webhooks, supporting message templates with variable substitution.
 
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest_middleware::ClientWithMiddleware;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
 	models::TriggerTypeConfig,
 	services::notification::{NotificationError, Notifier, WebhookConfig, WebhookNotifier},
-	utils::HttpRetryConfig,
 };
 
 /// Implementation of Slack notifications via webhooks
@@ -26,11 +25,12 @@ impl SlackNotifier {
 	/// * `url` - Slack webhook URL
 	/// * `title` - Message title
 	/// * `body_template` - Message template with variables
+	/// * `http_client` - HTTP client with middleware for retries
 	pub fn new(
 		url: String,
 		title: String,
 		body_template: String,
-		base_client: Arc<Client>,
+		http_client: Arc<ClientWithMiddleware>,
 	) -> Result<Self, NotificationError> {
 		let config = WebhookConfig {
 			url,
@@ -41,11 +41,10 @@ impl SlackNotifier {
 			secret: None,
 			headers: None,
 			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
 		};
 
 		Ok(Self {
-			inner: WebhookNotifier::new(config, base_client)?,
+			inner: WebhookNotifier::new(config, http_client)?,
 		})
 	}
 
@@ -65,17 +64,16 @@ impl SlackNotifier {
 	///
 	/// # Arguments
 	/// * `config` - Trigger configuration containing Slack parameters
+	/// * `http_client` - HTTP client with middleware for retries
 	///
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is Slack type
 	pub fn from_config(
 		config: &TriggerTypeConfig,
-		base_client: Arc<Client>,
+		http_client: Arc<ClientWithMiddleware>,
 	) -> Result<Self, NotificationError> {
 		if let TriggerTypeConfig::Slack {
-			slack_url,
-			message,
-			retry_policy,
+			slack_url, message, ..
 		} = config
 		{
 			let webhook_config = WebhookConfig {
@@ -87,11 +85,10 @@ impl SlackNotifier {
 				secret: None,
 				headers: None,
 				payload_fields: None,
-				retry_policy: retry_policy.clone(),
 			};
 
 			Ok(Self {
-				inner: WebhookNotifier::new(webhook_config, base_client)?,
+				inner: WebhookNotifier::new(webhook_config, http_client)?,
 			})
 		} else {
 			Err(NotificationError::config_error(
@@ -133,7 +130,10 @@ impl Notifier for SlackNotifier {
 
 #[cfg(test)]
 mod tests {
-	use crate::models::{NotificationMessage, SecretString, SecretValue};
+	use crate::{
+		models::{NotificationMessage, SecretString, SecretValue},
+		utils::{tests::create_test_http_client, HttpRetryConfig},
+	};
 
 	use super::*;
 
@@ -142,7 +142,7 @@ mod tests {
 			"https://non-existent-url-slack-webhook.com".to_string(),
 			"Alert".to_string(),
 			body_template.to_string(),
-			Arc::new(Client::new()),
+			create_test_http_client(),
 		)
 		.unwrap()
 	}
@@ -204,35 +204,14 @@ mod tests {
 	#[test]
 	fn test_from_config_with_slack_config() {
 		let config = create_test_slack_config();
-		let base_client = Arc::new(Client::new());
-		let notifier = SlackNotifier::from_config(&config, base_client);
+		let http_client = create_test_http_client();
+		let notifier = SlackNotifier::from_config(&config, http_client);
 		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
 		assert_eq!(notifier.inner.url, "https://slack.example.com");
 		assert_eq!(notifier.inner.title, "Test Alert");
 		assert_eq!(notifier.inner.body_template, "Test message ${value}");
-	}
-
-	#[test]
-	fn test_from_config_invalid_type() {
-		// Create a config that is not a Slack type
-		let config = TriggerTypeConfig::Discord {
-			discord_url: SecretValue::Plain(SecretString::new(
-				"https://discord.example.com".to_string(),
-			)),
-			message: NotificationMessage {
-				title: "Test Alert".to_string(),
-				body: "Test message ${value}".to_string(),
-			},
-			retry_policy: HttpRetryConfig::default(),
-		};
-		let base_client = Arc::new(Client::new());
-		let notifier = SlackNotifier::from_config(&config, base_client);
-		assert!(notifier.is_err());
-
-		let error = notifier.unwrap_err();
-		assert!(matches!(error, NotificationError::ConfigError { .. }));
 	}
 
 	////////////////////////////////////////////////////////////

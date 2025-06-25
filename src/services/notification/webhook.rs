@@ -8,7 +8,7 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use reqwest::{
 	header::{HeaderMap, HeaderName, HeaderValue},
-	Client, Method,
+	Method,
 };
 use reqwest_middleware::ClientWithMiddleware;
 use serde::Serialize;
@@ -17,11 +17,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
 	models::TriggerTypeConfig,
-	services::{
-		blockchain::TransientErrorRetryStrategy,
-		notification::{NotificationError, Notifier},
-	},
-	utils::{create_retryable_http_client, HttpRetryConfig},
+	services::notification::{NotificationError, Notifier},
 };
 
 /// HMAC SHA256 type alias
@@ -45,7 +41,6 @@ pub struct WebhookConfig {
 	pub secret: Option<String>,
 	pub headers: Option<HashMap<String, String>>,
 	pub payload_fields: Option<HashMap<String, serde_json::Value>>,
-	pub retry_policy: HttpRetryConfig,
 }
 
 /// Implementation of webhook notifications via webhooks
@@ -60,7 +55,7 @@ pub struct WebhookNotifier {
 	/// Message template with variable placeholders
 	pub body_template: String,
 	/// Configured HTTP client for webhook requests with retry capabilities
-	pub client: ClientWithMiddleware,
+	pub client: Arc<ClientWithMiddleware>,
 	/// HTTP method to use for the webhook request
 	pub method: Option<String>,
 	/// Secret to use for the webhook request
@@ -84,17 +79,14 @@ impl WebhookNotifier {
 	///
 	/// # Arguments
 	/// * `config` - Webhook configuration
+	/// * `http_client` - HTTP client with middleware for retries
 	///
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is valid
-	pub fn new(config: WebhookConfig, base_client: Arc<Client>) -> Result<Self, NotificationError> {
-		// Create a retryable HTTP client with the provided configuration
-		let retryable_client = create_retryable_http_client(
-			&config.retry_policy,
-			(*base_client).clone(),
-			Some(TransientErrorRetryStrategy),
-		);
-
+	pub fn new(
+		config: WebhookConfig,
+		http_client: Arc<ClientWithMiddleware>,
+	) -> Result<Self, NotificationError> {
 		let mut headers = config.headers.unwrap_or_default();
 		if !headers.contains_key("Content-Type") {
 			headers.insert("Content-Type".to_string(), "application/json".to_string());
@@ -104,7 +96,7 @@ impl WebhookNotifier {
 			url_params: config.url_params,
 			title: config.title,
 			body_template: config.body_template,
-			client: retryable_client,
+			client: http_client,
 			method: Some(config.method.unwrap_or("POST".to_string())),
 			secret: config.secret,
 			headers: Some(headers),
@@ -131,12 +123,13 @@ impl WebhookNotifier {
 	///
 	/// # Arguments
 	/// * `config` - Trigger configuration containing Webhook parameters
+	/// * `http_client` - HTTP client with middleware for retries
 	///
 	/// # Returns
 	/// * `Result<Self>` - Notifier instance if config is Webhook type
 	pub fn from_config(
 		config: &TriggerTypeConfig,
-		base_client: Arc<Client>,
+		http_client: Arc<ClientWithMiddleware>,
 	) -> Result<Self, NotificationError> {
 		if let TriggerTypeConfig::Webhook {
 			url,
@@ -144,7 +137,7 @@ impl WebhookNotifier {
 			method,
 			secret,
 			headers,
-			retry_policy,
+			..
 		} = config
 		{
 			let webhook_config = WebhookConfig {
@@ -156,10 +149,9 @@ impl WebhookNotifier {
 				secret: secret.as_ref().map(|s| s.as_ref().to_string()),
 				headers: headers.clone(),
 				payload_fields: None,
-				retry_policy: retry_policy.clone(),
 			};
 
-			WebhookNotifier::new(webhook_config, base_client)
+			WebhookNotifier::new(webhook_config, http_client)
 		} else {
 			let msg = format!("Invalid webhook configuration: {:?}", config);
 			Err(NotificationError::config_error(msg, None, None))
@@ -358,7 +350,7 @@ impl Notifier for WebhookNotifier {
 mod tests {
 	use crate::{
 		models::{NotificationMessage, SecretString, SecretValue},
-		utils::HttpRetryConfig,
+		utils::{tests::create_test_http_client, HttpRetryConfig},
 	};
 
 	use super::*;
@@ -371,7 +363,7 @@ mod tests {
 		secret: Option<&str>,
 		headers: Option<HashMap<String, String>>,
 	) -> WebhookNotifier {
-		let base_client = Arc::new(Client::new());
+		let http_client = create_test_http_client();
 		let config = WebhookConfig {
 			url: url.to_string(),
 			url_params: None,
@@ -381,9 +373,8 @@ mod tests {
 			secret: secret.map(|s| s.to_string()),
 			headers,
 			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
 		};
-		WebhookNotifier::new(config, base_client).unwrap()
+		WebhookNotifier::new(config, http_client).unwrap()
 	}
 
 	fn create_test_webhook_config() -> TriggerTypeConfig {
@@ -496,8 +487,8 @@ mod tests {
 	#[test]
 	fn test_from_config_with_webhook_config() {
 		let config = create_test_webhook_config();
-		let base_client = Arc::new(Client::new());
-		let notifier = WebhookNotifier::from_config(&config, base_client);
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::from_config(&config, http_client);
 		assert!(notifier.is_ok());
 
 		let notifier = notifier.unwrap();
@@ -520,8 +511,8 @@ mod tests {
 			retry_policy: HttpRetryConfig::default(),
 		};
 
-		let base_client = Arc::new(Client::new());
-		let notifier = WebhookNotifier::from_config(&config, base_client);
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::from_config(&config, http_client);
 		assert!(notifier.is_err());
 
 		let error = notifier.unwrap_err();
@@ -747,7 +738,6 @@ mod tests {
 		url_params.insert("param1".to_string(), "value1".to_string());
 		url_params.insert("param2".to_string(), "value2".to_string());
 
-		let base_client = Arc::new(Client::new());
 		let config = WebhookConfig {
 			url: server.url(),
 			url_params: Some(url_params),
@@ -757,9 +747,9 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
 		};
-		let notifier = WebhookNotifier::new(config, base_client).unwrap();
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 		let result = notifier
 			.notify_with_payload("Test message", HashMap::new())
@@ -777,7 +767,6 @@ mod tests {
 			.create_async()
 			.await;
 
-		let base_client = Arc::new(Client::new());
 		let config = WebhookConfig {
 			url: server.url(),
 			url_params: None,
@@ -787,9 +776,9 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: None,
-			retry_policy: HttpRetryConfig::default(),
 		};
-		let notifier = WebhookNotifier::new(config, base_client).unwrap();
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 		let result = notifier
 			.notify_with_payload("Test message", HashMap::new())
@@ -820,7 +809,6 @@ mod tests {
 			serde_json::json!("default_value"),
 		);
 
-		let base_client = Arc::new(Client::new());
 		let config = WebhookConfig {
 			url: server.url(),
 			url_params: None,
@@ -830,9 +818,9 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: Some(default_fields),
-			retry_policy: HttpRetryConfig::default(),
 		};
-		let notifier = WebhookNotifier::new(config, base_client).unwrap();
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 		let mut payload = HashMap::new();
 		payload.insert(
@@ -866,7 +854,6 @@ mod tests {
 			serde_json::json!("default_value"),
 		);
 
-		let base_client = Arc::new(Client::new());
 		let config = WebhookConfig {
 			url: server.url(),
 			url_params: None,
@@ -876,9 +863,9 @@ mod tests {
 			secret: None,
 			headers: None,
 			payload_fields: Some(default_fields),
-			retry_policy: HttpRetryConfig::default(),
 		};
-		let notifier = WebhookNotifier::new(config, base_client).unwrap();
+		let http_client = create_test_http_client();
+		let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
 		let mut payload = HashMap::new();
 		payload.insert(
