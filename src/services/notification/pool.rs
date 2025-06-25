@@ -37,14 +37,7 @@ impl NotificationClientPool {
 		}
 	}
 
-	///
-	/// Uses a double-checked locking pattern:
-	/// 1. Fast path with read lock to check for existing client
-	/// 2. Slow path with write lock to create new client if needed
-	///
-	/// This ensures thread-safety while maintaining good performance
-	/// for the common case of accessing existing clients.
-	/// Method to get or create HTTP client
+	/// Get or create an HTTP client with retry capabilities.
 	///
 	/// # Arguments
 	/// * `retry_policy` - Configuration for HTTP retry policy
@@ -91,6 +84,14 @@ impl NotificationClientPool {
 		Ok(arc_client)
 	}
 
+	/// Get or create an SMTP client for sending emails.
+	/// # Arguments
+	/// * `smtp_config` - Configuration for the SMTP client, including host,
+	///   port, username, and password.
+	/// # Returns
+	/// * `Result<Arc<SmtpTransport>, NotificationPoolError>` - The SMTP client
+	///   wrapped in an `Arc` for shared ownership, or an error if client creation
+	///   fails.
 	pub async fn get_or_create_smtp_client(
 		&self,
 		smtp_config: &SmtpConfig,
@@ -125,15 +126,13 @@ impl NotificationClientPool {
 		Ok(arc_client)
 	}
 
-	/// Get the number of active HTTP clients in the pool,
-	/// only used for testing purposes since the pool currently
-	/// has single default key for HTTP clients.
+	/// Get the number of active HTTP clients in the pool
 	#[cfg(test)]
 	pub async fn get_active_http_client_count(&self) -> usize {
 		self.http_clients.clients.read().await.len()
 	}
 
-	/// Method to get or create SMTP client
+	/// Get the number of active SMTP clients in the pool
 	#[cfg(test)]
 	pub async fn get_active_smtp_client_count(&self) -> usize {
 		self.smtp_clients.clients.read().await.len()
@@ -358,7 +357,7 @@ mod tests {
 			.get_or_create_smtp_client(&smtp_config_1)
 			.await
 			.unwrap();
-		
+
 		assert!(
 			Arc::ptr_eq(&client1, &client1_again),
 			"Should return the same client instance when called again with the same config"
