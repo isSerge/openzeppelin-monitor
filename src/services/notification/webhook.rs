@@ -894,11 +894,12 @@ mod tests {
 	#[tokio::test]
 	async fn test_notify_with_payload_failure_with_retryable_error() {
 		let mut server = mockito::Server::new_async().await;
+		let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 		let mock = server
 			.mock("POST", "/")
 			.with_status(500)
 			.with_body("Internal Server Error")
-			.expect(4) // 1 attempt, 3 retries
+			.expect(1 + default_retries_count)
 			.create_async()
 			.await;
 

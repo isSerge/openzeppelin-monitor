@@ -3,10 +3,13 @@ use openzeppelin_monitor::{
 	services::notification::{
 		NotificationError, NotificationService, Notifier, WebhookConfig, WebhookNotifier,
 	},
-	utils::tests::{
-		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-		get_http_client_from_notification_pool,
-		trigger::TriggerBuilder,
+	utils::{
+		tests::{
+			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+			get_http_client_from_notification_pool,
+			trigger::TriggerBuilder,
+		},
+		HttpRetryConfig,
 	},
 };
 use serde_json::json;
@@ -79,11 +82,12 @@ async fn test_webhook_notification_success() {
 async fn test_webhook_notification_failure_retryable_error() {
 	// Setup async mock server to simulate failure
 	let mut server = mockito::Server::new_async().await;
+	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 	let mock = server
 		.mock("GET", "/")
 		.with_status(500)
 		.with_body("Internal Server Error")
-		.expect(4) // 1 initial call + 3 default retries
+		.expect(1 + default_retries_count)
 		.create_async()
 		.await;
 
@@ -174,13 +178,14 @@ async fn test_notification_service_webhook_execution() {
 async fn test_notification_service_webhook_execution_failure() {
 	let notification_service = NotificationService::new();
 	let mut server = mockito::Server::new_async().await;
+	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 
 	// Setup mock webhook server with less strict matching
 	let mock = server
 		.mock("GET", "/")
 		.with_status(500)
 		.with_header("content-type", "application/json")
-		.expect(4) // 1 initial call + 3 default retries
+		.expect(1 + default_retries_count)
 		.create_async()
 		.await;
 

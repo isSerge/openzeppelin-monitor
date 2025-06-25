@@ -27,9 +27,12 @@ use openzeppelin_monitor::{
 		notification::NotificationService,
 		trigger::{TriggerExecutionService, TriggerExecutionServiceTrait},
 	},
-	utils::tests::{
-		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-		trigger::TriggerBuilder,
+	utils::{
+		tests::{
+			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+			trigger::TriggerBuilder,
+		},
+		HttpRetryConfig,
 	},
 };
 use std::str::FromStr;
@@ -858,6 +861,7 @@ async fn test_trigger_execution_service_execute_multiple_triggers_failed_retryab
 	// Slack execution success - Webhook execution failure - Script execution failure
 	// We should see two errors regarding the webhook and one regarding the script
 	let mut server = mockito::Server::new_async().await;
+	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 	let mock = server
 		.mock("POST", "/")
 		.match_body(mockito::Matcher::Json(json!({
@@ -872,7 +876,7 @@ async fn test_trigger_execution_service_execute_multiple_triggers_failed_retryab
 			]
 		})))
 		.with_status(500)
-		.expect(4) // 1 initial call + 3 default retries
+		.expect(1 + default_retries_count)
 		.create_async()
 		.await;
 	let mut mocked_triggers = HashMap::new();
@@ -1103,6 +1107,7 @@ async fn test_trigger_execution_service_execute_multiple_triggers_partial_succes
 	// Set up mock servers for both Slack and Webhook endpoints
 	let mut slack_server = mockito::Server::new_async().await;
 	let mut webhook_server = mockito::Server::new_async().await;
+	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 
 	// Set up Slack mock
 	let slack_mock = slack_server
@@ -1119,7 +1124,7 @@ async fn test_trigger_execution_service_execute_multiple_triggers_partial_succes
 			]
 		})))
 		.with_status(500)
-		.expect(4) // 1 initial call + 3 default retries
+		.expect(1 + default_retries_count)
 		.create_async()
 		.await;
 

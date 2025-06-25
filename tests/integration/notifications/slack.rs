@@ -1,10 +1,13 @@
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, ScriptLanguage},
 	services::notification::{NotificationService, Notifier, SlackNotifier},
-	utils::tests::{
-		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-		get_http_client_from_notification_pool,
-		trigger::TriggerBuilder,
+	utils::{
+		tests::{
+			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+			get_http_client_from_notification_pool,
+			trigger::TriggerBuilder,
+		},
+		HttpRetryConfig,
 	},
 };
 use serde_json::json;
@@ -87,11 +90,12 @@ async fn test_slack_notification_success() {
 async fn test_slack_notification_failure_retryable_error() {
 	// Setup async mock server to simulate failure
 	let mut server = mockito::Server::new_async().await;
+	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 	let mock = server
 		.mock("POST", "/")
 		.with_status(500)
 		.with_body("Internal Server Error")
-		.expect(4) // 1 initial call + 3 default retries
+		.expect(1 + default_retries_count)
 		.create_async()
 		.await;
 
@@ -187,11 +191,12 @@ async fn test_notification_service_slack_execution_failure() {
 	let notification_service = NotificationService::new();
 	// Setup async mock server to simulate failure
 	let mut server = mockito::Server::new_async().await;
+	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 	let mock = server
 		.mock("POST", "/")
 		.with_status(500)
 		.with_body("Internal Server Error")
-		.expect(4) // 1 initial call + 3 default retries
+		.expect(1 + default_retries_count)
 		.create_async()
 		.await;
 

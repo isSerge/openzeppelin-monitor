@@ -1,10 +1,13 @@
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, TriggerType},
 	services::notification::{NotificationError, NotificationService, Notifier, TelegramNotifier},
-	utils::tests::{
-		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-		get_http_client_from_notification_pool,
-		trigger::TriggerBuilder,
+	utils::{
+		tests::{
+			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+			get_http_client_from_notification_pool,
+			trigger::TriggerBuilder,
+		},
+		HttpRetryConfig,
 	},
 };
 use serde_json::json;
@@ -83,10 +86,11 @@ async fn test_telegram_notification_success() {
 async fn test_telegram_notification_failure_retryable_error() {
 	// Setup async mock server to simulate failure
 	let mut server = mockito::Server::new_async().await;
+	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 	let mock = server
 		.mock("POST", "/bottest_token/sendMessage")
 		.with_status(500)
-		.expect(4) // 1 initial call + 3 default retries
+		.expect(1 + default_retries_count)
 		.with_body("Internal Server Error")
 		.create_async()
 		.await;
