@@ -257,4 +257,117 @@ mod tests {
 			"Default pool should have one active HTTP client"
 		);
 	}
+
+	#[tokio::test]
+	async fn test_pool_returns_different_http_clients_for_different_configs() {
+		let pool = create_pool();
+
+		// Config 1 (default)
+		let retry_config_1 = HttpRetryConfig::default();
+
+		// Config 2 (different retry count)
+		let mut retry_config_2 = HttpRetryConfig::default();
+		retry_config_2.max_retries = 5;
+
+		// Get a client for each config
+		let client1 = pool
+			.get_or_create_http_client(&retry_config_1)
+			.await
+			.unwrap();
+		let client2 = pool
+			.get_or_create_http_client(&retry_config_2)
+			.await
+			.unwrap();
+
+		// Pointers should NOT be equal, as they are different clients
+		assert!(
+			!Arc::ptr_eq(&client1, &client2),
+			"Should return different client instances for different configurations"
+		);
+
+		// The pool should now contain two distinct clients
+		assert_eq!(
+			pool.get_active_http_client_count().await,
+			2,
+			"Pool should have two active HTTP clients"
+		);
+
+		// Getting the first client again should return the original one
+		let client1_again = pool
+			.get_or_create_http_client(&retry_config_1)
+			.await
+			.unwrap();
+		assert!(
+			Arc::ptr_eq(&client1, &client1_again),
+			"Should return the same client instance when called again with the same config"
+		);
+
+		// Pool size should still be 2
+		assert_eq!(
+			pool.get_active_http_client_count().await,
+			2,
+			"Pool should still have two active HTTP clients after getting an existing one"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_pool_returns_different_smtp_clients_for_different_configs() {
+		let pool = create_pool();
+
+		// Config 1 (default)
+		let smtp_config_1 = SmtpConfig {
+			host: "smtp.example.com".to_string(),
+			port: 587,
+			username: "user1".to_string(),
+			password: "pass1".to_string(),
+		};
+
+		// Config 2 (different credentials)
+		let smtp_config_2 = SmtpConfig {
+			host: "smtp.example.com".to_string(),
+			port: 587,
+			username: "user2".to_string(),
+			password: "pass2".to_string(),
+		};
+
+		// Get a client for each config
+		let client1 = pool
+			.get_or_create_smtp_client(&smtp_config_1)
+			.await
+			.unwrap();
+		let client2 = pool
+			.get_or_create_smtp_client(&smtp_config_2)
+			.await
+			.unwrap();
+
+		// Pointers should NOT be equal, as they are different clients
+		assert!(
+			!Arc::ptr_eq(&client1, &client2),
+			"Should return different client instances for different configurations"
+		);
+
+		// The pool should now contain two distinct clients
+		assert_eq!(
+			pool.get_active_smtp_client_count().await,
+			2,
+			"Pool should have two active SMTP clients"
+		);
+
+		// Getting the first client again should return the original one
+		let client1_again = pool
+			.get_or_create_smtp_client(&smtp_config_1)
+			.await
+			.unwrap();
+		
+		assert!(
+			Arc::ptr_eq(&client1, &client1_again),
+			"Should return the same client instance when called again with the same config"
+		);
+
+		assert_eq!(
+			pool.get_active_smtp_client_count().await,
+			2,
+			"Pool should still have two active SMTP clients after getting an existing one"
+		);
+	}
 }
