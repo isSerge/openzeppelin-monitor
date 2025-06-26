@@ -138,7 +138,7 @@ impl NotificationService {
 					.await
 					.map_err(|e| {
 						NotificationError::execution_error(
-							"Failed to get HTTP client from pool".to_string(),
+							"Failed to get or create HTTP client from pool".to_string(),
 							Some(e.into()),
 							None,
 						)
