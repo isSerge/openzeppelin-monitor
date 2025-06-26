@@ -125,7 +125,7 @@ impl NotificationService {
 				// Extract retry policy from the trigger configuration
 				let retry_policy = trigger.config.get_retry_policy().ok_or_else(|| {
 					NotificationError::config_error(
-						"Could not find retry policy for trigger",
+						format!("Expected retry policy in trigger config: {}", trigger.name),
 						None,
 						None,
 					)
@@ -345,7 +345,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Could not find retry policy for trigger"));
+					.contains("Expected retry policy in trigger config"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -403,7 +403,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Could not find retry policy for trigger"));
+					.contains("Expected retry policy in trigger config"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -433,7 +433,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Could not find retry policy for trigger"));
+					.contains("Expected retry policy in trigger config"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -463,7 +463,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Could not find retry policy for trigger"));
+					.contains("Expected retry policy in trigger config"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
