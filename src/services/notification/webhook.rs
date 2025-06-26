@@ -23,13 +23,6 @@ use crate::{
 /// HMAC SHA256 type alias
 type HmacSha256 = Hmac<Sha256>;
 
-/// Represents a webhook payload with additional fields
-#[derive(Serialize, Debug)]
-pub struct WebhookPayload {
-	#[serde(flatten)]
-	fields: HashMap<String, serde_json::Value>,
-}
-
 /// Represents a webhook configuration
 #[derive(Clone)]
 pub struct WebhookConfig {
@@ -312,16 +305,12 @@ impl Notifier for WebhookNotifier {
 			}
 		}
 
-		let payload = WebhookPayload {
-			fields: payload_fields,
-		};
-
 		// Send request with custom payload
 		let response = self
 			.client
 			.request(method, url.as_str())
 			.headers(headers)
-			.json(&payload)
+			.json(&payload_fields)
 			.send()
 			.await
 			.map_err(|e| {
