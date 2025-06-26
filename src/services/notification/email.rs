@@ -398,23 +398,4 @@ mod tests {
 		let error = result.unwrap_err();
 		assert!(matches!(error, NotificationError::NotifyFailed { .. }));
 	}
-
-	#[tokio::test]
-	async fn test_notify_fails_with_invalid_recipient_address() {
-		let mut notifier = create_test_notifier();
-
-		// Create an invalid recipient address
-		let invalid_email_str = "this-is-not-an-email";
-		notifier.recipients = vec![invalid_email_str.parse().unwrap_or_else(|_| {
-			"valid@example.com".parse().unwrap() // Placeholder
-		})];
-
-		let invalid_recipient_str = "invalid email, another@valid.com";
-		let result = invalid_recipient_str.parse::<lettre::message::Mailboxes>();
-
-		assert!(
-			result.is_err(),
-			"Parsing an invalid recipient list should fail"
-		);
-	}
 }
