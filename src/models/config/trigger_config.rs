@@ -295,6 +295,7 @@ impl ConfigLoader for Trigger {
 					message,
 					sender,
 					recipients,
+					retry_policy: _,
 				} = &self.config
 				{
 					// Validate host

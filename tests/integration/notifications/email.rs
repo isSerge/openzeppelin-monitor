@@ -14,9 +14,12 @@ use openzeppelin_monitor::{
 	services::notification::{
 		EmailContent, EmailNotifier, NotificationError, NotificationService, Notifier, SmtpConfig,
 	},
-	utils::tests::{
-		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-		trigger::TriggerBuilder,
+	utils::{
+		tests::{
+			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+			trigger::TriggerBuilder,
+		},
+		HttpRetryConfig,
 	},
 };
 
@@ -136,6 +139,7 @@ async fn test_notification_service_email_execution_failure() {
 		},
 		sender: "sender@example.com".parse().unwrap(),
 		recipients: vec!["recipient@example.com".parse().unwrap()],
+		retry_policy: HttpRetryConfig::default(),
 	};
 
 	let trigger = TriggerBuilder::new()

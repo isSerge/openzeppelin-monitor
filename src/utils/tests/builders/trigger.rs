@@ -187,6 +187,7 @@ impl TriggerBuilder {
 				.into_iter()
 				.map(EmailAddress::new_unchecked)
 				.collect(),
+			retry_policy: HttpRetryConfig::default(),
 		};
 		self
 	}

@@ -79,6 +79,9 @@ pub enum TriggerTypeConfig {
 		sender: EmailAddress,
 		/// Email recipients
 		recipients: Vec<EmailAddress>,
+		/// Retry policy for SMTP requests
+		#[serde(default)]
+		retry_policy: HttpRetryConfig,
 	},
 	/// Webhook configuration
 	Webhook {

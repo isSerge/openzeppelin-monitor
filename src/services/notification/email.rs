@@ -233,6 +233,7 @@ mod tests {
 	use crate::{
 		models::{NotificationMessage, SecretString, SecretValue},
 		services::notification::pool::NotificationClientPool,
+		utils::HttpRetryConfig,
 	};
 
 	use super::*;
@@ -273,6 +274,7 @@ mod tests {
 			},
 			sender: "sender@test.com".parse().unwrap(),
 			recipients: vec!["recipient@test.com".parse().unwrap()],
+			retry_policy: HttpRetryConfig::default(),
 		}
 	}
 

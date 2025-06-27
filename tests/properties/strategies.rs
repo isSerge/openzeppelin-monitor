@@ -131,6 +131,7 @@ pub fn trigger_strategy() -> impl Strategy<Value = Trigger> {
 							message,
 							sender,
 							recipients,
+							retry_policy: HttpRetryConfig::default(),
 						}
 					}
 				)
