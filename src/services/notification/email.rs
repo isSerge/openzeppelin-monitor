@@ -10,13 +10,16 @@ use lettre::{
 		header::{self, ContentType},
 		Mailbox, Mailboxes,
 	},
+	transport::smtp::Error as SmtpError,
 	Message, SmtpTransport, Transport,
 };
-use std::{collections::HashMap, sync::Arc};
+use rand::{rng, Rng};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
 	models::TriggerTypeConfig,
 	services::notification::{NotificationError, Notifier},
+	utils::{HttpRetryConfig, JitterSetting},
 };
 use pulldown_cmark::{html, Options, Parser};
 
@@ -28,11 +31,13 @@ pub struct EmailNotifier<T: Transport + Send + Sync> {
 	/// Message template with variable placeholders
 	body_template: String,
 	/// SMTP client for email delivery
-	client: T,
+	client: Arc<T>,
 	/// Email sender
 	sender: EmailAddress,
 	/// Email recipients
 	recipients: Vec<EmailAddress>,
+	/// Retry policy for SMTP requests
+	retry_policy: HttpRetryConfig,
 }
 
 /// Configuration for SMTP connection
@@ -62,16 +67,22 @@ where
 	/// # Arguments
 	/// * `email_content` - Email content configuration
 	/// * `transport` - SMTP transport
+	/// * `retry_policy` - Retry policy for SMTP requests
 	///
 	/// # Returns
 	/// * `Self` - Email notifier instance
-	pub fn with_transport(email_content: EmailContent, transport: T) -> Self {
+	pub fn with_transport(
+		email_content: EmailContent,
+		transport: T,
+		retry_policy: HttpRetryConfig,
+	) -> Self {
 		Self {
 			subject: email_content.subject,
 			body_template: email_content.body_template,
 			sender: email_content.sender,
 			recipients: email_content.recipients,
-			client: transport,
+			client: Arc::new(transport),
+			retry_policy,
 		}
 	}
 }
@@ -88,13 +99,15 @@ impl EmailNotifier<SmtpTransport> {
 	pub fn new(
 		smtp_client: Arc<SmtpTransport>,
 		email_content: EmailContent,
+		retry_policy: HttpRetryConfig,
 	) -> Result<Self, NotificationError> {
 		Ok(Self {
 			subject: email_content.subject,
 			body_template: email_content.body_template,
 			sender: email_content.sender,
 			recipients: email_content.recipients,
-			client: smtp_client.as_ref().clone(),
+			client: smtp_client,
+			retry_policy,
 		})
 	}
 
@@ -141,6 +154,7 @@ impl EmailNotifier<SmtpTransport> {
 			message,
 			sender,
 			recipients,
+			retry_policy,
 			..
 		} = config
 		{
@@ -151,7 +165,7 @@ impl EmailNotifier<SmtpTransport> {
 				recipients: recipients.clone(),
 			};
 
-			Self::new(smtp_client, email_content)
+			Self::new(smtp_client, email_content, retry_policy.clone())
 		} else {
 			Err(NotificationError::config_error(
 				format!("Invalid email configuration: {:?}", config),
@@ -163,9 +177,10 @@ impl EmailNotifier<SmtpTransport> {
 }
 
 #[async_trait]
-impl<T: Transport + Send + Sync> Notifier for EmailNotifier<T>
+impl<T> Notifier for EmailNotifier<T>
 where
-	T::Error: std::fmt::Display,
+	T: Transport<Error = SmtpError> + Clone + Send + Sync + 'static,
+	T::Ok: Send,
 {
 	/// Sends a formatted message to email
 	///
@@ -218,11 +233,68 @@ where
 				)
 			})?;
 
-		self.client.send(&email).map_err(|e| {
-			NotificationError::notify_failed(format!("Failed to send email: {}", e), None, None)
-		})?;
+		let mut last_error: Option<NotificationError> = None;
+		let mut current_backoff = self.retry_policy.initial_backoff;
 
-		Ok(())
+		for attempt in 0..=self.retry_policy.max_retries {
+			if attempt > 0 {
+				// Apply jitter before sleeping
+				let jitter = match self.retry_policy.jitter {
+					JitterSetting::None => Duration::from_secs(0),
+					JitterSetting::Full => {
+						let jitter_fraction = rng().random_range(0.0..=0.1); // e.g., up to 10%
+						current_backoff.mul_f64(jitter_fraction)
+					}
+				};
+
+				// Sleep for the current backoff duration plus jitter
+				tokio::time::sleep(current_backoff + jitter).await;
+
+				// Increase backoff for the *next* retry
+				current_backoff = (current_backoff * self.retry_policy.base_for_backoff)
+					.min(self.retry_policy.max_backoff);
+			}
+
+			let client = self.client.clone();
+			let email_clone = email.clone();
+
+			// spawn_blocking is needed because `lettre`'s send is synchronous.
+			let result = tokio::task::spawn_blocking(move || client.send(&email_clone)).await;
+
+			match result {
+				Ok(send_result) => match send_result {
+					Ok(_) => return Ok(()),
+					Err(e) => {
+						let is_permanent = &e.is_permanent(); // capture both timeouts and other transient errors
+						let err_msg =
+							format!("Failed to send email on attempt {}: {}", attempt + 1, e);
+						last_error = Some(NotificationError::notify_failed(
+							err_msg,
+							Some(Box::new(e)),
+							None,
+						));
+						if *is_permanent {
+							break; // Permanent error, stop retrying.
+						}
+					}
+				},
+				Err(e) => {
+					// Tokio task panic
+					let err_msg =
+						format!("Task execution failed on attempt {}: {}", attempt + 1, e);
+					last_error = Some(NotificationError::internal_error(
+						err_msg,
+						Some(Box::new(e)),
+						None,
+					));
+					break;
+				}
+			}
+		}
+
+		Err(last_error.unwrap_or_else(|| {
+			NotificationError::notify_failed("Email sending failed after all retries.", None, None)
+		}))
 	}
 }
 
@@ -259,7 +331,7 @@ mod tests {
 			recipients: vec!["recipient@test.com".parse().unwrap()],
 		};
 
-		EmailNotifier::new(Arc::new(client), email_content).unwrap()
+		EmailNotifier::new(Arc::new(client), email_content, HttpRetryConfig::default()).unwrap()
 	}
 
 	fn create_test_email_config(port: Option<u16>) -> TriggerTypeConfig {
