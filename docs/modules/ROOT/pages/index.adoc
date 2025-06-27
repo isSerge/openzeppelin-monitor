@@ -5,153 +5,48 @@
 
 CAUTION: This software is in alpha stage. Use in production environments at your own risk.
 
+== Overview
+
 In the rapidly evolving world of blockchain technology, effective monitoring is crucial for ensuring security and performance. OpenZeppelin Monitor is a blockchain monitoring service that watches for specific on-chain activities and triggers notifications based on configurable conditions. The service offers multi-chain support with configurable monitoring schedules, flexible trigger conditions, and an extensible architecture for adding new chains.
 
-**Features:**
+=== Key Capabilities
 
-- Multi-chain support
-- Configurable monitoring schedules
-- Flexible trigger conditions
-- Extensible architecture for adding new chains
+* **Real-time Monitoring**: Watch blockchain networks in real-time for specific events and transactions
+* **Smart Filtering**: Use flexible expressions to define exactly what you want to monitor
+* **Multi-notification Support**: Send alerts via Slack, Discord, Email, Telegram, Webhooks, or custom scripts
+* **Configurable Scheduling**: Set custom monitoring schedules using cron expressions
+* **Data Persistence**: Store monitoring data and resume from checkpoints
+* **Extensible Architecture**: Easy to add support for new blockchains and notification types
 
-**Supported Networks (OOTB):**
+=== Supported Networks
 
-- EVM
-- Stellar
+- **EVM-Compatible Networks**
+- **Stellar**
 
-**Supported Triggers (OOTB):**
+=== Notification Channels
 
-- Slack notifications
-- Email notifications
-- Discord notifications
-- Telegram notifications
-- Webhook notifications
-- Script notifications
+- **Slack** - Send formatted messages to Slack channels
+- **Discord** - Post alerts to Discord channels via webhooks
+- **Email** - Send email notifications with SMTP support
+- **Telegram** - Send messages to Telegram chats via bot API
+- **Webhooks** - Send HTTP requests to custom endpoints
+- **Custom Scripts** - Execute Python, JavaScript, or Bash scripts
 
 [NOTE]
 ====
 To get started immediately, see xref:quickstart.adoc[Quickstart].
 ====
 
-== Technical Overview
-
-[mermaid,width=100%]
-....
-%%{init: {
-    'theme': 'base',
-    'themeVariables': {
-        'background': '#ffffff',
-        'mainBkg': '#ffffff',
-        'primaryBorderColor': '#cccccc'
-    }
-}}%%
-graph TD
-    subgraph Blockchain Networks
-        ETH[Ethereum RPC]
-        POL[Polygon RPC]
-        BSC[BSC RPC]
-    end
-
-    subgraph Block Processing
-        BW[BlockWatcherService]
-        BS[(BlockStorage)]
-        JS[JobScheduler]
-    end
-
-    subgraph Client Layer
-        BC[BlockchainClient]
-        EVM[EVMClient]
-        STL[StellarClient]
-    end
-
-    subgraph Processing Pipeline
-        FS[FilterService]
-        TS[TriggerService]
-        NS[NotificationService]
-    end
-
-    subgraph Notifications
-        Slack
-        Email
-        Discord
-        Telegram
-        Webhook
-        Script
-    end
-
-    %% Block Processing Flow
-    JS -->|Schedule Block Fetch| BW
-    BW -->|Store Last Block| BS
-    BW -->|Read Last Block| BS
-    BW -->|Get New Blocks| BC
-
-    %% Client Connections
-    BC --> EVM
-    BC --> STL
-    EVM -->|RPC Calls| ETH
-    EVM -->|RPC Calls| POL
-    EVM -->|RPC Calls| BSC
-
-    %% Processing Flow
-    BW -->|New Block| FS
-    FS -->|Matches| TS
-    TS -->|Execute| NS
-    NS --> Slack
-    NS --> Email
-    NS --> Discord
-    NS --> Telegram
-    NS --> Webhook
-    NS --> Script
-
-    style STL fill:#f0f0f0
-
-    classDef rpc fill:#e1f5fe,stroke:#01579b
-    classDef storage fill:#fff3e0,stroke:#ef6c00
-    classDef service fill:#e8f5e9,stroke:#2e7d32
-    classDef notification fill:#f3e5f5,stroke:#7b1fa2
-
-    class ETH,POL,BSC rpc
-    class BS storage
-    class BW,FS,TS,NS service
-    class Slack,Email,Discord,Telegram,Webhook,Script notification
-....
-
-== Project Structure
-
-The project follows a standard Rust project layout:
-
-```
-openzeppelin-monitor/
-├── src/                # Source code
-│   ├── bootstrap/      # Bootstrap functions for the application
-│   ├── models/         # Data structures and types
-│   ├── repositories/   # Configuration storage
-│   ├── services/       # Core business logic
-│   ├── utils/          # Helper functions
-│
-├── config/             # Configuration files
-├── tests/              # Integration and property-based tests
-├── data/               # Runtime data storage
-├── docs/               # Documentation
-├── scripts/            # Utility scripts
-├── cmd/                # Metrics and monitoring
-├── examples/           # Example configuration files
-└── ... other root files (Cargo.toml, README.md, etc.)
-```
-
-For detailed information about each directory and its contents, see xref:structure.adoc[Project Structure Details].
-
-== Getting Started
+== Installation
 
 === Prerequisites
 
-* Rust 2021 edition
-* Docker (optional, for containerized deployment)
+* **Rust** 2021 edition or later
+* **Docker** (optional, for containerized deployment)
 
-== Installation
+=== Local Installation
 
-=== Run Locally
-. Clone the repository:
+. **Clone the repository:**
 +
 [source,bash]
 ----
@@ -159,21 +54,28 @@ git clone https://github.com/openzeppelin/openzeppelin-monitor
 cd openzeppelin-monitor
 ----
 
-. Install dependencies:
+. **Build the application:**
 +
 [source,bash]
 ----
 cargo build --release
 ----
 
-. Move the binary to the project root (so that it can access the `./config` folder)
+. **Move binary to project root:**
 +
 [source,bash]
 ----
 mv ./target/release/openzeppelin-monitor .
 ----
 
-. View available options:
+. **Verify installation:**
++
+[source,bash]
+----
+./openzeppelin-monitor --help
+----
+
+. **View available options:**
 +
 [source,bash]
 ----
@@ -189,22 +91,30 @@ mv ./target/release/openzeppelin-monitor .
 ./openzeppelin-monitor --check
 ----
 
-=== Run with Docker
+=== Docker Installation
 
-==== Basic Setup
+. **Clone the repository:**
++
+[source,bash]
+----
+git clone https://github.com/openzeppelin/openzeppelin-monitor
+cd openzeppelin-monitor
+----
 
-. Start the services using the make target:
+. **Set up environment:**
++
+[source,bash]
+----
+cp .env.example .env
+# Edit .env file with your configuration
+----
+
+. **Start with Docker Compose:**
 +
 [source,bash]
 ----
 cargo make docker-compose-up
 ----
-
-[NOTE]
-====
-By default, Docker Compose uses `Dockerfile.development`. To use production settings, set:
-`DOCKERFILE=Dockerfile.production` before running the command.
-====
 
 ==== Metrics Configuration
 
@@ -221,40 +131,11 @@ docker compose up -d
 docker compose --profile metrics up -d
 ----
 
-You can access the monitoring interfaces through your browser:
+To view prometheus metrics in a UI, you can use `http://localhost:9090` on your browser.
 
-* Prometheus UI: `http://localhost:9090`
-* Grafana Dashboard: `http://localhost:3000`
+To view grafana dashboard, you can use `http://localhost:3000` on your browser.
 
-Grafana comes pre-configured with default dashboards and metrics visualizations.
-
-==== Management Commands
-
-. Verify container status:
-+
-[source,bash]
-----
-docker ps -a
-----
-
-. Stop services:
-+
-[source,bash]
-----
-cargo make docker-compose-down
-# or using docker compose directly:
-# without metrics profile
-docker compose down
-# or with metrics profile
-docker compose --profile metrics down
-----
-
-. View logs (stdout):
-+
-[source,bash]
-----
-docker compose logs -f
-----
+By default, predefined metrics within a dashboard is populated in grafana.
 
 === Configuration Guidelines
 
@@ -300,7 +181,6 @@ docker compose logs -f
   "triggers": ["large_transfer_slack"],
   ...
 }
-
 
 ----
 
@@ -549,7 +429,6 @@ This table lists the environment variables and their default values.
 | `<string>`
 | Hashicorp Cloud Vault application name for secret management.
 |===
-
 * Copy and configure some example files:
 
 [source,bash]
@@ -570,29 +449,58 @@ cp examples/config/triggers/email_notifications.json config/triggers/email_notif
 cp examples/config/filters/evm_filter_block_number.sh config/filters/evm_filter_block_number.sh
 cp examples/config/filters/stellar_filter_block_number.sh config/filters/stellar_filter_block_number.sh
 ----
-
 === Command Line Options
 
 The monitor supports several command-line options for configuration and control:
 
 [cols="1,1,2", options="header"]
 |===
-| Option | Default | Description
-| `--log-file` | `false` | Write logs to file instead of stdout
-| `--log-level` | `info` | Set log level (trace, debug, info, warn, error)
-| `--log-path` | `logs/` | Path to store log files
-| `--log-max-size` | `1GB` | Maximum log file size before rolling
-| `--metrics-address` | `127.0.0.1:8081` | Address to start the metrics server on
-| `--metrics` | `false` | Enable metrics server
-| `--monitor-path` | - | Path to the monitor to execute (for testing)
-| `--network` | - | Network to execute the monitor for (for testing)
-| `--block` | - | Block number to execute the monitor for (for testing)
-| `--check` | `false` | Validate configuration files without starting the service
+| *Option* | *Default* | *Description*
+
+| `*--log-file*`
+| `false`
+| Write logs to file instead of stdout
+
+| `*--log-level*`
+| `info`
+| Set log level (trace, debug, info, warn, error)
+
+| `*--log-path*`
+| `logs/`
+| Path to store log files
+
+| `*--log-max-size*`
+| `1GB`
+| Maximum log file size before rolling
+
+| `*--metrics-address*`
+| `127.0.0.1:8081`
+| Address to start the metrics server on
+
+| `*--metrics*`
+| `false`
+| Enable metrics server
+
+| `*--monitor-path*`
+| -
+| Path to the monitor to execute (for testing)
+
+| `*--network*`
+| -
+| Network to execute the monitor for (for testing)
+
+| `*--block*`
+| -
+| Block number to execute the monitor for (for testing)
+
+| `*--check*`
+| `false`
+| Validate configuration files without starting the service
 |===
 
 == Data Storage Configuration
 
-The monitor uses file-based storage by default, with an extensible interface (`BlockStorage`) for custom storage implementations.
+The monitor uses file-based storage by default.
 
 === File Storage
 
@@ -641,53 +549,53 @@ A Network configuration defines connection details and operational parameters fo
 
 ==== Available Fields
 
-[cols="1,1,2"]
+[cols="1,1,2", options="header"]
 |===
-|Field |Type |Description
+| *Field* | *Type* | *Description*
 
-|network_type
-|String
-|Type of blockchain ("EVM" or "Stellar")
+| `*network_type*`
+| `String`
+| Type of blockchain (*"EVM"* or *"Stellar"*)
 
-|slug
-|String
-|**Unique** identifier for the network
+| `*slug*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* identifier for the network
 
-|name
-|String
-|**Unique** Human-readable network name
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* Human-readable network name
 
-|rpc_urls
-|Array[Object]
-|List of RPC endpoints with weights for load balancing
+| `*rpc_urls*`
+| `Array[Object]`
+| List of RPC endpoints with weights for load balancing
 
-|chain_id
-|Number
-|Network chain ID (EVM only)
+| `*chain_id*`
+| `Number`
+| Network chain ID (*EVM only*)
 
-|network_passphrase
-|String
-|Network identifier (Stellar only)
+| `*network_passphrase*`
+| `String`
+| Network identifier (*Stellar only*)
 
-|block_time_ms
-|Number
-|Average block time in milliseconds
+| `*block_time_ms*`
+| `Number`
+| Average block time in milliseconds
 
-|confirmation_blocks
-|Number
-|Number of blocks to wait for confirmation
+| `*confirmation_blocks*`
+| `Number`
+| Number of blocks to wait for confirmation
 
-|cron_schedule
-|String
-|Monitor scheduling in cron format
+| `*cron_schedule*`
+| `String`
+| Monitor scheduling in cron format
 
-|max_past_blocks
-|Number
-|Maximum number of past blocks to process
+| `*max_past_blocks*`
+| `Number`
+| Maximum number of past blocks to process
 
-|store_blocks
-|Boolean
-|Whether to store processed blocks (defaults output to `./data/` directory)
+| `*store_blocks*`
+| `Boolean`
+| Whether to store processed blocks (defaults output to `./data/` directory)
 |===
 
 ==== Important Considerations
@@ -751,33 +659,33 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 ----
 
 ===== Slack Notification Fields
-[cols="1,1,2"]
+[cols="1,1,2", options="header"]
 |===
-|Field |Type |Description
+| *Field* | *Type* | *Description*
 
-|name
-|String
-|**Unique** Human-readable name for the notification
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* Human-readable name for the notification
 
-|trigger_type
-|String
-|Must be "slack" for Slack notifications
+| `*trigger_type*`
+| `String`
+| Must be *"slack"* for Slack notifications
 
-|config.slack_url.type
-|String
-|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+| `*config.slack_url.type*`
+| `String`
+| Secret type (*"Plain"*, *"Environment"*, or *"HashicorpCloudVault"*)
 
-|config.slack_url.value
-|String
-|Secret value (URL, environment variable name, or vault secret name)
+| `*config.slack_url.value*`
+| `String`
+| Secret value (URL, environment variable name, or vault secret name)
 
-|config.message.title
-|String
-|Title that appears in the Slack message
+| `*config.message.title*`
+| `String`
+| Title that appears in the Slack message
 
-|config.message.body
-|String
-|Message template with variable substitution
+| `*config.message.body*`
+| `String`
+| Message template with variable substitution
 |===
 
 ===== Email Notifications
@@ -804,57 +712,57 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 ----
 
 ===== Email Notification Fields
-[cols="1,2,3"]
+[cols="1,2,3", options="header"]
 |===
-|Field |Type |Description
+| *Field* | *Type* | *Description*
 
-|name
-|String
-|**Unique** Human-readable name for the notification
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* Human-readable name for the notification
 
-|trigger_type
-|String
-|Must be "email" for email notifications
+| `*trigger_type*`
+| `String`
+| Must be *"email"* for email notifications
 
-|config.host
-|String
-|SMTP server hostname
+| `*config.host*`
+| `String`
+| SMTP server hostname
 
-|config.port
-|Number
-|SMTP port (defaults to 465)
+| `*config.port*`
+| `Number`
+| SMTP port (defaults to *465*)
 
-|config.username.type
-|String
-|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+| `*config.username.type*`
+| `String`
+| Secret type (*"Plain"*, *"Environment"*, or *"HashicorpCloudVault"*)
 
-|config.username.value
-|String
-|Secret value (username, environment variable name, or vault secret name)
+| `*config.username.value*`
+| `String`
+| Secret value (username, environment variable name, or vault secret name)
 
-|config.password.type
-|String
-|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+| `*config.password.type*`
+| `String`
+| Secret type (*"Plain"*, *"Environment"*, or *"HashicorpCloudVault"*)
 
-|config.password.value
-|String
-|Secret value (password, environment variable name, or vault secret name)
+| `*config.password.value*`
+| `String`
+| Secret value (password, environment variable name, or vault secret name)
 
-|config.message.title
-|String
-|Email subject line
+| `*config.message.title*`
+| `String`
+| Email subject line
 
-|config.message.body
-|String
-|Email body template with variable substitution
+| `*config.message.body*`
+| `String`
+| Email body template with variable substitution
 
-|config.sender
-|String
-|Sender email address
+| `*config.sender*`
+| `String`
+| Sender email address
 
-|config.recipients
-|Array[String]
-|List of recipient email addresses
+| `*config.recipients*`
+| `Array[String]`
+| List of recipient email addresses
 |===
 
 ===== Webhook Notifications
@@ -881,49 +789,49 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 ----
 
 ===== Webhook Notification Fields
-[cols="1,2,3"]
+[cols="1,2,3", options="header"]
 |===
-|Field |Type |Description
+| *Field* | *Type* | *Description*
 
-|name
-|String
-|**Unique** Human-readable name for the notification
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* Human-readable name for the notification
 
-|trigger_type
-|String
-|Must be "webhook" for webhook notifications
+| `*trigger_type*`
+| `String`
+| Must be *"webhook"* for webhook notifications
 
-|config.url.type
-|String
-|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+| `*config.url.type*`
+| `String`
+| Secret type (*"Plain"*, *"Environment"*, or *"HashicorpCloudVault"*)
 
-|config.url.value
-|String
-|Secret value (URL, environment variable name, or vault secret name)
+| `*config.url.value*`
+| `String`
+| Secret value (URL, environment variable name, or vault secret name)
 
-|config.method
-|String
-|HTTP method (POST, GET, etc.) defaults to POST
+| `*config.method*`
+| `String`
+| HTTP method (POST, GET, etc.) defaults to POST
 
-|config.secret.type
-|String
-|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+| `*config.secret.type*`
+| `String`
+| Secret type (*"Plain"*, *"Environment"*, or *"HashicorpCloudVault"*)
 
-|config.secret.value
-|String
-|Secret value (HMAC secret, environment variable name, or vault secret name)
+| `*config.secret.value*`
+| `String`
+| Secret value (HMAC secret, environment variable name, or vault secret name)
 
-|config.headers
-|Object
-|Headers to include in the webhook request
+| `*config.headers*`
+| `Object`
+| Headers to include in the webhook request
 
-|config.message.title
-|String
-|Title that appears in the webhook message
+| `*config.message.title*`
+| `String`
+| Title that appears in the webhook message
 
-|config.message.body
-|String
-|Message template with variable substitution
+| `*config.message.body*`
+| `String`
+| Message template with variable substitution
 |===
 
 ===== Discord Notifications
@@ -942,33 +850,33 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 ----
 
 ===== Discord Notification Fields
-[cols="1,2,3"]
+[cols="1,2,3", options="header"]
 |===
-|Field |Type |Description
+| *Field* | *Type* | *Description*
 
-|name
-|String
-|**Unique** Human-readable name for the notification
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* Human-readable name for the notification
 
-|trigger_type
-|String
-|Must be "discord" for Discord notifications
+| `*trigger_type*`
+| `String`
+| Must be *"discord"* for Discord notifications
 
-|config.discord_url.type
-|String
-|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+| `*config.discord_url.type*`
+| `String`
+| Secret type (*"Plain"*, *"Environment"*, or *"HashicorpCloudVault"*)
 
-|config.discord_url.value
-|String
-|Secret value (URL, environment variable name, or vault secret name)
+| `*config.discord_url.value*`
+| `String`
+| Secret value (URL, environment variable name, or vault secret name)
 
-|config.message.title
-|String
-|Title that appears in the Discord message
+| `*config.message.title*`
+| `String`
+| Title that appears in the Discord message
 
-|config.message.body
-|String
-|Message template with variable substitution
+| `*config.message.body*`
+| `String`
+| Message template with variable substitution
 |===
 
 ===== Telegram Notifications
@@ -988,41 +896,41 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 ----
 
 ===== Telegram Notification Fields
-[cols="1,2,3"]
+[cols="1,2,3", options="header"]
 |===
-|Field |Type |Description
+| *Field* | *Type* | *Description*
 
-|name
-|String
-|**Unique** Human-readable name for the notification
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* Human-readable name for the notification
 
-|trigger_type
-|String
-|Must be "telegram" for Telegram notifications
+| `*trigger_type*`
+| `String`
+| Must be *"telegram"* for Telegram notifications
 
-|config.token.type
-|String
-|Secret type ("Plain", "Environment", or "HashicorpCloudVault")
+| `*config.token.type*`
+| `String`
+| Secret type (*"Plain"*, *"Environment"*, or *"HashicorpCloudVault"*)
 
-|config.token.value
-|String
-|Secret value (bot token, environment variable name, or vault secret name)
+| `*config.token.value*`
+| `String`
+| Secret value (bot token, environment variable name, or vault secret name)
 
-|config.chat_id
-|String
-|Telegram chat ID
+| `*config.chat_id*`
+| `String`
+| Telegram chat ID
 
-|config.disable_web_preview
-|Boolean
-|Whether to disable web preview in Telegram messages (defaults to false)
+| `*config.disable_web_preview*`
+| `Boolean`
+| Whether to disable web preview in Telegram messages (defaults to false)
 
-|config.message.title
-|String
-|Title that appears in the Telegram message
+| `*config.message.title*`
+| `String`
+| Title that appears in the Telegram message
 
-|config.message.body
-|String
-|Message template with variable substitution
+| `*config.message.body*`
+| `String`
+| Message template with variable substitution
 |===
 
 
@@ -1038,33 +946,33 @@ A Trigger defines actions to take when monitored conditions are met. Triggers ca
 ----
 
 ===== Script Notification Fields
-[cols="1,2,3"]
+[cols="1,2,3", options="header"]
 |===
-|Field |Type |Description
+| *Field* | *Type* | *Description*
 
-|name
-|String
-|**Unique** Human-readable name for the notification
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* Human-readable name for the notification
 
-|trigger_type
-|String
-|Must be "script" for Custom Script notifications
+| `*trigger_type*`
+| `String`
+| Must be *"script"* for Custom Script notifications
 
-|language
-|String
-|The language of the script
+| `*language*`
+| `String`
+| The language of the script
 
-|script_path
-|String
-|The path to the script
+| `*script_path*`
+| `String`
+| The path to the script
 
-|arguments
-|Array[String]
-|The arguments of the script (optional).
+| `*arguments*`
+| `Array[String]`
+| The arguments of the script (optional).
 
-|timeout_ms
-|Number
-|The timeout of the script is important to avoid infinite loops during the execution. If the script takes longer than the timeout, it will be killed.
+| `*timeout_ms*`
+| `Number`
+| The timeout of the script is important to avoid infinite loops during the execution. If the script takes longer than the timeout, it will be killed.
 |===
 
 
@@ -1080,56 +988,56 @@ For more information about custom scripts, see xref:scripts.adoc[Custom Scripts 
 The monitor uses a structured JSON format with nested objects for template variables. The data is flattened into dot notation for template use.
 
 ===== Common Variables
-[cols="1,2"]
+[cols="1,2", options="header"]
 |===
-|Variable |Description
+| *Variable* | *Description*
 
-|monitor.name
-|Name of the triggered monitor
+| `*monitor.name*`
+| Name of the triggered monitor
 
-|transaction.hash
-|Hash of the transaction
+| `*transaction.hash*`
+| Hash of the transaction
 
-|functions.[index].signature
-|Function signature
+| `*functions.[index].signature*`
+| Function signature
 
-|events.[index].signature
-|Event signature
+| `*events.[index].signature*`
+| Event signature
 |===
 
 ===== Network-Specific Variables
 
 ====== EVM Variables
-[cols="1,2"]
+[cols="1,2", options="header"]
 |===
-|Variable |Description
+| *Variable* | *Description*
 
-|transaction.from
-|Sender address
+| `*transaction.from*`
+| Sender address
 
-|transaction.to
-|Recipient address
+| `*transaction.to*`
+| Recipient address
 
-|transaction.value
-|Transaction value
+| `*transaction.value*`
+| Transaction value
 
-|events.[index].args.[param]
-|Event parameters by name
+| `*events.[index].args.[param]*`
+| Event parameters by name
 
-|functions.[index].args.[param]
-|Function parameters by name
+| `*functions.[index].args.[param]*`
+| Function parameters by name
 |===
 
 ====== Stellar Variables
-[cols="1,2"]
+[cols="1,2", options="header"]
 |===
-|Variable |Description
+| *Variable* | *Description*
 
-|events.[index].args.[position]
-|Event parameters by position
+| `*events.[index].args.[position]*`
+| Event parameters by position
 
-|functions.[index].args.[param]
-|Function parameters by name
+| `*functions.[index].args.[param]*`
+| Function parameters by name
 |===
 
 [NOTE]
@@ -1262,7 +1170,7 @@ A Monitor defines what blockchain activity to watch and what actions to take whe
     "events": [
       {
         "signature": "Transfer(address,address,uint256)",
-        "expression": "amount > 1000000"
+        "expression": "value > 1000000"
       }
     ],
     "transactions": [
@@ -1283,6 +1191,41 @@ A Monitor defines what blockchain activity to watch and what actions to take whe
   "triggers": ["evm_large_transfer_usdc_slack", "evm_large_transfer_usdc_email"]
 }
 ----
+
+==== Available Fields
+
+[cols="1,1,2", options="header"]
+|===
+| *Field* | *Type* | *Description*
+
+| `*name*`
+| `String`
+| [.underline]#*Required*# - *_Unique_* identifier for this monitor
+
+| `*networks*`
+| `Array[String]`
+| List of network slugs this monitor should watch
+
+| `*paused*`
+| `Boolean`
+| Whether this monitor is currently paused
+
+| `*addresses*`
+| `Array[Object]`
+| Contract addresses to monitor with optional ABIs
+
+| `*match_conditions*`
+| `Object`
+| Collection of conditions that can trigger the monitor
+
+| `*trigger_conditions*`
+| `Array[Object]`
+| Collection of filters to apply to monitor matches before executing triggers
+
+| `*triggers*`
+| `Array[String]`
+| IDs of triggers to execute when conditions match
+|===
 
 ==== Match Conditions
 
@@ -1312,7 +1255,7 @@ Match events emitted by monitored contracts:
   "events": [
     {
       "signature": "Transfer(address,address,uint256)",
-      "expression": "amount > 1000000"
+      "expression": "value > 1000000"
     }
   ]
 }
@@ -1334,118 +1277,83 @@ Match transaction properties. The available fields and expression syntax depend 
 ----
 
 ==== Available Transaction Fields (EVM)
-[cols="1,1,2"]
+[cols="1,1,2", options="header"]
 |===
-| Field | Type | Description
+| *Field* | *Type* | *Description*
 
-| value
-| uint256
+| `*value*`
+| `uint256`
 | Transaction value in wei
 
-| from
-| address
+| `*from*`
+| `address`
 | Sender address (case-insensitive comparison)
 
-| to
-| address
+| `*to*`
+| `address`
 | Recipient address (case-insensitive comparison)
 
-| hash
-| string
+| `*hash*`
+| `string`
 | Transaction hash
 
-| gas_price
-| uint256
+| `*gas_price*`
+| `uint256`
 | Gas price in wei (legacy transactions)
 
-| max_fee_per_gas
-| uint256
+| `*max_fee_per_gas*`
+| `uint256`
 | EIP-1559 maximum fee per gas
 
-| max_priority_fee_per_gas
-| uint256
+| `*max_priority_fee_per_gas*`
+| `uint256`
 | EIP-1559 priority fee
 
-| gas_limit
-| uint256
+| `*gas_limit*`
+| `uint256`
 | Gas limit for transaction
 
-| nonce
-| uint256
+| `*nonce*`
+| `uint256`
 | Sender nonce
 
-| input
-| string
-| Hex-encoded input data (e.g., "0xa9059cbb...")
+| `*input*`
+| `string`
+| Hex-encoded input data (e.g., *"0xa9059cbb..."*)
 
-| gas_used
-| uint256
+| `*gas_used*`
+| `uint256`
 | Actual gas used (from receipt)
 
-| transaction_index
-| uint64
+| `*transaction_index*`
+| `uint64`
 | Position in block
 |===
 
 ==== Available Transaction Fields (Stellar)
-[cols="1,1,2"]
+[cols="1,1,2", options="header"]
 |===
-| Field | Type | Description
+| *Field* | *Type* | *Description*
 
-| hash
-| string
+| `*hash*`
+| `string`
 | Transaction hash
 
-| ledger
-| i64
+| `*ledger*`
+| `i64`
 | Ledger sequence number where the transaction was included
 
-| value
-| i64
+| `*value*`
+| `i64`
 | Value associated with the *first* relevant operation (e.g., payment amount). Defaults to 0 if no relevant operation or value is found.
 
-| from
-| address
+| `*from*`
+| `address`
 | Source account address of the *first* relevant operation (e.g., payment sender). Case-insensitive comparison.
 
-| to
-| address
+| `*to*`
+| `address`
 | Destination account address of the *first* relevant operation (e.g., payment recipient or invoked contract). Case-insensitive comparison.
-|===
-
-==== Available Fields
-
-[cols="1,1,2"]
-|===
-|Field |Type |Description
-
-|name
-|String
-|**Unique** identifier for this monitor
-
-|networks
-|Array[String]
-|List of network slugs this monitor should watch
-
-|paused
-|Boolean
-|Whether this monitor is currently paused
-
-|addresses
-|Array[Object]
-|Contract addresses to monitor with optional ABIs
-
-|match_conditions
-|Object
-|Collection of conditions that can trigger the monitor
-
-|trigger_conditions
-|Array[Object]
-|Collection of filters to apply to monitor matches before executing triggers
-
-|triggers
-|Array[String]
-|IDs of triggers to execute when conditions match
 |===
 
 ==== Matching Rules
@@ -1467,42 +1375,42 @@ Expressions allow for condition checking of function arguments, event parameters
 |===
 | Type | Description | Example Operators | Notes
 
-| Numeric (uint/int variants)
+| `*Numeric (uint/int variants)*`
 | Integer values (e.g., `42`, `-100`) or decimal values (e.g., `3.14`, `-0.5`).
 | `>`, `>=`, `<`, `<=`, `==`, `!=`
 | Numbers must have digits before and after a decimal point if one is present (e.g., `.5` or `5.` are not valid standalone numbers).
 
-| Address
+| `*Address*`
 | Blockchain addresses.
 | `==`, `!=`
 | Comparisons (e.g., `from == '0xABC...'`) are typically case-insensitive regarding the hex characters of the address value itself.
 
-| String
+| `*String*`
 | Text values. Can be single-quoted (e.g., `'hello'`) or, on the right-hand side of a comparison, unquoted (e.g., `active`).
 | `==`, `!=`, `starts_with`, `ends_with`, `contains`
 | Quoted strings support `\'` to escape a single quote and `\\` to escape a backslash. All string comparison operations (e.g., `name == 'Alice'`, `description contains 'error'`) are performed case-insensitively during evaluation. See the dedicated "String Operations" section for more examples and details.
 
-| Boolean
+| `*Boolean*`
 | True or false values.
 | `==`, `!=`
 | Represented as `true` or `false`. These keywords are parsed case-insensitively (e.g., `TRUE`, `False` are also valid in expressions).
 
-| Hex String Literal
+| `*Hex String Literal*`
 | A string literal starting with `0x` or `0X` followed by hexadecimal characters (0-9, a-f, A-F).
 | `==`, `!=`, `starts_with`, `ends_with`, `contains`
 | Treated as a string for comparison purposes (e.g., `input_data starts_with '0xa9059cbb'`). Comparison is case-sensitive for the hex characters after `0x`.
 
-| Array (EVM/Stellar)
+| `*Array (EVM/Stellar)*`
 | Ordered list of items. For Stellar, often a JSON string in config (e.g., `'["a", {"id":1}]'`). For EVM, typically decoded from ABI parameters.
 | `contains`, `==`, `!=`, `[index]`
 | Detailed operations, including indexed access and behavior of `contains`, vary by network. See "Operations on Complex Types" below.
 
-| Object/Map (Stellar)
+| `*Object/Map (Stellar)*`
 | Key-value pairs, typically represented as a JSON string in config (e.g., `'{"key": "value", "id": 123}'`).
 | `.key_access`, `==`, `!=`
 | Supports dot notation for field access (e.g., `data.id`). See "Operations on Complex Types" for details.
 
-| Vec (Stellar)
+| `*Vec (Stellar)*`
 | Ordered list, where the parameter's value can be a CSV string (e.g., `"foo,bar"`) or a JSON array string (e.g., `'["foo","bar"]'`).
 | `contains`, `==`, `!=`
 | Behavior of `contains` and `==` differs based on whether the value is CSV or a JSON array string. See "Operations on Complex Types" for details.
@@ -1801,19 +1709,19 @@ For more information about custom scripts, see xref:scripts.adoc[Custom Scripts 
 |===
 |Field |Type |Description
 
-|script_path
+|`*script_path*`
 |String
 |The path to the script
 
-|language
+|`*language*`
 |String
 |The language of the script
 
-|arguments
+|`*arguments*`
 |Array[String]
 |The arguments of the script (optional).
 
-|timeout_ms
+|`*timeout_ms*`
 |Number
 |The timeout of the script is important to avoid infinite loops during the execution. If the script takes longer than the timeout, it will be killed and the match will be included by default.
 |===
@@ -1829,6 +1737,82 @@ For more information about custom scripts, see xref:scripts.adoc[Custom Scripts 
 * The monitoring frequency is controlled by the network's `cron_schedule`.
 * Each monitor can watch multiple networks and addresses simultaneously.
 * Monitors can be paused without removing their configuration.
+
+
+== Running the Monitor
+
+=== Local Execution
+
+. **Basic startup:**
++
+[source,bash]
+----
+./openzeppelin-monitor
+----
+
+. **With logging to file:**
++
+[source,bash]
+----
+./openzeppelin-monitor --log-file
+----
+
+. **With metrics enabled:**
++
+[source,bash]
+----
+./openzeppelin-monitor --metrics
+----
+
+. **Validate configuration without starting:**
++
+[source,bash]
+----
+./openzeppelin-monitor --check
+----
+
+=== Docker Execution
+
+. **Start all services:**
++
+[source,bash]
+----
+cargo make docker-compose-up
+----
+
+. **With metrics and monitoring (Prometheus + Grafana):**
++
+[source,bash]
+----
+# Set METRICS_ENABLED=true in .env file, then:
+docker compose --profile metrics up -d
+----
+
+. **View logs:**
++
+[source,bash]
+----
+docker compose logs -f monitor
+----
+
+. **Stop services:**
++
+[source,bash]
+----
+cargo make docker-compose-down
+----
+
+=== Command Line Options
+
+[cols="2,1,3", options="header"]
+|===
+| Option | Default | Description
+| `--log-file` | `false` | Write logs to file instead of stdout
+| `--log-level` | `info` | Set log level (trace, debug, info, warn, error)
+| `--metrics` | `false` | Enable metrics server on port 8081
+| `--check` | `false` | Validate configuration files only
+| `--help` | - | Show all available options
+|===
 
 === Testing your configuration
 
@@ -1914,89 +1898,6 @@ Specific Block Mode requires both parameters:
 * `--block`: The block number to process
 ====
 
-== Running the Monitor
-
-=== Local Execution
-
-[source,bash]
-----
-./openzeppelin-monitor
-----
-
-=== Docker Deployment
-
-The monitor can be run as either a development or production container using the corresponding Dockerfile (`Dockerfile.development` or `Dockerfile.production`).
-
-==== Environment Configuration
-
-* Copy .env.example to .env and change values according to your needs.
-
-==== Build Image and Run Containers
-
-You can build and run containers using single command:
-
-[source,bash]
-----
-cargo make docker-compose-up
-----
-
-[NOTE]
-====
-By default, Docker Compose uses `Dockerfile.development`. To use production settings, set:
-`DOCKERFILE=Dockerfile.production` before running the command.
-====
-
-==== Metrics Configuration
-
-The metrics server, Prometheus, and Grafana can be enabled by setting `METRICS_ENABLED=true` in your `.env` file.
-
-You can start services directly with Docker Compose:
-
-[source,bash]
-----
-# without metrics profile ( METRICS_ENABLED=false by default )
-docker compose up -d
-
-# With metrics enabled
-docker compose --profile metrics up -d
-----
-
-==== Management Commands
-
-. Verify container status:
-+
-[source,bash]
-----
-docker ps -a
-----
-
-. Stop services:
-+
-[source,bash]
-----
-cargo make docker-compose-down
-# or using docker compose directly:
-# without metrics profile
-docker compose down
-# or with metrics profile
-docker compose --profile metrics down
-----
-
-
-The build process will include:
-
-* The appropriate .env file
-* Configurations from the ./config folder
-
-To modify configurations without rebuilding:
-
-* Restart the container
-
-[source,bash]
-----
-docker compose restart monitor
-----
-
 ==== Data Persistence (Optional)
 
 * Set `LOG_MODE` as file will persist the log data in `logs/` on host. To change it to a different directory use `LOG_DATA_DIR`.
@@ -2033,36 +1934,11 @@ The monitor implements a comprehensive error handling system with rich context a
 ** Script modifications require monitor restart to take effect
 ** Supported languages are limited to Python, JavaScript, and Bash
 
-== Testing
-
-=== Running Tests
-
-[source,bash]
-----
-RUST_TEST_THREADS=1 cargo test
-RUST_TEST_THREADS=1 cargo test properties
-RUST_TEST_THREADS=1 cargo test integration
-----
-
-=== Coverage Reports
-
-Generate an HTML coverage report:
-
-[source,bash]
-----
-RUST_TEST_THREADS=1 cargo +stable llvm-cov --html --open
-----
-
-Generate a coverage report in the terminal:
-
-[source,bash]
-----
-RUST_TEST_THREADS=1 cargo +stable llvm-cov
-----
-
 == Support
 
 For support or inquiries, contact us on link:https://t.me/openzeppelin_tg/4[Telegram].
+
+Have feature requests or want to contribute? Join our community on link:https://github.com/OpenZeppelin/openzeppelin-monitor/[GitHub]
 
 == License
 This project is licensed under the GNU Affero General Public License v3.0 - see the LICENSE file for details.
