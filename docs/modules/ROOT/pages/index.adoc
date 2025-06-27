@@ -254,7 +254,7 @@ Default retry policy is using exponential backoff with the following parameters:
 |===
 | Parameter | Default Value | Description
 | `max_retries` | `3` | Maximum number of retries before giving up
-| `base_for_backoff` | `2` | Base duration for exponential backoff calculations
+| `base_for_backoff` | `2` | Base duration for exponential backoff calculations in seconds
 | `initial_backoff` | `250` | Initial backoff duration in milliseconds
 | `max_backoff` | `10` | Maximum backoff duration in seconds
 | `jitter` | `Full` | Jitter strategy to apply to the backoff duration, currently supports `Full` and `None`
