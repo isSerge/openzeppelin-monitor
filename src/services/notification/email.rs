@@ -233,25 +233,28 @@ where
 			})?;
 
 		let mut last_error: Option<NotificationError> = None;
-		let mut current_backoff = self.retry_policy.initial_backoff;
 
 		for attempt in 0..=self.retry_policy.max_retries {
 			if attempt > 0 {
+				let mut backoff = self.retry_policy.initial_backoff;
+
+				if attempt > 1 {
+					backoff =
+						backoff.saturating_mul(self.retry_policy.base_for_backoff.pow(attempt - 1));
+				}
+				backoff = backoff.min(self.retry_policy.max_backoff);
+
 				// Apply jitter before sleeping
 				let jitter = match self.retry_policy.jitter {
 					JitterSetting::None => Duration::from_secs(0),
 					JitterSetting::Full => {
 						let jitter_fraction = rng().random_range(0.0..=0.1); // e.g., up to 10%
-						current_backoff.mul_f64(jitter_fraction)
+						backoff.mul_f64(jitter_fraction)
 					}
 				};
 
 				// Sleep for the current backoff duration plus jitter
-				tokio::time::sleep(current_backoff + jitter).await;
-
-				// Increase backoff for the *next* retry
-				current_backoff = (current_backoff * self.retry_policy.base_for_backoff)
-					.min(self.retry_policy.max_backoff);
+				tokio::time::sleep(backoff + jitter).await;
 			}
 
 			let client = self.client.clone();
@@ -306,7 +309,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use lettre::transport::smtp::authentication::Credentials;
+	use lettre::transport::{smtp::authentication::Credentials, stub::StubTransport};
 
 	use crate::{
 		models::{NotificationMessage, SecretString, SecretValue},
@@ -315,6 +318,15 @@ mod tests {
 	};
 
 	use super::*;
+
+	fn create_test_email_content() -> EmailContent {
+		EmailContent {
+			subject: "Test Subject".to_string(),
+			body_template: "Hello ${name}, your balance is ${balance}".to_string(),
+			sender: "sender@test.com".parse().unwrap(),
+			recipients: vec!["recipient@test.com".parse().unwrap()],
+		}
+	}
 
 	fn create_test_notifier() -> EmailNotifier<SmtpTransport> {
 		let smtp_config = SmtpConfig {
@@ -330,12 +342,7 @@ mod tests {
 			.credentials(Credentials::new(smtp_config.username, smtp_config.password))
 			.build();
 
-		let email_content = EmailContent {
-			subject: "Test Subject".to_string(),
-			body_template: "Hello ${name}, your balance is ${balance}".to_string(),
-			sender: "sender@test.com".parse().unwrap(),
-			recipients: vec!["recipient@test.com".parse().unwrap()],
-		};
+		let email_content = create_test_email_content();
 
 		EmailNotifier::new(Arc::new(client), email_content, HttpRetryConfig::default()).unwrap()
 	}
@@ -467,15 +474,36 @@ mod tests {
 	////////////////////////////////////////////////////////////
 	// notify tests
 	////////////////////////////////////////////////////////////
+	#[tokio::test]
+	async fn test_notify_succeeds_on_first_try() {
+		let transport = StubTransport::new_ok();
+		let notifier = EmailNotifier::with_transport(
+			create_test_email_content(),
+			transport.clone(),
+			HttpRetryConfig::default(),
+		);
+
+		notifier.notify("test message").await.unwrap();
+		assert_eq!(transport.messages().len(), 1);
+	}
 
 	#[tokio::test]
-	async fn test_notify_failure() {
-		let notifier = create_test_notifier();
-		let result = notifier.notify("Test message").await;
-		// Expected to fail since we're using a dummy SMTP server
-		assert!(result.is_err());
+	async fn test_notify_fails_after_all_retries() {
+		let transport = StubTransport::new_error();
+		let retry_policy = HttpRetryConfig::default();
+		let default_max_retries = retry_policy.max_retries as usize;
+		let notifier = EmailNotifier::with_transport(
+			create_test_email_content(),
+			transport.clone(),
+			retry_policy,
+		);
 
-		let error = result.unwrap_err();
-		assert!(matches!(error, NotificationError::NotifyFailed { .. }));
+		let result = notifier.notify("test message").await;
+		assert!(result.is_err());
+		assert_eq!(
+			transport.messages().len(),
+			1 + default_max_retries,
+			"Should be called 1 time + default max retries"
+		);
 	}
 }
