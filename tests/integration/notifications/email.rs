@@ -1,9 +1,5 @@
-use async_trait::async_trait;
-use mockall::mock;
-
 use email_address::EmailAddress;
-use lettre::{address::Envelope, Message, Transport};
-use mockall::predicate::*;
+use lettre::transport::stub::StubTransport;
 use std::collections::HashMap;
 
 use openzeppelin_monitor::{
@@ -12,7 +8,7 @@ use openzeppelin_monitor::{
 		SecretValue, TriggerType, TriggerTypeConfig,
 	},
 	services::notification::{
-		EmailContent, EmailNotifier, NotificationError, NotificationService, Notifier, SmtpConfig,
+		EmailContent, EmailNotifier, NotificationError, NotificationService, Notifier,
 	},
 	utils::{
 		tests::{
@@ -48,35 +44,6 @@ fn create_test_evm_match(monitor: Monitor) -> MonitorMatch {
 	}))
 }
 
-mock! {
-	pub EmailNotifier {
-		pub fn new(smtp_config: SmtpConfig, email_content: EmailContent) -> Result<Self, NotificationError>;
-		pub fn format_message(&self, variables: &HashMap<String, String>) -> String;
-	}
-
-	#[async_trait]
-	impl Notifier for EmailNotifier {
-		async fn notify(&self, message: &str) -> Result<(), NotificationError>;
-	}
-}
-
-mock! {
-	pub SmtpTransport {}
-
-	impl Transport for SmtpTransport {
-		type Ok = String;
-		type Error = String;
-
-		fn send_raw(&self, envelope: &Envelope, email: &[u8]) -> Result<String, String> {
-			Ok("250 OK".to_string())
-		}
-
-		fn send(&self, message: &Message) -> Result<String, String> {
-			Ok("250 OK".to_string())
-		}
-	}
-}
-
 #[tokio::test]
 async fn test_email_notification_success() {
 	let email_content = EmailContent {
@@ -86,14 +53,10 @@ async fn test_email_notification_success() {
 		recipients: vec![EmailAddress::new_unchecked("recipient@test.com")],
 	};
 
-	let mut mock_transport = MockSmtpTransport::new();
+	let stub_transport = StubTransport::new_ok();
 
-	mock_transport
-		.expect_send()
-		.times(1)
-		.returning(|_| Ok("250 OK".to_string()));
-
-	let notifier = EmailNotifier::with_transport(email_content, mock_transport);
+	let notifier =
+		EmailNotifier::with_transport(email_content, stub_transport, HttpRetryConfig::default());
 
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_ok());
@@ -108,14 +71,10 @@ async fn test_email_notification_failure() {
 		recipients: vec![EmailAddress::new_unchecked("recipient@test.com")],
 	};
 
-	let mut mock_transport = MockSmtpTransport::new();
+	let stub_transport = StubTransport::new_error();
 
-	mock_transport
-		.expect_send()
-		.times(1)
-		.returning(|_| Err("500 Internal Server Error".to_string()));
-
-	let notifier = EmailNotifier::with_transport(email_content, mock_transport);
+	let notifier =
+		EmailNotifier::with_transport(email_content, stub_transport, HttpRetryConfig::default());
 
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_err());
