@@ -14,7 +14,7 @@ use lettre::{
 	Message, SmtpTransport, Transport,
 };
 use rand::{rng, Rng};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
 
 use crate::{
 	models::TriggerTypeConfig,
@@ -58,10 +58,8 @@ pub struct EmailContent {
 	pub recipients: Vec<EmailAddress>,
 }
 
-impl<T: Transport + Send + Sync> EmailNotifier<T>
-where
-	T::Error: std::fmt::Display,
-{
+// This implementation is only for testing purposes
+impl<T: Transport + Send + Sync> EmailNotifier<T> {
 	/// Creates a new email notifier instance with a custom transport
 	///
 	/// # Arguments
@@ -179,8 +177,9 @@ impl EmailNotifier<SmtpTransport> {
 #[async_trait]
 impl<T> Notifier for EmailNotifier<T>
 where
-	T: Transport<Error = SmtpError> + Clone + Send + Sync + 'static,
+	T: Transport + Clone + Send + Sync + 'static,
 	T::Ok: Send,
+	T::Error: std::error::Error + Send + Sync + 'static,
 {
 	/// Sends a formatted message to email
 	///
@@ -265,15 +264,22 @@ where
 				Ok(send_result) => match send_result {
 					Ok(_) => return Ok(()),
 					Err(e) => {
-						let is_permanent = &e.is_permanent(); // capture both timeouts and other transient errors
+						// Check if the error is permanent
+						let is_permanent = e
+							.source()
+							.and_then(|source| source.downcast_ref::<SmtpError>())
+							.is_some_and(|smtp_err| smtp_err.is_permanent());
+
 						let err_msg =
 							format!("Failed to send email on attempt {}: {}", attempt + 1, e);
+
 						last_error = Some(NotificationError::notify_failed(
 							err_msg,
 							Some(Box::new(e)),
 							None,
 						));
-						if *is_permanent {
+
+						if is_permanent {
 							break; // Permanent error, stop retrying.
 						}
 					}
