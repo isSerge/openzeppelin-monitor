@@ -274,7 +274,7 @@ where
 							.is_some_and(|smtp_err| smtp_err.is_permanent());
 
 						let err_msg =
-							format!("Failed to send email on attempt {}: {}", attempt + 1, e);
+							format!("Failed to send email on attempt {}: {}", attempt, e);
 
 						last_error = Some(NotificationError::notify_failed(
 							err_msg,
@@ -301,9 +301,8 @@ where
 			}
 		}
 
-		Err(last_error.unwrap_or_else(|| {
-			NotificationError::notify_failed("Email sending failed after all retries.", None, None)
-		}))
+		// All retries have failed and last_error is guaranteed to be Some
+		Err(last_error.expect("last_error should be Some if the retry loop has failed"))
 	}
 }
 
@@ -445,6 +444,44 @@ mod tests {
 		assert_eq!(notifier.sender.to_string(), "sender@test.com");
 		assert_eq!(notifier.recipients.len(), 1);
 		assert_eq!(notifier.recipients[0].to_string(), "recipient@test.com");
+	}
+
+	#[tokio::test]
+	async fn test_from_config_invalid_type() {
+		// Create a config that is not Email type
+		let wrong_config = TriggerTypeConfig::Slack {
+			slack_url: SecretValue::Plain(SecretString::new(
+				"https://slack.com/api/chat.postMessage".to_string(),
+			)),
+			message: NotificationMessage {
+				title: "Test Slack".to_string(),
+				body: "Hello ${name}".to_string(),
+			},
+			retry_policy: HttpRetryConfig::default(),
+		};
+
+		// Correct config to create SmtpTransport
+		let smtp_config = SmtpConfig {
+			host: "dummy.smtp.com".to_string(),
+			port: 465,
+			username: "test".to_string(),
+			password: "test".to_string(),
+		};
+
+		let smtp_client = Arc::new(
+			SmtpTransport::relay(&smtp_config.host)
+				.unwrap()
+				.port(smtp_config.port)
+				.credentials(Credentials::new(smtp_config.username, smtp_config.password))
+				.build(),
+		);
+
+		let result = EmailNotifier::from_config(&wrong_config, smtp_client);
+		assert!(result.is_err());
+		assert!(matches!(
+			result.unwrap_err(),
+			NotificationError::ConfigError(_)
+		));
 	}
 
 	#[tokio::test]

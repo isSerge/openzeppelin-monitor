@@ -63,7 +63,7 @@ async fn test_email_notification_success() {
 }
 
 #[tokio::test]
-async fn test_email_notification_failure() {
+async fn test_email_notification_failure_after_retries() {
 	let email_content = EmailContent {
 		subject: "Test".to_string(),
 		body_template: "Test message".to_string(),
@@ -72,15 +72,28 @@ async fn test_email_notification_failure() {
 	};
 
 	let stub_transport = StubTransport::new_error();
+	let retry_policy = HttpRetryConfig::default();
+	let default_max_retries = retry_policy.max_retries as usize;
 
 	let notifier =
-		EmailNotifier::with_transport(email_content, stub_transport, HttpRetryConfig::default());
+		EmailNotifier::with_transport(email_content, stub_transport.clone(), retry_policy);
 
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_err());
+	assert_eq!(
+		stub_transport.messages().len(),
+		1 + default_max_retries,
+		"Should be called 1 time + default max retries"
+	);
 
 	let error = result.unwrap_err();
-	assert!(matches!(error, NotificationError::NotifyFailed(_)));
+
+	match error {
+		NotificationError::NotifyFailed(ctx) => {
+			assert!(ctx.message.contains("Failed to send email on attempt"));
+		}
+		e => panic!("Expected NotifyFailed, got {:?}", e),
+	}
 }
 
 #[tokio::test]
