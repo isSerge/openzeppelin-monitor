@@ -1,7 +1,7 @@
 use crate::services::blockchain::TransientErrorRetryStrategy;
 use crate::services::notification::SmtpConfig;
 use crate::utils::client_storage::ClientStorage;
-use crate::utils::{create_retryable_http_client, HttpRetryConfig};
+use crate::utils::{create_retryable_http_client, RetryConfig};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::SmtpTransport;
 use reqwest::Client as ReqwestClient;
@@ -47,7 +47,7 @@ impl NotificationClientPool {
 	///   fails.
 	pub async fn get_or_create_http_client(
 		&self,
-		retry_policy: &HttpRetryConfig,
+		retry_policy: &RetryConfig,
 	) -> Result<Arc<ClientWithMiddleware>, NotificationPoolError> {
 		// Generate a unique key for the retry policy based on its configuration.
 		let key = format!("{:?}", retry_policy);
@@ -166,7 +166,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_pool_get_or_create_http_client() {
 		let pool = create_pool();
-		let retry_config = HttpRetryConfig::default();
+		let retry_config = RetryConfig::default();
 		let client = pool.get_or_create_http_client(&retry_config).await;
 
 		assert!(
@@ -184,7 +184,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_pool_returns_same_client() {
 		let pool = create_pool();
-		let retry_config = HttpRetryConfig::default();
+		let retry_config = RetryConfig::default();
 		let client1 = pool.get_or_create_http_client(&retry_config).await.unwrap();
 		let client2 = pool.get_or_create_http_client(&retry_config).await.unwrap();
 
@@ -202,7 +202,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_pool_concurrent_access() {
 		let pool = Arc::new(create_pool());
-		let retry_config = HttpRetryConfig::default();
+		let retry_config = RetryConfig::default();
 
 		let num_tasks = 10;
 		let mut tasks = Vec::new();
@@ -229,7 +229,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_pool_default() {
 		let pool = NotificationClientPool::default();
-		let retry_config = HttpRetryConfig::default();
+		let retry_config = RetryConfig::default();
 
 		assert_eq!(
 			pool.get_active_http_client_count().await,
@@ -262,10 +262,10 @@ mod tests {
 		let pool = create_pool();
 
 		// Config 1 (default)
-		let retry_config_1 = HttpRetryConfig::default();
+		let retry_config_1 = RetryConfig::default();
 
 		// Config 2 (different retry count)
-		let mut retry_config_2 = HttpRetryConfig::default();
+		let mut retry_config_2 = RetryConfig::default();
 		retry_config_2.max_retries = 5;
 
 		// Get a client for each config

@@ -15,7 +15,7 @@ use openzeppelin_monitor::{
 			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
 			trigger::TriggerBuilder,
 		},
-		HttpRetryConfig,
+		RetryConfig,
 	},
 };
 
@@ -56,7 +56,7 @@ async fn test_email_notification_success() {
 	let stub_transport = StubTransport::new_ok();
 
 	let notifier =
-		EmailNotifier::with_transport(email_content, stub_transport, HttpRetryConfig::default());
+		EmailNotifier::with_transport(email_content, stub_transport, RetryConfig::default());
 
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_ok());
@@ -72,7 +72,7 @@ async fn test_email_notification_failure_after_retries() {
 	};
 
 	let stub_transport = StubTransport::new_error();
-	let retry_policy = HttpRetryConfig::default();
+	let retry_policy = RetryConfig::default();
 	let default_max_retries = retry_policy.max_retries as usize;
 
 	let notifier =
@@ -111,7 +111,7 @@ async fn test_notification_service_email_execution_failure() {
 		},
 		sender: "sender@example.com".parse().unwrap(),
 		recipients: vec!["recipient@example.com".parse().unwrap()],
-		retry_policy: HttpRetryConfig::default(),
+		retry_policy: RetryConfig::default(),
 	};
 
 	let trigger = TriggerBuilder::new()

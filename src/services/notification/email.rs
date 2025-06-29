@@ -19,7 +19,7 @@ use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
 use crate::{
 	models::TriggerTypeConfig,
 	services::notification::{NotificationError, Notifier},
-	utils::{HttpRetryConfig, JitterSetting},
+	utils::{JitterSetting, RetryConfig},
 };
 use pulldown_cmark::{html, Options, Parser};
 
@@ -37,7 +37,7 @@ pub struct EmailNotifier<T: Transport + Send + Sync> {
 	/// Email recipients
 	recipients: Vec<EmailAddress>,
 	/// Retry policy for SMTP requests
-	retry_policy: HttpRetryConfig,
+	retry_policy: RetryConfig,
 }
 
 /// Configuration for SMTP connection
@@ -72,7 +72,7 @@ impl<T: Transport + Send + Sync> EmailNotifier<T> {
 	pub fn with_transport(
 		email_content: EmailContent,
 		transport: T,
-		retry_policy: HttpRetryConfig,
+		retry_policy: RetryConfig,
 	) -> Self {
 		Self {
 			subject: email_content.subject,
@@ -97,7 +97,7 @@ impl EmailNotifier<SmtpTransport> {
 	pub fn new(
 		smtp_client: Arc<SmtpTransport>,
 		email_content: EmailContent,
-		retry_policy: HttpRetryConfig,
+		retry_policy: RetryConfig,
 	) -> Result<Self, NotificationError> {
 		Ok(Self {
 			subject: email_content.subject,
@@ -234,7 +234,7 @@ where
 
 		let mut last_error: Option<NotificationError> = None;
 
-		// Retry logic for sending the email, 
+		// Retry logic for sending the email,
 		// with exponential backoff and jitter
 		for attempt in 0..=self.retry_policy.max_retries {
 			if attempt > 0 {
@@ -275,8 +275,7 @@ where
 							.and_then(|source| source.downcast_ref::<SmtpError>())
 							.is_some_and(|smtp_err| smtp_err.is_permanent());
 
-						let err_msg =
-							format!("Failed to send email on attempt {}: {}", attempt, e);
+						let err_msg = format!("Failed to send email on attempt {}: {}", attempt, e);
 
 						last_error = Some(NotificationError::notify_failed(
 							err_msg,
@@ -286,7 +285,7 @@ where
 
 						// Permanent error, stop retrying
 						if is_permanent {
-							break; 
+							break;
 						}
 					}
 				},
@@ -316,7 +315,7 @@ mod tests {
 	use crate::{
 		models::{NotificationMessage, SecretString, SecretValue},
 		services::notification::pool::NotificationClientPool,
-		utils::HttpRetryConfig,
+		utils::RetryConfig,
 	};
 
 	use super::*;
@@ -346,7 +345,7 @@ mod tests {
 
 		let email_content = create_test_email_content();
 
-		EmailNotifier::new(Arc::new(client), email_content, HttpRetryConfig::default()).unwrap()
+		EmailNotifier::new(Arc::new(client), email_content, RetryConfig::default()).unwrap()
 	}
 
 	fn create_test_email_config(port: Option<u16>) -> TriggerTypeConfig {
@@ -361,7 +360,7 @@ mod tests {
 			},
 			sender: "sender@test.com".parse().unwrap(),
 			recipients: vec!["recipient@test.com".parse().unwrap()],
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		}
 	}
 
@@ -460,7 +459,7 @@ mod tests {
 				title: "Test Slack".to_string(),
 				body: "Hello ${name}".to_string(),
 			},
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		};
 
 		// Correct config to create SmtpTransport
@@ -520,7 +519,7 @@ mod tests {
 		let notifier = EmailNotifier::with_transport(
 			create_test_email_content(),
 			transport.clone(),
-			HttpRetryConfig::default(),
+			RetryConfig::default(),
 		);
 
 		notifier.notify("test message").await.unwrap();
@@ -530,7 +529,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_notify_fails_after_all_retries() {
 		let transport = StubTransport::new_error();
-		let retry_policy = HttpRetryConfig::default();
+		let retry_policy = RetryConfig::default();
 		let default_max_retries = retry_policy.max_retries as usize;
 		let notifier = EmailNotifier::with_transport(
 			create_test_email_content(),

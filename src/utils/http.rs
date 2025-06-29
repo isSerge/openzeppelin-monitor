@@ -33,9 +33,9 @@ pub enum JitterSetting {
 	Full,
 }
 
-/// Configuration for HTTP retry policies
+/// Configuration for HTTP (RPC and Webhook notifiers) and SMTP (Email notifier) retry policies
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct HttpRetryConfig {
+pub struct RetryConfig {
 	/// Maximum number of retries for transient errors
 	#[serde(default = "default_max_attempts")]
 	pub max_retries: u32,
@@ -53,7 +53,7 @@ pub struct HttpRetryConfig {
 	pub jitter: JitterSetting,
 }
 
-impl Default for HttpRetryConfig {
+impl Default for RetryConfig {
 	/// Creates a default configuration with reasonable retry settings
 	fn default() -> Self {
 		Self {
@@ -77,7 +77,7 @@ impl Default for HttpRetryConfig {
 /// A `ClientWithMiddleware` that includes retry capabilities
 ///
 pub fn create_retryable_http_client<S>(
-	config: &HttpRetryConfig,
+	config: &RetryConfig,
 	base_client: reqwest::Client,
 	custom_strategy: Option<S>,
 ) -> ClientWithMiddleware

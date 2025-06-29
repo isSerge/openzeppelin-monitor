@@ -1,6 +1,6 @@
 use crate::{
 	models::{core::ScriptLanguage, SecretValue},
-	utils::HttpRetryConfig,
+	utils::RetryConfig,
 };
 use email_address::EmailAddress;
 use serde::{Deserialize, Serialize};
@@ -61,7 +61,7 @@ pub enum TriggerTypeConfig {
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
 		#[serde(default)]
-		retry_policy: HttpRetryConfig,
+		retry_policy: RetryConfig,
 	},
 	/// Email notification configuration
 	Email {
@@ -81,7 +81,7 @@ pub enum TriggerTypeConfig {
 		recipients: Vec<EmailAddress>,
 		/// Retry policy for SMTP requests
 		#[serde(default)]
-		retry_policy: HttpRetryConfig,
+		retry_policy: RetryConfig,
 	},
 	/// Webhook configuration
 	Webhook {
@@ -97,7 +97,7 @@ pub enum TriggerTypeConfig {
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
 		#[serde(default)]
-		retry_policy: HttpRetryConfig,
+		retry_policy: RetryConfig,
 	},
 	/// Telegram notification configuration
 	Telegram {
@@ -111,7 +111,7 @@ pub enum TriggerTypeConfig {
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
 		#[serde(default)]
-		retry_policy: HttpRetryConfig,
+		retry_policy: RetryConfig,
 	},
 	/// Discord notification configuration
 	Discord {
@@ -121,7 +121,7 @@ pub enum TriggerTypeConfig {
 		message: NotificationMessage,
 		/// Retry policy for HTTP requests
 		#[serde(default)]
-		retry_policy: HttpRetryConfig,
+		retry_policy: RetryConfig,
 	},
 	/// Script execution configuration
 	Script {
@@ -139,7 +139,7 @@ pub enum TriggerTypeConfig {
 
 impl TriggerTypeConfig {
 	/// Get the retry policy for the trigger type, if applicable.
-	pub fn get_retry_policy(&self) -> Option<HttpRetryConfig> {
+	pub fn get_retry_policy(&self) -> Option<RetryConfig> {
 		match self {
 			Self::Slack { retry_policy, .. } => Some(retry_policy.clone()),
 			Self::Discord { retry_policy, .. } => Some(retry_policy.clone()),

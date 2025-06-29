@@ -8,7 +8,7 @@
 use lettre::{transport::smtp::authentication::Credentials, SmtpTransport};
 use openzeppelin_monitor::{
 	services::notification::{EmailContent, EmailNotifier, SmtpConfig},
-	utils::HttpRetryConfig,
+	utils::RetryConfig,
 };
 use proptest::{prelude::*, test_runner::Config};
 use std::{collections::HashMap, sync::Arc};
@@ -58,7 +58,7 @@ proptest! {
 				sender: "test@test.com".parse().unwrap(),
 				recipients: vec!["recipient@test.com".parse().unwrap()],
 			},
-			HttpRetryConfig::default(),
+			RetryConfig::default(),
 		).unwrap();
 
 		let first_pass = notifier.format_message(&vars);
@@ -99,7 +99,7 @@ proptest! {
 				sender: "test@test.com".parse().unwrap(),
 				recipients: vec!["recipient@test.com".parse().unwrap()],
 			},
-			HttpRetryConfig::default(),
+			RetryConfig::default(),
 		).unwrap();
 
 		let formatted = notifier.format_message(&vars);
@@ -139,7 +139,7 @@ proptest! {
 				sender: "test@test.com".parse().unwrap(),
 				recipients: vec!["recipient@test.com".parse().unwrap()],
 			},
-			HttpRetryConfig::default(),
+			RetryConfig::default(),
 		).unwrap();
 
 		let empty_vars = HashMap::new();
