@@ -246,17 +246,24 @@ where
 				}
 				backoff = backoff.min(self.retry_policy.max_backoff);
 
-				// Apply jitter before sleeping
-				let jitter = match self.retry_policy.jitter {
-					JitterSetting::None => Duration::from_secs(0),
+				// Calculate sleep duration based on jitter setting
+				let sleep_duration = match self.retry_policy.jitter {
+					// No jitter, sleep for the exact backoff duration
+					JitterSetting::None => backoff,
+					// Full jitter, sleep for a random duration between 0 and backoff
 					JitterSetting::Full => {
-						let jitter_fraction = rng().random_range(0.0..=0.1); // e.g., up to 10%
-						backoff.mul_f64(jitter_fraction)
+						if backoff.as_nanos() > 0 {
+							// Generate a random duration from 0 up to our calculated backoff.
+							Duration::from_nanos(rng().random_range(0..backoff.as_nanos()) as u64)
+						} else {
+							// Not using `gen_range` if backoff is zero to avoid panic
+							Duration::from_nanos(0)
+						}
 					}
 				};
 
-				// Sleep for the current backoff duration plus jitter
-				tokio::time::sleep(backoff + jitter).await;
+				// Sleep for the current backoff duration
+				tokio::time::sleep(sleep_duration).await;
 			}
 
 			let client = self.client.clone();
