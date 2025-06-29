@@ -234,6 +234,8 @@ where
 
 		let mut last_error: Option<NotificationError> = None;
 
+		// Retry logic for sending the email, 
+		// with exponential backoff and jitter
 		for attempt in 0..=self.retry_policy.max_retries {
 			if attempt > 0 {
 				let mut backoff = self.retry_policy.initial_backoff;
@@ -260,14 +262,14 @@ where
 			let client = self.client.clone();
 			let email_clone = email.clone();
 
-			// spawn_blocking is needed because `lettre`'s send is synchronous.
+			// Using sync send with spawn_blocking
 			let result = tokio::task::spawn_blocking(move || client.send(&email_clone)).await;
 
 			match result {
 				Ok(send_result) => match send_result {
 					Ok(_) => return Ok(()),
 					Err(e) => {
-						// Check if the error is permanent
+						// Downcast error and check if it is permanent (tests may have non SMTP errors)
 						let is_permanent = e
 							.source()
 							.and_then(|source| source.downcast_ref::<SmtpError>())
@@ -282,8 +284,9 @@ where
 							None,
 						));
 
+						// Permanent error, stop retrying
 						if is_permanent {
-							break; // Permanent error, stop retrying.
+							break; 
 						}
 					}
 				},
