@@ -265,8 +265,10 @@ mod tests {
 		let retry_config_1 = RetryConfig::default();
 
 		// Config 2 (different retry count)
-		let mut retry_config_2 = RetryConfig::default();
-		retry_config_2.max_retries = 5;
+		let retry_config_2 = RetryConfig {
+			max_retries: 5,
+			..Default::default()
+		};
 
 		// Get a client for each config
 		let client1 = pool
