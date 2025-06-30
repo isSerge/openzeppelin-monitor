@@ -13,15 +13,18 @@ use lettre::{
 	transport::smtp::Error as SmtpError,
 	Message, SmtpTransport, Transport,
 };
-use rand::{rng, Rng};
-use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
+use pulldown_cmark::{html, Options, Parser};
+use std::{collections::HashMap, error::Error as StdError, sync::Arc};
+use tokio_retry::{
+	strategy::{jitter, ExponentialBackoff},
+	RetryIf,
+};
 
 use crate::{
 	models::TriggerTypeConfig,
 	services::notification::{NotificationError, Notifier},
 	utils::{JitterSetting, RetryConfig},
 };
-use pulldown_cmark::{html, Options, Parser};
 
 /// Implementation of email notifications via SMTP
 #[derive(Debug)]
@@ -232,86 +235,61 @@ where
 				)
 			})?;
 
-		let mut last_error: Option<NotificationError> = None;
+		let backoff_strategy =
+			ExponentialBackoff::from_millis(self.retry_policy.initial_backoff.as_millis() as u64)
+				.max_delay(self.retry_policy.max_backoff);
 
-		// Retry logic for sending the email,
-		// with exponential backoff and jitter
-		for attempt in 0..=self.retry_policy.max_retries {
-			if attempt > 0 {
-				let mut backoff = self.retry_policy.initial_backoff;
+		let retry_strategy: Box<dyn Iterator<Item = std::time::Duration> + Send + Sync> =
+			match self.retry_policy.jitter {
+				JitterSetting::None => Box::new(backoff_strategy),
+				JitterSetting::Full => Box::new(backoff_strategy.map(jitter)),
+			};
 
-				if attempt > 1 {
-					backoff =
-						backoff.saturating_mul(self.retry_policy.base_for_backoff.pow(attempt - 1));
-				}
-				backoff = backoff.min(self.retry_policy.max_backoff);
+		let retry_strategy = retry_strategy.take(self.retry_policy.max_retries as usize);
 
-				// Calculate sleep duration based on jitter setting
-				let sleep_duration = match self.retry_policy.jitter {
-					// No jitter, sleep for the exact backoff duration
-					JitterSetting::None => backoff,
-					// Full jitter, sleep for a random duration between 0 and backoff
-					JitterSetting::Full => {
-						if backoff.as_nanos() > 0 {
-							// Generate a random duration from 0 up to our calculated backoff.
-							Duration::from_nanos(rng().random_range(0..backoff.as_nanos()) as u64)
-						} else {
-							// Not using `gen_range` if backoff is zero to avoid panic
-							Duration::from_nanos(0)
-						}
-					}
-				};
-
-				// Sleep for the current backoff duration
-				tokio::time::sleep(sleep_duration).await;
-			}
-
+		let send_action = || async {
 			let client = self.client.clone();
 			let email_clone = email.clone();
 
-			// Using sync send with spawn_blocking
-			let result = tokio::task::spawn_blocking(move || client.send(&email_clone)).await;
+			let send_result = tokio::task::spawn_blocking(move || client.send(&email_clone)).await;
 
-			match result {
-				Ok(send_result) => match send_result {
-					Ok(_) => return Ok(()),
-					Err(e) => {
-						// Downcast error and check if it is permanent (tests may have non SMTP errors)
-						let is_permanent = e
-							.source()
-							.and_then(|source| source.downcast_ref::<SmtpError>())
-							.is_some_and(|smtp_err| smtp_err.is_permanent());
-
-						let err_msg = format!("Failed to send email on attempt {}: {}", attempt, e);
-
-						last_error = Some(NotificationError::notify_failed(
-							err_msg,
-							Some(Box::new(e)),
-							None,
-						));
-
-						// Permanent error, stop retrying
-						if is_permanent {
-							break;
-						}
-					}
-				},
-				Err(e) => {
-					// Tokio task panic
-					let err_msg =
-						format!("Task execution failed on attempt {}: {}", attempt + 1, e);
-					last_error = Some(NotificationError::internal_error(
+			match send_result {
+				Ok(Ok(_)) => Ok(()),
+				// Handle email sending error
+				Ok(Err(e)) => {
+					let err_msg = format!("Failed to send email: {}", e);
+					Err(NotificationError::notify_failed(
 						err_msg,
 						Some(Box::new(e)),
 						None,
-					));
-					break;
+					))
+				}
+				// Handle tokio task execution error
+				Err(e) => {
+					let err_msg = format!("Task execution failed: {}", e);
+					Err(NotificationError::internal_error(
+						err_msg,
+						Some(Box::new(e)),
+						None,
+					))
 				}
 			}
-		}
+		};
 
-		// All retries have failed and last_error is guaranteed to be Some
-		Err(last_error.expect("last_error should be Some if the retry loop has failed"))
+		// Condition to retry only on non-permanent SMTP errors
+		let should_retry = |e: &NotificationError| {
+			if let NotificationError::NotifyFailed(context) = e {
+				if let Some(source) = context.source() {
+					// Check if the error is an SmtpError and if it is retryable
+					if let Some(smtp_error) = source.downcast_ref::<SmtpError>() {
+						return !smtp_error.is_permanent();
+					}
+				}
+			}
+			true
+		};
+
+		RetryIf::spawn(retry_strategy, send_action, should_retry).await
 	}
 }
 

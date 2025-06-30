@@ -90,7 +90,7 @@ async fn test_email_notification_failure_after_retries() {
 
 	match error {
 		NotificationError::NotifyFailed(ctx) => {
-			assert!(ctx.message.contains("Failed to send email on attempt"));
+			assert!(ctx.message.contains("Failed to send email"));
 		}
 		e => panic!("Expected NotifyFailed, got {:?}", e),
 	}
