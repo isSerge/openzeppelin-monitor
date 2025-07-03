@@ -4,6 +4,7 @@
 //! via SMTP, supporting message templates with variable substitution.
 
 use async_trait::async_trait;
+use backon::{BackoffBuilder, ExponentialBuilder, Retryable};
 use email_address::EmailAddress;
 use lettre::{
 	message::{
@@ -15,10 +16,6 @@ use lettre::{
 };
 use pulldown_cmark::{html, Options, Parser};
 use std::{collections::HashMap, error::Error as StdError, sync::Arc};
-use tokio_retry::{
-	strategy::{jitter, ExponentialBackoff},
-	RetryIf,
-};
 
 use crate::{
 	models::TriggerTypeConfig,
@@ -62,7 +59,11 @@ pub struct EmailContent {
 }
 
 // This implementation is only for testing purposes
-impl<T: Transport + Send + Sync> EmailNotifier<T> {
+impl<T: Transport + Send + Sync> EmailNotifier<T>
+where
+	T::Ok: Send + Sync,
+	T::Error: StdError + Send + Sync + 'static,
+{
 	/// Creates a new email notifier instance with a custom transport
 	///
 	/// # Arguments
@@ -181,8 +182,8 @@ impl EmailNotifier<SmtpTransport> {
 impl<T> Notifier for EmailNotifier<T>
 where
 	T: Transport + Clone + Send + Sync + 'static,
-	T::Ok: Send,
-	T::Error: std::error::Error + Send + Sync + 'static,
+	T::Ok: Send + Sync,
+	T::Error: StdError + Send + Sync + 'static,
 {
 	/// Sends a formatted message to email
 	///
@@ -235,52 +236,43 @@ where
 				)
 			})?;
 
-		let backoff_strategy =
-			ExponentialBackoff::from_millis(self.retry_policy.initial_backoff.as_millis() as u64)
-				.max_delay(self.retry_policy.max_backoff);
-
-		let retry_strategy: Box<dyn Iterator<Item = std::time::Duration> + Send + Sync> =
-			match self.retry_policy.jitter {
-				JitterSetting::None => Box::new(backoff_strategy),
-				JitterSetting::Full => Box::new(backoff_strategy.map(jitter)),
-			};
-
-		let retry_strategy = retry_strategy.take(self.retry_policy.max_retries as usize);
-
-		let send_action = || async {
+		let operation = || async {
 			let client = self.client.clone();
 			let email_clone = email.clone();
 
-			let send_result = tokio::task::spawn_blocking(move || client.send(&email_clone)).await;
+			tokio::task::spawn_blocking(move || client.send(&email_clone))
+				.await
+				.map_err(|e| {
+					NotificationError::internal_error(
+						format!("Task execution failed: {}", e),
+						Some(Box::new(e)),
+						None,
+					)
+				})?
+				.map_err(|e| {
+					NotificationError::notify_failed(
+						format!("Failed to send email: {}", e),
+						Some(Box::new(e)),
+						None,
+					)
+				})?;
 
-			match send_result {
-				Ok(Ok(_)) => Ok(()),
-				// Handle email sending error
-				Ok(Err(e)) => {
-					let err_msg = format!("Failed to send email: {}", e);
-					Err(NotificationError::notify_failed(
-						err_msg,
-						Some(Box::new(e)),
-						None,
-					))
-				}
-				// Handle tokio task execution error
-				Err(e) => {
-					let err_msg = format!("Task execution failed: {}", e);
-					Err(NotificationError::internal_error(
-						err_msg,
-						Some(Box::new(e)),
-						None,
-					))
-				}
-			}
+			Ok(())
 		};
 
-		// Condition to retry only on non-permanent SMTP errors
-		let should_retry = |e: &NotificationError| {
+		let backoff = ExponentialBuilder::default()
+			.with_min_delay(self.retry_policy.initial_backoff)
+			.with_max_delay(self.retry_policy.max_backoff);
+
+		let backoff_with_jitter = match self.retry_policy.jitter {
+			JitterSetting::Full => backoff.with_jitter(),
+			JitterSetting::None => backoff,
+		};
+
+		// Retry if the error is SmtpError and not permanent
+		let should_retry = |e: &NotificationError| -> bool {
 			if let NotificationError::NotifyFailed(context) = e {
 				if let Some(source) = context.source() {
-					// Check if the error is an SmtpError and if it is retryable
 					if let Some(smtp_error) = source.downcast_ref::<SmtpError>() {
 						return !smtp_error.is_permanent();
 					}
@@ -289,7 +281,14 @@ where
 			true
 		};
 
-		RetryIf::spawn(retry_strategy, send_action, should_retry).await
+		operation
+			.retry(
+				backoff_with_jitter
+					.build()
+					.take(self.retry_policy.max_retries as usize),
+			)
+			.when(should_retry)
+			.await
 	}
 }
 
