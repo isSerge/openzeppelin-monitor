@@ -1,5 +1,5 @@
 use email_address::EmailAddress;
-use lettre::transport::stub::StubTransport;
+use lettre::transport::stub::AsyncStubTransport;
 use std::collections::HashMap;
 
 use openzeppelin_monitor::{
@@ -53,7 +53,7 @@ async fn test_email_notification_success() {
 		recipients: vec![EmailAddress::new_unchecked("recipient@test.com")],
 	};
 
-	let stub_transport = StubTransport::new_ok();
+	let stub_transport = AsyncStubTransport::new_ok();
 
 	let notifier =
 		EmailNotifier::with_transport(email_content, stub_transport, RetryConfig::default());
@@ -71,7 +71,7 @@ async fn test_email_notification_failure_after_retries() {
 		recipients: vec![EmailAddress::new_unchecked("recipient@test.com")],
 	};
 
-	let stub_transport = StubTransport::new_error();
+	let stub_transport = AsyncStubTransport::new_error();
 	let retry_policy = RetryConfig::default();
 	let default_max_retries = retry_policy.max_retries as usize;
 
@@ -81,7 +81,7 @@ async fn test_email_notification_failure_after_retries() {
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_err());
 	assert_eq!(
-		stub_transport.messages().len(),
+		stub_transport.messages().await.len(),
 		1 + default_max_retries,
 		"Should be called 1 time + default max retries"
 	);
@@ -101,8 +101,8 @@ async fn test_notification_service_email_execution_failure() {
 	let notification_service = NotificationService::new();
 
 	let trigger_config = TriggerTypeConfig::Email {
-		host: "dummy.smtp.host.invalid".to_string(), // Will cause SmtpTransport to fail connection
-		port: Some(587),
+		host: "127.0.0.1".to_string(), // Will cause a connection error
+		port: Some(2525),
 		username: SecretValue::Plain(SecretString::new("user".to_string())),
 		password: SecretValue::Plain(SecretString::new("pass".to_string())),
 		message: NotificationMessage {

@@ -2,8 +2,8 @@ use crate::services::blockchain::TransientErrorRetryStrategy;
 use crate::services::notification::SmtpConfig;
 use crate::utils::client_storage::ClientStorage;
 use crate::utils::{create_retryable_http_client, RetryConfig};
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::SmtpTransport;
+use lettre::Tokio1Executor;
+use lettre::{transport::smtp::authentication::Credentials, AsyncSmtpTransport};
 use reqwest::Client as ReqwestClient;
 use reqwest_middleware::ClientWithMiddleware;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ pub enum NotificationPoolError {
 /// allowing for efficient reuse and management of HTTP and SMTP connections.
 pub struct NotificationClientPool {
 	http_clients: ClientStorage<ClientWithMiddleware>,
-	smtp_clients: ClientStorage<SmtpTransport>,
+	smtp_clients: ClientStorage<AsyncSmtpTransport<Tokio1Executor>>,
 }
 
 impl NotificationClientPool {
@@ -103,22 +103,24 @@ impl NotificationClientPool {
 	/// * `smtp_config` - Configuration for the SMTP client, including host,
 	///   port, username, and password.
 	/// # Returns
-	/// * `Result<Arc<SmtpTransport>, NotificationPoolError>` - The SMTP client
+	/// * `Result<Arc<AsyncSmtpTransport<Tokio1Executor>>, NotificationPoolError>` - The SMTP client
 	///   wrapped in an `Arc` for shared ownership, or an error if client creation
 	///   fails.
 	pub async fn get_or_create_smtp_client(
 		&self,
 		smtp_config: &SmtpConfig,
-	) -> Result<Arc<SmtpTransport>, NotificationPoolError> {
+	) -> Result<Arc<AsyncSmtpTransport<Tokio1Executor>>, NotificationPoolError> {
 		let key = format!("{:?}", smtp_config);
 		self.get_or_create_client(&key, &self.smtp_clients, || {
 			let creds =
 				Credentials::new(smtp_config.username.clone(), smtp_config.password.clone());
-			Ok(SmtpTransport::relay(&smtp_config.host)
-				.map_err(|e| NotificationPoolError::SmtpClientBuildError(e.to_string()))?
-				.port(smtp_config.port)
-				.credentials(creds)
-				.build())
+			Ok(
+				AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp_config.host)
+					.map_err(|e| NotificationPoolError::SmtpClientBuildError(e.to_string()))?
+					.port(smtp_config.port)
+					.credentials(creds)
+					.build(),
+			)
 		})
 		.await
 	}

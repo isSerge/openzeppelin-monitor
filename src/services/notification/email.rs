@@ -12,7 +12,7 @@ use lettre::{
 		Mailbox, Mailboxes,
 	},
 	transport::smtp::Error as SmtpError,
-	Message, SmtpTransport, Transport,
+	AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
 };
 use pulldown_cmark::{html, Options, Parser};
 use std::{collections::HashMap, error::Error as StdError, sync::Arc};
@@ -25,7 +25,7 @@ use crate::{
 
 /// Implementation of email notifications via SMTP
 #[derive(Debug)]
-pub struct EmailNotifier<T: Transport + Send + Sync> {
+pub struct EmailNotifier<T: AsyncTransport + Send + Sync> {
 	/// Email subject
 	subject: String,
 	/// Message template with variable placeholders
@@ -59,7 +59,7 @@ pub struct EmailContent {
 }
 
 // This implementation is only for testing purposes
-impl<T: Transport + Send + Sync> EmailNotifier<T>
+impl<T: AsyncTransport + Send + Sync> EmailNotifier<T>
 where
 	T::Ok: Send + Sync,
 	T::Error: StdError + Send + Sync + 'static,
@@ -89,7 +89,7 @@ where
 	}
 }
 
-impl EmailNotifier<SmtpTransport> {
+impl EmailNotifier<AsyncSmtpTransport<Tokio1Executor>> {
 	/// Creates a new email notifier instance
 	///
 	/// # Arguments
@@ -99,7 +99,7 @@ impl EmailNotifier<SmtpTransport> {
 	/// # Returns
 	/// * `Result<Self, NotificationError>` - Email notifier instance or error
 	pub fn new(
-		smtp_client: Arc<SmtpTransport>,
+		smtp_client: Arc<AsyncSmtpTransport<Tokio1Executor>>,
 		email_content: EmailContent,
 		retry_policy: RetryConfig,
 	) -> Result<Self, NotificationError> {
@@ -113,17 +113,24 @@ impl EmailNotifier<SmtpTransport> {
 		})
 	}
 
+	/// Returns the body template of the email.
+	pub fn body_template(&self) -> &str {
+		&self.body_template
+	}
+
 	/// Formats a message by substituting variables in the template and converts it to HTML
+	/// Method is static because properterty-based tests do not have tokio runtime available,
+	/// which is required for AsyncSmtpTransport
 	///
 	/// # Arguments
 	/// * `variables` - Map of variable names to values
 	///
 	/// # Returns
 	/// * `String` - Formatted message with variables replaced and converted to HTML
-	pub fn format_message(&self, variables: &HashMap<String, String>) -> String {
+	pub fn format_message(body_template: &str, variables: &HashMap<String, String>) -> String {
 		let formatted_message = variables
 			.iter()
-			.fold(self.body_template.clone(), |message, (key, value)| {
+			.fold(body_template.to_string(), |message, (key, value)| {
 				message.replace(&format!("${{{}}}", key), value)
 			});
 
@@ -150,7 +157,7 @@ impl EmailNotifier<SmtpTransport> {
 	/// * `Result<Self, NotificationError>` - Notifier instance if config is email type
 	pub fn from_config(
 		config: &TriggerTypeConfig,
-		smtp_client: Arc<SmtpTransport>,
+		smtp_client: Arc<AsyncSmtpTransport<Tokio1Executor>>,
 	) -> Result<Self, NotificationError> {
 		if let TriggerTypeConfig::Email {
 			message,
@@ -181,7 +188,7 @@ impl EmailNotifier<SmtpTransport> {
 #[async_trait]
 impl<T> Notifier for EmailNotifier<T>
 where
-	T: Transport + Clone + Send + Sync + 'static,
+	T: AsyncTransport + Clone + Send + Sync + 'static,
 	T::Ok: Send + Sync,
 	T::Error: StdError + Send + Sync + 'static,
 {
@@ -237,25 +244,13 @@ where
 			})?;
 
 		let operation = || async {
-			let client = self.client.clone();
-			let email_clone = email.clone();
-
-			tokio::task::spawn_blocking(move || client.send(&email_clone))
-				.await
-				.map_err(|e| {
-					NotificationError::internal_error(
-						format!("Task execution failed: {}", e),
-						Some(Box::new(e)),
-						None,
-					)
-				})?
-				.map_err(|e| {
-					NotificationError::notify_failed(
-						format!("Failed to send email: {}", e),
-						Some(Box::new(e)),
-						None,
-					)
-				})?;
+			self.client.send(email.clone()).await.map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to send email: {}", e),
+					Some(Box::new(e)),
+					None,
+				)
+			})?;
 
 			Ok(())
 		};
@@ -294,7 +289,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use lettre::transport::{smtp::authentication::Credentials, stub::StubTransport};
+	use lettre::transport::{smtp::authentication::Credentials, stub::AsyncStubTransport};
 
 	use crate::{
 		models::{NotificationMessage, SecretString, SecretValue},
@@ -313,7 +308,7 @@ mod tests {
 		}
 	}
 
-	fn create_test_notifier() -> EmailNotifier<SmtpTransport> {
+	fn create_test_notifier() -> EmailNotifier<AsyncSmtpTransport<Tokio1Executor>> {
 		let smtp_config = SmtpConfig {
 			host: "dummy.smtp.com".to_string(),
 			port: 465,
@@ -321,7 +316,7 @@ mod tests {
 			password: "test".to_string(),
 		};
 
-		let client = SmtpTransport::relay(&smtp_config.host)
+		let client = AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp_config.host)
 			.unwrap()
 			.port(smtp_config.port)
 			.credentials(Credentials::new(smtp_config.username, smtp_config.password))
@@ -352,47 +347,47 @@ mod tests {
 	// format_message tests
 	////////////////////////////////////////////////////////////
 
-	#[test]
-	fn test_format_message_basic_substitution() {
+	#[tokio::test]
+	async fn test_format_message_basic_substitution() {
 		let notifier = create_test_notifier();
 		let mut variables = HashMap::new();
 		variables.insert("name".to_string(), "Alice".to_string());
 		variables.insert("balance".to_string(), "100".to_string());
 
-		let result = notifier.format_message(&variables);
+		let result = EmailNotifier::format_message(notifier.body_template(), &variables);
 		let expected_result = "<p>Hello Alice, your balance is 100</p>\n";
 		assert_eq!(result, expected_result);
 	}
 
-	#[test]
-	fn test_format_message_missing_variable() {
+	#[tokio::test]
+	async fn test_format_message_missing_variable() {
 		let notifier = create_test_notifier();
 		let mut variables = HashMap::new();
 		variables.insert("name".to_string(), "Bob".to_string());
 
-		let result = notifier.format_message(&variables);
+		let result = EmailNotifier::format_message(notifier.body_template(), &variables);
 		let expected_result = "<p>Hello Bob, your balance is ${balance}</p>\n";
 		assert_eq!(result, expected_result);
 	}
 
-	#[test]
-	fn test_format_message_empty_variables() {
+	#[tokio::test]
+	async fn test_format_message_empty_variables() {
 		let notifier = create_test_notifier();
 		let variables = HashMap::new();
 
-		let result = notifier.format_message(&variables);
+		let result = EmailNotifier::format_message(notifier.body_template(), &variables);
 		let expected_result = "<p>Hello ${name}, your balance is ${balance}</p>\n";
 		assert_eq!(result, expected_result);
 	}
 
-	#[test]
-	fn test_format_message_with_empty_values() {
+	#[tokio::test]
+	async fn test_format_message_with_empty_values() {
 		let notifier = create_test_notifier();
 		let mut variables = HashMap::new();
 		variables.insert("name".to_string(), "".to_string());
 		variables.insert("balance".to_string(), "".to_string());
 
-		let result = notifier.format_message(&variables);
+		let result = EmailNotifier::format_message(notifier.body_template(), &variables);
 		let expected_result = "<p>Hello , your balance is</p>\n";
 		assert_eq!(result, expected_result);
 	}
@@ -455,7 +450,7 @@ mod tests {
 		};
 
 		let smtp_client = Arc::new(
-			SmtpTransport::relay(&smtp_config.host)
+			AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp_config.host)
 				.unwrap()
 				.port(smtp_config.port)
 				.credentials(Credentials::new(smtp_config.username, smtp_config.password))
@@ -499,7 +494,7 @@ mod tests {
 	////////////////////////////////////////////////////////////
 	#[tokio::test]
 	async fn test_notify_succeeds_on_first_try() {
-		let transport = StubTransport::new_ok();
+		let transport = AsyncStubTransport::new_ok();
 		let notifier = EmailNotifier::with_transport(
 			create_test_email_content(),
 			transport.clone(),
@@ -507,12 +502,12 @@ mod tests {
 		);
 
 		notifier.notify("test message").await.unwrap();
-		assert_eq!(transport.messages().len(), 1);
+		assert_eq!(transport.messages().await.len(), 1);
 	}
 
 	#[tokio::test]
 	async fn test_notify_fails_after_all_retries() {
-		let transport = StubTransport::new_error();
+		let transport = AsyncStubTransport::new_error();
 		let retry_policy = RetryConfig::default();
 		let default_max_retries = retry_policy.max_retries as usize;
 		let notifier = EmailNotifier::with_transport(
@@ -524,7 +519,7 @@ mod tests {
 		let result = notifier.notify("test message").await;
 		assert!(result.is_err());
 		assert_eq!(
-			transport.messages().len(),
+			transport.messages().await.len(),
 			1 + default_max_retries,
 			"Should be called 1 time + default max retries"
 		);
