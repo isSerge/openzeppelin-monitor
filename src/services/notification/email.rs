@@ -119,7 +119,7 @@ impl EmailNotifier<AsyncSmtpTransport<Tokio1Executor>> {
 	}
 
 	/// Formats a message by substituting variables in the template and converts it to HTML
-	/// Method is static because properterty-based tests do not have tokio runtime available,
+	/// Method is static because property-based tests do not have tokio runtime available,
 	/// which is required for AsyncSmtpTransport
 	///
 	/// # Arguments
