@@ -7,23 +7,18 @@ use async_trait::async_trait;
 
 use std::{collections::HashMap, sync::Arc};
 
-mod discord;
 mod email;
 mod error;
+mod payload_builder;
 mod pool;
 mod script;
-mod slack;
-mod telegram;
 mod webhook;
-
-mod payload_builder;
 
 use crate::{
 	models::{MonitorMatch, ScriptLanguage, Trigger, TriggerType, TriggerTypeConfig},
 	utils::normalize_string,
 };
 
-pub use discord::DiscordNotifier;
 pub use email::{EmailContent, EmailNotifier, SmtpConfig};
 pub use error::NotificationError;
 pub use payload_builder::{
@@ -32,8 +27,6 @@ pub use payload_builder::{
 };
 pub use pool::NotificationClientPool;
 pub use script::ScriptNotifier;
-pub use slack::SlackNotifier;
-pub use telegram::TelegramNotifier;
 pub use webhook::{WebhookConfig, WebhookNotifier};
 
 /// Interface for notification implementations
