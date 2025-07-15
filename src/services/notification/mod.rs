@@ -97,6 +97,22 @@ impl NotificationService {
 		}
 	}
 
+	/// Formats a message by substituting variables in the template
+	///
+	/// # Arguments
+	/// * `body_template` - Message template with variables
+	/// * `variables` - Map of variable names to values
+	///
+	/// # Returns
+	/// * `String` - Formatted message with variables replaced
+	pub fn format_message(body_template: &str, variables: &HashMap<String, String>) -> String {
+		let mut message = body_template.to_string();
+		for (key, value) in variables {
+			message = message.replace(&format!("${{{}}}", key), value);
+		}
+		message
+	}
+
 	/// Executes a notification based on the trigger configuration
 	///
 	/// # Arguments
@@ -145,8 +161,18 @@ impl NotificationService {
 
 				match &trigger.trigger_type {
 					TriggerType::Webhook => {
+						let body_template = match &trigger.config {
+							TriggerTypeConfig::Webhook { message, .. } => message.body.clone(),
+							_ => {
+								return Err(NotificationError::config_error(
+									"Invalid webhook configuration".to_string(),
+									None,
+									None,
+								));
+							}
+						};
 						let notifier = WebhookNotifier::from_config(&trigger.config, http_client)?;
-						let message = notifier.format_message(variables);
+						let message = Self::format_message(&body_template, variables);
 						notifier.notify(&message).await?;
 					}
 					TriggerType::Discord => {
@@ -181,7 +207,7 @@ impl NotificationService {
 						};
 
 						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
-						let message = notifier.format_message(variables);
+						let message = Self::format_message(&body_template, variables);
 						let payload = DiscordPayloadBuilder.build_payload(&title, &message);
 						notifier.notify_json(&payload).await?;
 					}
@@ -222,7 +248,7 @@ impl NotificationService {
 						};
 
 						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
-						let message = notifier.format_message(variables);
+						let message = Self::format_message(&body_template, variables);
 						let payload = TelegramPayloadBuilder {
 							chat_id,
 							disable_web_preview,
@@ -260,7 +286,7 @@ impl NotificationService {
 						};
 
 						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
-						let message = notifier.format_message(variables);
+						let message = Self::format_message(&body_template, variables);
 						let payload = SlackPayloadBuilder.build_payload(&title, &message);
 						notifier.notify_json(&payload).await?;
 					}

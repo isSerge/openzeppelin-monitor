@@ -67,12 +67,7 @@ async fn test_webhook_notification_success() {
 	let http_client = get_http_client_from_notification_pool().await;
 	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
-	// Prepare and send test message
-	let mut variables = HashMap::new();
-	variables.insert("value".to_string(), "42".to_string());
-	let message = notifier.format_message(&variables);
-
-	let result = notifier.notify(&message).await;
+	let result = notifier.notify("Test message").await;
 
 	assert!(result.is_ok());
 	mock.assert();

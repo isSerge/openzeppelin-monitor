@@ -44,8 +44,6 @@ pub struct WebhookNotifier {
 	pub url_params: Option<HashMap<String, String>>,
 	/// Title to display in the message
 	pub title: String,
-	/// Message template with variable placeholders
-	pub body_template: String,
 	/// Configured HTTP client for webhook requests with retry capabilities
 	pub client: Arc<ClientWithMiddleware>,
 	/// HTTP method to use for the webhook request
@@ -79,28 +77,12 @@ impl WebhookNotifier {
 			url: config.url,
 			url_params: config.url_params,
 			title: config.title,
-			body_template: config.body_template,
 			client: http_client,
 			method: Some(config.method.unwrap_or("POST".to_string())),
 			secret: config.secret,
 			headers: Some(headers),
 			payload_fields: config.payload_fields,
 		})
-	}
-
-	/// Formats a message by substituting variables in the template
-	///
-	/// # Arguments
-	/// * `variables` - Map of variable names to values
-	///
-	/// # Returns
-	/// * `String` - Formatted message with variables replaced
-	pub fn format_message(&self, variables: &HashMap<String, String>) -> String {
-		let mut message = self.body_template.clone();
-		for (key, value) in variables {
-			message = message.replace(&format!("${{{}}}", key), value);
-		}
-		message
 	}
 
 	/// Creates a Webhook notifier from a trigger configuration
@@ -350,7 +332,6 @@ mod tests {
 
 	fn create_test_notifier(
 		url: &str,
-		body_template: &str,
 		secret: Option<&str>,
 		headers: Option<HashMap<String, String>>,
 	) -> WebhookNotifier {
@@ -359,7 +340,7 @@ mod tests {
 			url: url.to_string(),
 			url_params: None,
 			title: "Alert".to_string(),
-			body_template: body_template.to_string(),
+			body_template: "Test message".to_string(),
 			method: Some("POST".to_string()),
 			secret: secret.map(|s| s.to_string()),
 			headers,
@@ -383,53 +364,6 @@ mod tests {
 	}
 
 	////////////////////////////////////////////////////////////
-	// format_message tests
-	////////////////////////////////////////////////////////////
-
-	#[test]
-	fn test_format_message() {
-		let notifier = create_test_notifier(
-			"https://webhook.example.com",
-			"Value is ${value} and status is ${status}",
-			None,
-			None,
-		);
-
-		let mut variables = HashMap::new();
-		variables.insert("value".to_string(), "100".to_string());
-		variables.insert("status".to_string(), "critical".to_string());
-
-		let result = notifier.format_message(&variables);
-		assert_eq!(result, "Value is 100 and status is critical");
-	}
-
-	#[test]
-	fn test_format_message_with_missing_variables() {
-		let notifier = create_test_notifier(
-			"https://webhook.example.com",
-			"Value is ${value} and status is ${status}",
-			None,
-			None,
-		);
-
-		let mut variables = HashMap::new();
-		variables.insert("value".to_string(), "100".to_string());
-		// status variable is not provided
-
-		let result = notifier.format_message(&variables);
-		assert_eq!(result, "Value is 100 and status is ${status}");
-	}
-
-	#[test]
-	fn test_format_message_with_empty_template() {
-		let notifier = create_test_notifier("https://webhook.example.com", "", None, None);
-
-		let variables = HashMap::new();
-		let result = notifier.format_message(&variables);
-		assert_eq!(result, "");
-	}
-
-	////////////////////////////////////////////////////////////
 	// sign_request tests
 	////////////////////////////////////////////////////////////
 
@@ -437,7 +371,6 @@ mod tests {
 	fn test_sign_request() {
 		let notifier = create_test_notifier(
 			"https://webhook.example.com",
-			"Test message",
 			Some("test-secret"),
 			None,
 		);
@@ -457,7 +390,7 @@ mod tests {
 	#[test]
 	fn test_sign_request_fails_empty_secret() {
 		let notifier =
-			create_test_notifier("https://webhook.example.com", "Test message", None, None);
+			create_test_notifier("https://webhook.example.com", None, None);
 		let payload = json!({
 			"title": "Test Title",
 			"body": "Test message"
@@ -485,7 +418,6 @@ mod tests {
 		let notifier = notifier.unwrap();
 		assert_eq!(notifier.url, "https://webhook.example.com");
 		assert_eq!(notifier.title, "Test Alert");
-		assert_eq!(notifier.body_template, "Test message ${value}");
 	}
 
 	#[test]
@@ -517,7 +449,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_notify_failure() {
 		let notifier =
-			create_test_notifier("https://webhook.example.com", "Test message", None, None);
+			create_test_notifier("https://webhook.example.com", None, None);
 		let result = notifier.notify("Test message").await;
 		assert!(result.is_err());
 	}
@@ -536,12 +468,13 @@ mod tests {
 
 		let notifier = create_test_notifier(
 			server.url().as_str(),
-			"Test message",
 			Some("top-secret"),
-			Some(HashMap::from([(
-				"Content-Type".to_string(),
-				"application/json".to_string(),
-			)])),
+			Some(HashMap::from([
+				(
+					"Content-Type".to_string(),
+					"application/json".to_string(),
+				),
+			])),
 		);
 
 		let response = notifier.notify("Test message").await;
@@ -563,7 +496,6 @@ mod tests {
 
 		let notifier = create_test_notifier(
 			server.url().as_str(),
-			"Test message",
 			None,
 			Some(invalid_headers),
 		);
@@ -581,7 +513,6 @@ mod tests {
 
 		let notifier = create_test_notifier(
 			server.url().as_str(),
-			"Test message",
 			None,
 			Some(invalid_headers),
 		);
@@ -609,7 +540,6 @@ mod tests {
 
 		let notifier = create_test_notifier(
 			server.url().as_str(),
-			"Test message",
 			None,
 			Some(valid_headers),
 		);
@@ -633,7 +563,6 @@ mod tests {
 
 		let notifier = create_test_notifier(
 			server.url().as_str(),
-			"Test message",
 			Some("test-secret"),
 			None,
 		);
@@ -647,7 +576,6 @@ mod tests {
 	fn test_sign_request_validation() {
 		let notifier = create_test_notifier(
 			"https://webhook.example.com",
-			"Test message",
 			Some("test-secret"),
 			None,
 		);
@@ -697,7 +625,7 @@ mod tests {
 			.create_async()
 			.await;
 
-		let notifier = create_test_notifier(server.url().as_str(), "Test message", None, None);
+		let notifier = create_test_notifier(server.url().as_str(), None, None);
 		let mut payload = HashMap::new();
 		// Insert fields in the same order as they appear in expected_payload
 		payload.insert("title".to_string(), serde_json::json!("Alert"));
@@ -871,7 +799,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_notify_with_payload_invalid_url() {
-		let notifier = create_test_notifier("invalid-url", "Test message", None, None);
+		let notifier = create_test_notifier("invalid-url", None, None);
 
 		let result = notifier
 			.notify_with_payload("Test message", HashMap::new())
@@ -894,7 +822,7 @@ mod tests {
 			.create_async()
 			.await;
 
-		let notifier = create_test_notifier(server.url().as_str(), "Test message", None, None);
+		let notifier = create_test_notifier(server.url().as_str(), None, None);
 
 		let result = notifier
 			.notify_with_payload("Test message", HashMap::new())
@@ -915,7 +843,7 @@ mod tests {
 			.create_async()
 			.await;
 
-		let notifier = create_test_notifier(server.url().as_str(), "Test message", None, None);
+		let notifier = create_test_notifier(server.url().as_str(), None, None);
 
 		let result = notifier
 			.notify_with_payload("Test message", HashMap::new())
