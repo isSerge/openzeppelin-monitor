@@ -16,6 +16,8 @@ mod slack;
 mod telegram;
 mod webhook;
 
+mod payload_builder;
+
 use crate::{
 	models::{MonitorMatch, ScriptLanguage, Trigger, TriggerType, TriggerTypeConfig},
 	utils::normalize_string,
@@ -24,6 +26,10 @@ use crate::{
 pub use discord::DiscordNotifier;
 pub use email::{EmailContent, EmailNotifier, SmtpConfig};
 pub use error::NotificationError;
+pub use payload_builder::{
+	DiscordPayloadBuilder, GenericWebhookPayloadBuilder, SlackPayloadBuilder,
+	TelegramPayloadBuilder, WebhookPayloadBuilder,
+};
 pub use pool::NotificationClientPool;
 pub use script::ScriptNotifier;
 pub use slack::SlackNotifier;
@@ -161,9 +167,38 @@ impl NotificationService {
 						notifier.notify(&message).await?;
 					}
 					TriggerType::Slack => {
-						let notifier = SlackNotifier::from_config(&trigger.config, http_client)?;
+						let (url, title, body_template) = match &trigger.config {
+							TriggerTypeConfig::Slack {
+								slack_url, message, ..
+							} => (
+								slack_url.as_ref().to_string(),
+								message.title.clone(),
+								message.body.clone(),
+							),
+							_ => {
+								return Err(NotificationError::config_error(
+									"Invalid slack configuration".to_string(),
+									None,
+									None,
+								));
+							}
+						};
+
+						let webhook_config = WebhookConfig {
+							url,
+							url_params: None,
+							title: title.clone(),
+							body_template: body_template.clone(),
+							method: Some("POST".to_string()),
+							secret: None,
+							headers: None,
+							payload_fields: None,
+						};
+
+						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
 						let message = notifier.format_message(variables);
-						notifier.notify(&message).await?;
+						let payload = SlackPayloadBuilder.build_payload(&title, &message);
+						notifier.notify_json(&payload).await?;
 					}
 					_ => unreachable!(),
 				}
