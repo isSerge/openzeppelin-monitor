@@ -3,10 +3,9 @@
 //! This module provides functionality to build webhook payloads for different notification services (Telegram, Slack, Discord, etc.).
 
 use serde_json::json;
-use std::collections::HashMap;
 
 /// Trait for building webhook payloads.
-pub trait WebhookPayloadBuilder {
+pub trait WebhookPayloadBuilder: Send + Sync {
     /// Builds a webhook payload.
     ///
     /// # Arguments
