@@ -164,7 +164,14 @@ impl WebhookNotifier {
 		})?; // Handle error if secret is invalid
 
 		// Create the message to sign
-		let message = format!("{}{}", payload, timestamp);
+		let serialized_payload = serde_json::to_string(payload).map_err(|e| {
+			NotificationError::internal_error(
+				format!("Failed to serialize payload: {}", e),
+				Some(e.into()),
+				None,
+			)
+		})?;
+		let message = format!("{}{}", serialized_payload, timestamp);
 		mac.update(message.as_bytes());
 
 		// Get the HMAC result
