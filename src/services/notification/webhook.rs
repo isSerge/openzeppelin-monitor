@@ -11,7 +11,6 @@ use reqwest::{
 	Method,
 };
 use reqwest_middleware::ClientWithMiddleware;
-use serde::Serialize;
 use sha2::Sha256;
 use std::{collections::HashMap, sync::Arc};
 
@@ -57,14 +56,6 @@ pub struct WebhookNotifier {
 	pub headers: Option<HashMap<String, String>>,
 	/// Payload fields to use for the webhook request
 	pub payload_fields: Option<HashMap<String, serde_json::Value>>,
-}
-
-/// Represents a formatted webhook message
-#[derive(Serialize, Debug)]
-pub struct WebhookMessage {
-	/// The content of the message
-	title: String,
-	body: String,
 }
 
 impl WebhookNotifier {
@@ -189,10 +180,7 @@ impl WebhookNotifier {
 	///
 	/// # Returns
 	/// * `Result<(), NotificationError>` - Success or error
-	pub async fn notify_json(
-		&self,
-		payload: &serde_json::Value,
-	) -> Result<(), NotificationError> {
+	pub async fn notify_json(&self, payload: &serde_json::Value) -> Result<(), NotificationError> {
 		let mut url = self.url.clone();
 		// Add URL parameters if present
 		if let Some(params) = &self.url_params {
