@@ -157,9 +157,40 @@ impl NotificationService {
 						notifier.notify(&message).await?;
 					}
 					TriggerType::Discord => {
-						let notifier = DiscordNotifier::from_config(&trigger.config, http_client)?;
+						let (url, title, body_template) = match &trigger.config {
+							TriggerTypeConfig::Discord {
+								discord_url,
+								message,
+								..
+							} => (
+								discord_url.as_ref().to_string(),
+								message.title.clone(),
+								message.body.clone(),
+							),
+							_ => {
+								return Err(NotificationError::config_error(
+									"Invalid discord configuration".to_string(),
+									None,
+									None,
+								));
+							}
+						};
+
+						let webhook_config = WebhookConfig {
+							url,
+							url_params: None,
+							title: title.clone(),
+							body_template: body_template.clone(),
+							method: Some("POST".to_string()),
+							secret: None,
+							headers: None,
+							payload_fields: None,
+						};
+
+						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
 						let message = notifier.format_message(variables);
-						notifier.notify(&message).await?;
+						let payload = DiscordPayloadBuilder.build_payload(&title, &message);
+						notifier.notify_json(&payload).await?;
 					}
 					TriggerType::Telegram => {
 						let notifier = TelegramNotifier::from_config(&trigger.config, http_client)?;
