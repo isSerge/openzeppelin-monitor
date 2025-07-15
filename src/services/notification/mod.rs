@@ -29,6 +29,7 @@ pub use pool::NotificationClientPool;
 pub use script::ScriptNotifier;
 pub use webhook::{WebhookConfig, WebhookNotifier};
 
+/// TODO: Remove Notifier trait after refactoring is complete.
 /// Interface for notification implementations
 ///
 /// All notification types must implement this trait to provide
@@ -159,139 +160,114 @@ impl NotificationService {
 						)
 					})?;
 
-				match &trigger.trigger_type {
-					TriggerType::Webhook => {
-						let body_template = match &trigger.config {
-							TriggerTypeConfig::Webhook { message, .. } => message.body.clone(),
-							_ => {
-								return Err(NotificationError::config_error(
-									"Invalid webhook configuration".to_string(),
-									None,
-									None,
-								));
-							}
-						};
-						let notifier = WebhookNotifier::from_config(&trigger.config, http_client)?;
-						let message = Self::format_message(&body_template, variables);
-						notifier.notify(&message).await?;
-					}
-					TriggerType::Discord => {
-						let (url, title, body_template) = match &trigger.config {
-							TriggerTypeConfig::Discord {
-								discord_url,
-								message,
-								..
-							} => (
-								discord_url.as_ref().to_string(),
-								message.title.clone(),
-								message.body.clone(),
-							),
-							_ => {
-								return Err(NotificationError::config_error(
-									"Invalid discord configuration".to_string(),
-									None,
-									None,
-								));
-							}
-						};
-
-						let webhook_config = WebhookConfig {
+				let (url, title, body_template, method, secret, headers, chat_id, disable_web_preview) =
+					match &trigger.config {
+						TriggerTypeConfig::Webhook {
 							url,
-							url_params: None,
-							title: title.clone(),
-							body_template: body_template.clone(),
-							method: Some("POST".to_string()),
-							secret: None,
-							headers: None,
-							payload_fields: None,
-						};
-
-						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
-						let message = Self::format_message(&body_template, variables);
-						let payload = DiscordPayloadBuilder.build_payload(&title, &message);
-						notifier.notify_json(&payload).await?;
-					}
-					TriggerType::Telegram => {
-						let (token, chat_id, disable_web_preview, title, body_template) =
-							match &trigger.config {
-								TriggerTypeConfig::Telegram {
-									token,
-									chat_id,
-									disable_web_preview,
-									message,
-									..
-								} => (
-									token.as_ref().to_string(),
-									chat_id.clone(),
-									disable_web_preview.unwrap_or(false),
-									message.title.clone(),
-									message.body.clone(),
-								),
-								_ => {
-									return Err(NotificationError::config_error(
-										"Invalid telegram configuration".to_string(),
-										None,
-										None,
-									));
-								}
-							};
-
-						let webhook_config = WebhookConfig {
-							url: format!("https://api.telegram.org/bot{}/sendMessage", token),
-							url_params: None,
-							title: title.clone(),
-							body_template: body_template.clone(),
-							method: Some("POST".to_string()),
-							secret: None,
-							headers: None,
-							payload_fields: None,
-						};
-
-						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
-						let message = Self::format_message(&body_template, variables);
-						let payload = TelegramPayloadBuilder {
+							message,
+							method,
+							secret,
+							headers,
+							..
+						} => (
+							url.as_ref().to_string(),
+							message.title.clone(),
+							message.body.clone(),
+							method.clone(),
+							secret.as_ref().map(|s| s.as_ref().to_string()),
+							headers.clone(),
+							None,
+							None,
+						),
+						TriggerTypeConfig::Discord {
+							discord_url,
+							message,
+							..
+						} => (
+							discord_url.as_ref().to_string(),
+							message.title.clone(),
+							message.body.clone(),
+							Some("POST".to_string()),
+							None,
+							None,
+							None,
+							None,
+						),
+						TriggerTypeConfig::Telegram {
+							token,
 							chat_id,
 							disable_web_preview,
+							message,
+							..
+						} => (
+							format!("https://api.telegram.org/bot{}/sendMessage", token),
+							message.title.clone(),
+							message.body.clone(),
+							Some("POST".to_string()),
+							None,
+							None,
+							Some(chat_id.clone()),
+							Some(disable_web_preview.unwrap_or(false)),
+						),
+						TriggerTypeConfig::Slack {
+							slack_url,
+							message,
+							..
+						} => (
+							slack_url.as_ref().to_string(),
+							message.title.clone(),
+							message.body.clone(),
+							Some("POST".to_string()),
+							None,
+							None,
+							None,
+							None,
+						),
+						_ => {
+							return Err(NotificationError::config_error(
+								format!(
+									"Invalid webhook configuration for trigger type: {:?}",
+									trigger.trigger_type
+								),
+								None,
+								None,
+							));
 						}
-						.build_payload(&title, &message);
-						notifier.notify_json(&payload).await?;
-					}
-					TriggerType::Slack => {
-						let (url, title, body_template) = match &trigger.config {
-							TriggerTypeConfig::Slack {
-								slack_url, message, ..
-							} => (
-								slack_url.as_ref().to_string(),
-								message.title.clone(),
-								message.body.clone(),
-							),
-							_ => {
-								return Err(NotificationError::config_error(
-									"Invalid slack configuration".to_string(),
-									None,
-									None,
-								));
-							}
-						};
+					};
 
-						let webhook_config = WebhookConfig {
-							url,
-							url_params: None,
-							title: title.clone(),
-							body_template: body_template.clone(),
-							method: Some("POST".to_string()),
-							secret: None,
-							headers: None,
-							payload_fields: None,
-						};
+				let webhook_config = WebhookConfig {
+					url,
+					url_params: None,
+					title: title.clone(),
+					body_template: body_template.clone(),
+					method,
+					secret,
+					headers,
+					payload_fields: None,
+				};
 
-						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
-						let message = Self::format_message(&body_template, variables);
-						let payload = SlackPayloadBuilder.build_payload(&title, &message);
-						notifier.notify_json(&payload).await?;
+				let notifier = WebhookNotifier::new(webhook_config, http_client)?;
+				let message = Self::format_message(&body_template, variables);
+
+				let payload = match trigger.trigger_type {
+					TriggerType::Slack => SlackPayloadBuilder.build_payload(&title, &message),
+					TriggerType::Discord => DiscordPayloadBuilder.build_payload(&title, &message),
+					TriggerType::Telegram => TelegramPayloadBuilder {
+						chat_id: chat_id.ok_or_else(|| {
+							NotificationError::config_error(
+								"Telegram chat_id is required".to_string(),
+								None,
+								None,
+							)
+						})?,
+						disable_web_preview: disable_web_preview.unwrap_or(false),
 					}
-					_ => unreachable!(),
-				}
+					.build_payload(&title, &message),
+					TriggerType::Webhook => GenericWebhookPayloadBuilder.build_payload(&title, &message),
+					_ => unreachable!(), // Should be caught by the outer match
+				};
+
+				notifier.notify_json(&payload).await?;
 			}
 			TriggerType::Email => {
 				// Extract SMTP configuration from the trigger
