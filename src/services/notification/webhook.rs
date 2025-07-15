@@ -151,10 +151,10 @@ impl WebhookNotifier {
 		}
 	}
 
-	pub fn sign_request(
+	pub fn sign_payload(
 		&self,
 		secret: &str,
-		payload: &WebhookMessage,
+		payload: &serde_json::Value,
 	) -> Result<(String, String), NotificationError> {
 		// Explicitly reject empty secret, because `HmacSha256::new_from_slice` currently allows empty secrets
 		if secret.is_empty() {
@@ -173,7 +173,7 @@ impl WebhookNotifier {
 		})?; // Handle error if secret is invalid
 
 		// Create the message to sign
-		let message = format!("{:?}{}", payload, timestamp);
+		let message = format!("{}{}", payload, timestamp);
 		mac.update(message.as_bytes());
 
 		// Get the HMAC result
@@ -181,38 +181,17 @@ impl WebhookNotifier {
 
 		Ok((signature, timestamp.to_string()))
 	}
-}
 
-#[async_trait]
-impl Notifier for WebhookNotifier {
-	/// Sends a formatted message to Webhook
+	/// Sends a JSON payload to Webhook
 	///
 	/// # Arguments
-	/// * `message` - The formatted message to send
+	/// * `payload` - The JSON payload to send
 	///
 	/// # Returns
 	/// * `Result<(), NotificationError>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
-		// Default payload with title and body
-		let mut payload_fields = HashMap::new();
-		payload_fields.insert("title".to_string(), serde_json::json!(self.title));
-		payload_fields.insert("body".to_string(), serde_json::json!(message));
-
-		self.notify_with_payload(message, payload_fields).await
-	}
-
-	/// Sends a formatted message to Webhook with custom payload fields
-	///
-	/// # Arguments
-	/// * `message` - The formatted message to send
-	/// * `payload_fields` - Additional fields to include in the payload
-	///
-	/// # Returns
-	/// * `Result<(), NotificationError>` - Success or error
-	async fn notify_with_payload(
+	pub async fn notify_json(
 		&self,
-		message: &str,
-		mut payload_fields: HashMap<String, serde_json::Value>,
+		payload: &serde_json::Value,
 	) -> Result<(), NotificationError> {
 		let mut url = self.url.clone();
 		// Add URL parameters if present
@@ -223,15 +202,6 @@ impl Notifier for WebhookNotifier {
 				.collect();
 			if !params_str.is_empty() {
 				url = format!("{}?{}", url, params_str.join("&"));
-			}
-		}
-
-		// Merge with default payload fields if they exist
-		if let Some(default_fields) = &self.payload_fields {
-			for (key, value) in default_fields {
-				if !payload_fields.contains_key(key) {
-					payload_fields.insert(key.clone(), value.clone());
-				}
 			}
 		}
 
@@ -249,17 +219,9 @@ impl Notifier for WebhookNotifier {
 		);
 
 		if let Some(secret) = &self.secret {
-			// Create a WebhookMessage for signing
-			let payload_for_signing = WebhookMessage {
-				title: self.title.clone(),
-				body: message.to_string(),
-			};
-
-			let (signature, timestamp) =
-				self.sign_request(secret, &payload_for_signing)
-					.map_err(|e| {
-						NotificationError::internal_error(e.to_string(), Some(e.into()), None)
-					})?;
+			let (signature, timestamp) = self.sign_payload(secret, payload).map_err(|e| {
+				NotificationError::internal_error(e.to_string(), Some(e.into()), None)
+			})?;
 
 			// Add signature headers
 			headers.insert(
@@ -310,7 +272,7 @@ impl Notifier for WebhookNotifier {
 			.client
 			.request(method, url.as_str())
 			.headers(headers)
-			.json(&payload_fields)
+			.json(payload)
 			.send()
 			.await
 			.map_err(|e| {
@@ -332,6 +294,51 @@ impl Notifier for WebhookNotifier {
 		}
 
 		Ok(())
+	}
+}
+
+#[async_trait]
+impl Notifier for WebhookNotifier {
+	/// Sends a formatted message to Webhook
+	///
+	/// # Arguments
+	/// * `message` - The formatted message to send
+	///
+	/// # Returns
+	/// * `Result<(), NotificationError>` - Success or error
+	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
+		// Default payload with title and body
+		let mut payload_fields = HashMap::new();
+		payload_fields.insert("title".to_string(), serde_json::json!(self.title));
+		payload_fields.insert("body".to_string(), serde_json::json!(message));
+
+		self.notify_with_payload(message, payload_fields).await
+	}
+
+	/// Sends a formatted message to Webhook with custom payload fields
+	///
+	/// # Arguments
+	/// * `message` - The formatted message to send
+	/// * `payload_fields` - Additional fields to include in the payload
+	///
+	/// # Returns
+	/// * `Result<(), NotificationError>` - Success or error
+	async fn notify_with_payload(
+		&self,
+		_message: &str,
+		mut payload_fields: HashMap<String, serde_json::Value>,
+	) -> Result<(), NotificationError> {
+		// Merge with default payload fields if they exist
+		if let Some(default_fields) = &self.payload_fields {
+			for (key, value) in default_fields {
+				if !payload_fields.contains_key(key) {
+					payload_fields.insert(key.clone(), value.clone());
+				}
+			}
+		}
+		let payload = serde_json::Value::Object(payload_fields.into_iter().collect());
+
+		self.notify_json(&payload).await
 	}
 }
 
@@ -439,13 +446,13 @@ mod tests {
 			Some("test-secret"),
 			None,
 		);
-		let payload = WebhookMessage {
-			title: "Test Title".to_string(),
-			body: "Test message".to_string(),
-		};
+		let payload = json!({
+			"title": "Test Title",
+			"body": "Test message"
+		});
 		let secret = "test-secret";
 
-		let result = notifier.sign_request(secret, &payload).unwrap();
+		let result = notifier.sign_payload(secret, &payload).unwrap();
 		let (signature, timestamp) = result;
 
 		assert!(!signature.is_empty());
@@ -456,13 +463,13 @@ mod tests {
 	fn test_sign_request_fails_empty_secret() {
 		let notifier =
 			create_test_notifier("https://webhook.example.com", "Test message", None, None);
-		let payload = WebhookMessage {
-			title: "Test Title".to_string(),
-			body: "Test message".to_string(),
-		};
+		let payload = json!({
+			"title": "Test Title",
+			"body": "Test message"
+		});
 		let empty_secret = "";
 
-		let result = notifier.sign_request(empty_secret, &payload);
+		let result = notifier.sign_payload(empty_secret, &payload);
 		assert!(result.is_err());
 
 		let error = result.unwrap_err();
@@ -527,7 +534,7 @@ mod tests {
 			.mock("POST", "/")
 			.match_header("X-Signature", Matcher::Regex("^[0-9a-f]{64}$".to_string()))
 			.match_header("X-Timestamp", Matcher::Regex("^[0-9]+$".to_string()))
-			.match_header("Content-Type", "text/plain")
+			.match_header("Content-Type", "application/json")
 			.with_status(200)
 			.create_async()
 			.await;
@@ -538,7 +545,7 @@ mod tests {
 			Some("top-secret"),
 			Some(HashMap::from([(
 				"Content-Type".to_string(),
-				"text/plain".to_string(),
+				"application/json".to_string(),
 			)])),
 		);
 
@@ -650,12 +657,12 @@ mod tests {
 			None,
 		);
 
-		let payload = WebhookMessage {
-			title: "Test Title".to_string(),
-			body: "Test message".to_string(),
-		};
+		let payload = json!({
+			"title": "Test Title",
+			"body": "Test message"
+		});
 
-		let result = notifier.sign_request("test-secret", &payload).unwrap();
+		let result = notifier.sign_payload("test-secret", &payload).unwrap();
 		let (signature, timestamp) = result;
 
 		// Validate signature format (should be a hex string)
