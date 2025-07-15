@@ -6,8 +6,7 @@
 //! and produces consistent, well-formed output across various input combinations.
 
 use openzeppelin_monitor::{
-	services::notification::{WebhookConfig, WebhookNotifier},
-	utils::tests::create_test_http_client,
+	services::notification::NotificationService,
 };
 use proptest::{prelude::*, test_runner::Config};
 use std::collections::HashMap;
@@ -36,22 +35,8 @@ proptest! {
 		template in "[a-zA-Z0-9 ${}_]{1,100}",
 		vars in template_variables_strategy()
 	) {
-		let config = WebhookConfig {
-			url: "https://webhook.com/test".to_string(),
-			url_params: None,
-			title: "Test".to_string(),
-			body_template: template.clone(),
-			method: None,
-			secret: None,
-			headers: None,
-			payload_fields: None,
-		};
-		let http_client = create_test_http_client();
-		let notifier = WebhookNotifier::new(config, http_client)
-		.unwrap();
-
-		let first_pass = notifier.format_message(&vars);
-		let second_pass = notifier.format_message(&vars);
+		let first_pass = NotificationService::format_message(&template, &vars);
+		let second_pass = NotificationService::format_message(&template, &vars);
 
 		prop_assert_eq!(first_pass, second_pass);
 	}
@@ -67,21 +52,7 @@ proptest! {
 		template in "[a-zA-Z0-9 ]{0,50}\\$\\{[a-z_]+\\}[a-zA-Z0-9 ]{0,50}",
 		vars in template_variables_strategy()
 	) {
-		let config = WebhookConfig {
-			url: "https://webhook.com/test".to_string(),
-			url_params: None,
-			title: "Test".to_string(),
-			body_template: template.clone(),
-			method: None,
-			secret: None,
-			headers: None,
-			payload_fields: None,
-		};
-		let http_client =create_test_http_client();
-		let notifier = WebhookNotifier::new(config, http_client)
-		.unwrap();
-
-		let formatted = notifier.format_message(&vars);
+		let formatted = NotificationService::format_message(&template, &vars);
 
 		// Verify no partial variable substitutions occurred
 		prop_assert!(!formatted.contains("${{"));
@@ -97,22 +68,8 @@ proptest! {
 	fn test_notification_empty_variables(
 		template in "[a-zA-Z0-9 ${}_]{1,100}"
 	) {
-		let config = WebhookConfig {
-			url: "https://webhook.com/test".to_string(),
-			url_params: None,
-			title: "Test".to_string(),
-			body_template: template.clone(),
-			method: None,
-			secret: None,
-			headers: None,
-			payload_fields: None,
-		};
-		let http_client = create_test_http_client();
-		let notifier = WebhookNotifier::new(config, http_client)
-		.unwrap();
-
 		let empty_vars = HashMap::new();
-		let formatted = notifier.format_message(&empty_vars);
+		let formatted = NotificationService::format_message(&template, &empty_vars);
 
 		// Template should remain unchanged when no variables are provided
 		prop_assert_eq!(formatted, format!("{}", template));
