@@ -193,9 +193,49 @@ impl NotificationService {
 						notifier.notify_json(&payload).await?;
 					}
 					TriggerType::Telegram => {
-						let notifier = TelegramNotifier::from_config(&trigger.config, http_client)?;
+						let (token, chat_id, disable_web_preview, title, body_template) =
+							match &trigger.config {
+								TriggerTypeConfig::Telegram {
+									token,
+									chat_id,
+									disable_web_preview,
+									message,
+									..
+								} => (
+									token.as_ref().to_string(),
+									chat_id.clone(),
+									disable_web_preview.unwrap_or(false),
+									message.title.clone(),
+									message.body.clone(),
+								),
+								_ => {
+									return Err(NotificationError::config_error(
+										"Invalid telegram configuration".to_string(),
+										None,
+										None,
+									));
+								}
+							};
+
+						let webhook_config = WebhookConfig {
+							url: format!("https://api.telegram.org/bot{}/sendMessage", token),
+							url_params: None,
+							title: title.clone(),
+							body_template: body_template.clone(),
+							method: Some("POST".to_string()),
+							secret: None,
+							headers: None,
+							payload_fields: None,
+						};
+
+						let notifier = WebhookNotifier::new(webhook_config, http_client)?;
 						let message = notifier.format_message(variables);
-						notifier.notify(&message).await?;
+						let payload = TelegramPayloadBuilder {
+							chat_id,
+							disable_web_preview,
+						}
+						.build_payload(&title, &message);
+						notifier.notify_json(&payload).await?;
 					}
 					TriggerType::Slack => {
 						let (url, title, body_template) = match &trigger.config {
