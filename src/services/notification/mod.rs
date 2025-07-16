@@ -160,80 +160,86 @@ impl NotificationService {
 						)
 					})?;
 
-				let (url, title, body_template, method, secret, headers, chat_id, disable_web_preview) =
-					match &trigger.config {
-						TriggerTypeConfig::Webhook {
-							url,
-							message,
-							method,
-							secret,
-							headers,
-							..
-						} => (
-							url.as_ref().to_string(),
-							message.title.clone(),
-							message.body.clone(),
-							method.clone(),
-							secret.as_ref().map(|s| s.as_ref().to_string()),
-							headers.clone(),
+				let (
+					url,
+					title,
+					body_template,
+					method,
+					secret,
+					headers,
+					chat_id,
+					disable_web_preview,
+				) = match &trigger.config {
+					TriggerTypeConfig::Webhook {
+						url,
+						message,
+						method,
+						secret,
+						headers,
+						..
+					} => (
+						url.as_ref().to_string(),
+						message.title.clone(),
+						message.body.clone(),
+						method.clone(),
+						secret.as_ref().map(|s| s.as_ref().to_string()),
+						headers.clone(),
+						None,
+						None,
+					),
+					TriggerTypeConfig::Discord {
+						discord_url,
+						message,
+						..
+					} => (
+						discord_url.as_ref().to_string(),
+						message.title.clone(),
+						message.body.clone(),
+						Some("POST".to_string()),
+						None,
+						None,
+						None,
+						None,
+					),
+					TriggerTypeConfig::Telegram {
+						token,
+						chat_id,
+						disable_web_preview,
+						message,
+						..
+					} => (
+						format!("https://api.telegram.org/bot{}/sendMessage", token),
+						message.title.clone(),
+						message.body.clone(),
+						Some("POST".to_string()),
+						None,
+						None,
+						Some(chat_id.clone()),
+						Some(disable_web_preview.unwrap_or(false)),
+					),
+					TriggerTypeConfig::Slack {
+						slack_url, message, ..
+					} => (
+						slack_url.as_ref().to_string(),
+						message.title.clone(),
+						message.body.clone(),
+						Some("POST".to_string()),
+						None,
+						None,
+						None,
+						None,
+					),
+					_ => {
+						return Err(NotificationError::config_error(
+							format!(
+								"Invalid webhook configuration for trigger type: {:?}",
+								trigger.trigger_type
+							),
 							None,
 							None,
-						),
-						TriggerTypeConfig::Discord {
-							discord_url,
-							message,
-							..
-						} => (
-							discord_url.as_ref().to_string(),
-							message.title.clone(),
-							message.body.clone(),
-							Some("POST".to_string()),
-							None,
-							None,
-							None,
-							None,
-						),
-						TriggerTypeConfig::Telegram {
-							token,
-							chat_id,
-							disable_web_preview,
-							message,
-							..
-						} => (
-							format!("https://api.telegram.org/bot{}/sendMessage", token),
-							message.title.clone(),
-							message.body.clone(),
-							Some("POST".to_string()),
-							None,
-							None,
-							Some(chat_id.clone()),
-							Some(disable_web_preview.unwrap_or(false)),
-						),
-						TriggerTypeConfig::Slack {
-							slack_url,
-							message,
-							..
-						} => (
-							slack_url.as_ref().to_string(),
-							message.title.clone(),
-							message.body.clone(),
-							Some("POST".to_string()),
-							None,
-							None,
-							None,
-							None,
-						),
-						_ => {
-							return Err(NotificationError::config_error(
-								format!(
-									"Invalid webhook configuration for trigger type: {:?}",
-									trigger.trigger_type
-								),
-								None,
-								None,
-							));
-						}
-					};
+						));
+					}
+				};
 
 				let webhook_config = WebhookConfig {
 					url,
@@ -263,7 +269,9 @@ impl NotificationService {
 						disable_web_preview: disable_web_preview.unwrap_or(false),
 					}
 					.build_payload(&title, &message),
-					TriggerType::Webhook => GenericWebhookPayloadBuilder.build_payload(&title, &message),
+					TriggerType::Webhook => {
+						GenericWebhookPayloadBuilder.build_payload(&title, &message)
+					}
 					_ => unreachable!(), // Should be caught by the outer match
 				};
 

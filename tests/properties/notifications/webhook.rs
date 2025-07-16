@@ -5,9 +5,7 @@
 //! The tests ensure that the Webhook notification system handles template variables correctly
 //! and produces consistent, well-formed output across various input combinations.
 
-use openzeppelin_monitor::{
-	services::notification::NotificationService,
-};
+use openzeppelin_monitor::services::notification::NotificationService;
 use proptest::{prelude::*, test_runner::Config};
 use std::collections::HashMap;
 

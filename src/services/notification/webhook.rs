@@ -369,11 +369,8 @@ mod tests {
 
 	#[test]
 	fn test_sign_request() {
-		let notifier = create_test_notifier(
-			"https://webhook.example.com",
-			Some("test-secret"),
-			None,
-		);
+		let notifier =
+			create_test_notifier("https://webhook.example.com", Some("test-secret"), None);
 		let payload = json!({
 			"title": "Test Title",
 			"body": "Test message"
@@ -389,8 +386,7 @@ mod tests {
 
 	#[test]
 	fn test_sign_request_fails_empty_secret() {
-		let notifier =
-			create_test_notifier("https://webhook.example.com", None, None);
+		let notifier = create_test_notifier("https://webhook.example.com", None, None);
 		let payload = json!({
 			"title": "Test Title",
 			"body": "Test message"
@@ -448,8 +444,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_notify_failure() {
-		let notifier =
-			create_test_notifier("https://webhook.example.com", None, None);
+		let notifier = create_test_notifier("https://webhook.example.com", None, None);
 		let result = notifier.notify("Test message").await;
 		assert!(result.is_err());
 	}
@@ -469,12 +464,10 @@ mod tests {
 		let notifier = create_test_notifier(
 			server.url().as_str(),
 			Some("top-secret"),
-			Some(HashMap::from([
-				(
+			Some(HashMap::from([(
 					"Content-Type".to_string(),
 					"application/json".to_string(),
-				),
-			])),
+			)])),
 		);
 
 		let response = notifier.notify("Test message").await;
@@ -494,11 +487,7 @@ mod tests {
 		let invalid_headers =
 			HashMap::from([("Invalid Header!@#".to_string(), "value".to_string())]);
 
-		let notifier = create_test_notifier(
-			server.url().as_str(),
-			None,
-			Some(invalid_headers),
-		);
+		let notifier = create_test_notifier(server.url().as_str(), None, Some(invalid_headers));
 
 		let result = notifier.notify("Test message").await;
 		let err = result.unwrap_err();
@@ -511,11 +500,7 @@ mod tests {
 		let invalid_headers =
 			HashMap::from([("X-Custom-Header".to_string(), "Invalid\nValue".to_string())]);
 
-		let notifier = create_test_notifier(
-			server.url().as_str(),
-			None,
-			Some(invalid_headers),
-		);
+		let notifier = create_test_notifier(server.url().as_str(), None, Some(invalid_headers));
 
 		let result = notifier.notify("Test message").await;
 		let err = result.unwrap_err();
@@ -538,11 +523,7 @@ mod tests {
 			.create_async()
 			.await;
 
-		let notifier = create_test_notifier(
-			server.url().as_str(),
-			None,
-			Some(valid_headers),
-		);
+		let notifier = create_test_notifier(server.url().as_str(), None, Some(valid_headers));
 
 		let result = notifier.notify("Test message").await;
 		assert!(result.is_ok());
@@ -561,11 +542,7 @@ mod tests {
 			.create_async()
 			.await;
 
-		let notifier = create_test_notifier(
-			server.url().as_str(),
-			Some("test-secret"),
-			None,
-		);
+		let notifier = create_test_notifier(server.url().as_str(), Some("test-secret"), None);
 
 		let result = notifier.notify("Test message").await;
 		assert!(result.is_ok());
@@ -574,11 +551,8 @@ mod tests {
 
 	#[test]
 	fn test_sign_request_validation() {
-		let notifier = create_test_notifier(
-			"https://webhook.example.com",
-			Some("test-secret"),
-			None,
-		);
+		let notifier =
+			create_test_notifier("https://webhook.example.com", Some("test-secret"), None);
 
 		let payload = json!({
 			"title": "Test Title",
