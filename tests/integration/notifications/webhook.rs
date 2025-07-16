@@ -1,7 +1,8 @@
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, TriggerType},
 	services::notification::{
-		NotificationError, NotificationService, Notifier, WebhookConfig, WebhookNotifier,
+		GenericWebhookPayloadBuilder, NotificationError, NotificationService, Notifier,
+		WebhookConfig, WebhookNotifier, WebhookPayloadBuilder,
 	},
 	utils::{
 		tests::{
@@ -67,7 +68,9 @@ async fn test_webhook_notification_success() {
 	let http_client = get_http_client_from_notification_pool().await;
 	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
-	let result = notifier.notify("Test message").await;
+	let payload =
+		GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message with value 42");
+	let result = notifier.notify_json(&payload).await;
 
 	assert!(result.is_ok());
 	mock.assert();
@@ -99,7 +102,8 @@ async fn test_webhook_notification_failure_retryable_error() {
 	let http_client = get_http_client_from_notification_pool().await;
 	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
-	let result = notifier.notify("Test message").await;
+	let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+	let result = notifier.notify_json(&payload).await;
 
 	assert!(result.is_err());
 	mock.assert();
@@ -130,7 +134,8 @@ async fn test_webhook_notification_failure_non_retryable_error() {
 	let http_client = get_http_client_from_notification_pool().await;
 	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
-	let result = notifier.notify("Test message").await;
+	let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+	let result = notifier.notify_json(&payload).await;
 
 	assert!(result.is_err());
 	mock.assert();
