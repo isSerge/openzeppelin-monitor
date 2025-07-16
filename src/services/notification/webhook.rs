@@ -315,6 +315,14 @@ mod tests {
 		}
 	}
 
+	fn create_test_payload() -> serde_json::Value {
+		GenericWebhookPayloadBuilder.build_payload(
+			"Test Alert",
+			"Test message with value ${value}",
+			&HashMap::from([("value".to_string(), "42".to_string())]),
+		)
+	}
+
 	////////////////////////////////////////////////////////////
 	// sign_request tests
 	////////////////////////////////////////////////////////////
@@ -397,7 +405,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_notify_failure() {
 		let notifier = create_test_notifier("https://webhook.example.com", None, None);
-		let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+		let payload = create_test_payload();
 		let result = notifier.notify_json(&payload).await;
 		assert!(result.is_err());
 	}
@@ -423,7 +431,7 @@ mod tests {
 			)])),
 		);
 
-		let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+		let payload = create_test_payload();
 		let result = notifier.notify_json(&payload).await;
 
 		assert!(result.is_ok());
@@ -442,7 +450,7 @@ mod tests {
 			HashMap::from([("Invalid Header!@#".to_string(), "value".to_string())]);
 
 		let notifier = create_test_notifier(server.url().as_str(), None, Some(invalid_headers));
-		let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+		let payload = create_test_payload();
 		let result = notifier.notify_json(&payload).await;
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Invalid header name"));
@@ -456,7 +464,7 @@ mod tests {
 
 		let notifier = create_test_notifier(server.url().as_str(), None, Some(invalid_headers));
 
-		let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+		let payload = create_test_payload();
 		let result = notifier.notify_json(&payload).await;
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Invalid header value"));
@@ -480,7 +488,7 @@ mod tests {
 
 		let notifier = create_test_notifier(server.url().as_str(), None, Some(valid_headers));
 
-		let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+		let payload = create_test_payload();
 		let result = notifier.notify_json(&payload).await;
 		assert!(result.is_ok());
 		mock.assert();
@@ -500,7 +508,7 @@ mod tests {
 
 		let notifier = create_test_notifier(server.url().as_str(), Some("test-secret"), None);
 
-		let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+		let payload = create_test_payload();
 		let result = notifier.notify_json(&payload).await;
 		assert!(result.is_ok());
 		mock.assert();
@@ -511,7 +519,7 @@ mod tests {
 		let notifier =
 			create_test_notifier("https://webhook.example.com", Some("test-secret"), None);
 
-		let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+		let payload = create_test_payload();
 
 		let result = notifier.sign_payload("test-secret", &payload).unwrap();
 		let (signature, timestamp) = result;
