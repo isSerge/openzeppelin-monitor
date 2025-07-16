@@ -9,7 +9,7 @@ use std::{collections::HashMap, sync::Arc};
 
 mod email;
 mod error;
-mod payload_builder;
+pub mod payload_builder;
 mod pool;
 mod script;
 mod webhook;
@@ -62,22 +62,6 @@ impl NotificationService {
 		NotificationService {
 			client_pool: Arc::new(NotificationClientPool::new()),
 		}
-	}
-
-	/// Formats a message by substituting variables in the template
-	///
-	/// # Arguments
-	/// * `body_template` - Message template with variables
-	/// * `variables` - Map of variable names to values
-	///
-	/// # Returns
-	/// * `String` - Formatted message with variables replaced
-	pub fn format_message(body_template: &str, variables: &HashMap<String, String>) -> String {
-		let mut message = body_template.to_string();
-		for (key, value) in variables {
-			message = message.replace(&format!("${{{}}}", key), value);
-		}
-		message
 	}
 
 	/// Executes a notification based on the trigger configuration
@@ -219,11 +203,14 @@ impl NotificationService {
 				};
 
 				let notifier = WebhookNotifier::new(webhook_config, http_client)?;
-				let message = Self::format_message(&body_template, variables);
 
 				let payload = match trigger.trigger_type {
-					TriggerType::Slack => SlackPayloadBuilder.build_payload(&title, &message),
-					TriggerType::Discord => DiscordPayloadBuilder.build_payload(&title, &message),
+					TriggerType::Slack => {
+						SlackPayloadBuilder.build_payload(&title, &body_template, variables)
+					}
+					TriggerType::Discord => {
+						DiscordPayloadBuilder.build_payload(&title, &body_template, variables)
+					}
 					TriggerType::Telegram => TelegramPayloadBuilder {
 						chat_id: chat_id.ok_or_else(|| {
 							NotificationError::config_error(
@@ -234,11 +221,13 @@ impl NotificationService {
 						})?,
 						disable_web_preview: disable_web_preview.unwrap_or(false),
 					}
-					.build_payload(&title, &message),
-					TriggerType::Webhook => {
-						GenericWebhookPayloadBuilder.build_payload(&title, &message)
-					}
-					_ => unreachable!(), // Should be caught by the outer match
+					.build_payload(&title, &body_template, variables),
+					TriggerType::Webhook => GenericWebhookPayloadBuilder.build_payload(
+						&title,
+						&body_template,
+						variables,
+					),
+					_ => unreachable!(),
 				};
 
 				notifier.notify_json(&payload).await?;
