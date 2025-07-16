@@ -29,40 +29,6 @@ pub use pool::NotificationClientPool;
 pub use script::ScriptNotifier;
 pub use webhook::{WebhookConfig, WebhookNotifier};
 
-/// TODO: Remove Notifier trait after refactoring is complete.
-/// Interface for notification implementations
-///
-/// All notification types must implement this trait to provide
-/// consistent notification behavior.
-#[async_trait]
-pub trait Notifier {
-	/// Sends a notification with the given message
-	///
-	/// # Arguments
-	/// * `message` - The formatted message to send
-	///
-	/// # Returns
-	/// * `Result<(), NotificationError>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), NotificationError>;
-
-	/// Sends a notification with custom payload fields
-	///
-	/// # Arguments
-	/// * `message` - The formatted message to send
-	/// * `payload_fields` - Additional fields to include in the payload
-	///
-	/// # Returns
-	/// * `Result<(), NotificationError>` - Success or error
-	async fn notify_with_payload(
-		&self,
-		message: &str,
-		_payload_fields: HashMap<String, serde_json::Value>,
-	) -> Result<(), NotificationError> {
-		// Default implementation just calls notify
-		self.notify(message).await
-	}
-}
-
 /// Interface for executing scripts
 ///
 /// This Interface is used to execute scripts for notifications.

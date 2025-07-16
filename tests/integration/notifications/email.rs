@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use mockall::mock;
 
 use email_address::EmailAddress;
@@ -12,7 +11,7 @@ use openzeppelin_monitor::{
 		SecretValue, TriggerType, TriggerTypeConfig,
 	},
 	services::notification::{
-		EmailContent, EmailNotifier, NotificationError, NotificationService, Notifier, SmtpConfig,
+		EmailContent, EmailNotifier, NotificationError, NotificationService, SmtpConfig,
 	},
 	utils::tests::{
 		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
@@ -49,11 +48,7 @@ mock! {
 	pub EmailNotifier {
 		pub fn new(smtp_config: SmtpConfig, email_content: EmailContent) -> Result<Self, NotificationError>;
 		pub fn format_message(&self, variables: &HashMap<String, String>) -> String;
-	}
-
-	#[async_trait]
-	impl Notifier for EmailNotifier {
-		async fn notify(&self, message: &str) -> Result<(), NotificationError>;
+		pub async fn notify(&self, message: &str) -> Result<(), NotificationError>;
 	}
 }
 

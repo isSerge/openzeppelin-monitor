@@ -1,8 +1,8 @@
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, TriggerType},
 	services::notification::{
-		GenericWebhookPayloadBuilder, NotificationError, NotificationService, Notifier,
-		WebhookConfig, WebhookNotifier, WebhookPayloadBuilder,
+		GenericWebhookPayloadBuilder, NotificationError, NotificationService, WebhookConfig,
+		WebhookNotifier, WebhookPayloadBuilder,
 	},
 	utils::{
 		tests::{

@@ -3,7 +3,6 @@
 //! Provides functionality to send formatted messages to email addresses
 //! via SMTP, supporting message templates with variable substitution.
 
-use async_trait::async_trait;
 use email_address::EmailAddress;
 use lettre::{
 	message::{
@@ -14,10 +13,7 @@ use lettre::{
 };
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{
-	models::TriggerTypeConfig,
-	services::notification::{NotificationError, Notifier},
-};
+use crate::{models::TriggerTypeConfig, services::notification::NotificationError};
 use pulldown_cmark::{html, Options, Parser};
 
 /// Implementation of email notifications via SMTP
@@ -73,6 +69,64 @@ where
 			recipients: email_content.recipients,
 			client: transport,
 		}
+	}
+
+	/// Sends a formatted message to email
+	///
+	/// # Arguments
+	/// * `message` - The formatted message to send
+	///
+	/// # Returns
+	/// * `Result<(), NotificationError>` - Success or error
+	pub async fn notify(&self, message: &str) -> Result<(), NotificationError> {
+		let recipients_str = self
+			.recipients
+			.iter()
+			.map(ToString::to_string)
+			.collect::<Vec<_>>()
+			.join(", ");
+
+		let mailboxes: Mailboxes = recipients_str.parse::<Mailboxes>().map_err(|e| {
+			NotificationError::notify_failed(
+				format!("Failed to parse recipients: {}", e),
+				Some(e.into()),
+				None,
+			)
+		})?;
+		let recipients_header: header::To = mailboxes.into();
+
+		let email = Message::builder()
+			.mailbox(recipients_header)
+			.from(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to parse sender: {}", e),
+					Some(e.into()),
+					None,
+				)
+			})?)
+			.reply_to(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to parse reply-to: {}", e),
+					Some(e.into()),
+					None,
+				)
+			})?)
+			.subject(&self.subject)
+			.header(ContentType::TEXT_HTML)
+			.body(message.to_owned())
+			.map_err(|e| {
+				NotificationError::notify_failed(
+					format!("Failed to build email message: {}", e),
+					Some(e.into()),
+					None,
+				)
+			})?;
+
+		self.client.send(&email).map_err(|e| {
+			NotificationError::notify_failed(format!("Failed to send email: {}", e), None, None)
+		})?;
+
+		Ok(())
 	}
 }
 
@@ -159,70 +213,6 @@ impl EmailNotifier<SmtpTransport> {
 				None,
 			))
 		}
-	}
-}
-
-#[async_trait]
-impl<T: Transport + Send + Sync> Notifier for EmailNotifier<T>
-where
-	T::Error: std::fmt::Display,
-{
-	/// Sends a formatted message to email
-	///
-	/// # Arguments
-	/// * `message` - The formatted message to send
-	///
-	/// # Returns
-	/// * `Result<(), NotificationError>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
-		let recipients_str = self
-			.recipients
-			.iter()
-			.map(ToString::to_string)
-			.collect::<Vec<_>>()
-			.join(", ");
-
-		let mailboxes: Mailboxes = recipients_str.parse::<Mailboxes>().map_err(|e| {
-			NotificationError::notify_failed(
-				format!("Failed to parse recipients: {}", e),
-				Some(e.into()),
-				None,
-			)
-		})?;
-		let recipients_header: header::To = mailboxes.into();
-
-		let email = Message::builder()
-			.mailbox(recipients_header)
-			.from(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
-				NotificationError::notify_failed(
-					format!("Failed to parse sender: {}", e),
-					Some(e.into()),
-					None,
-				)
-			})?)
-			.reply_to(self.sender.to_string().parse::<Mailbox>().map_err(|e| {
-				NotificationError::notify_failed(
-					format!("Failed to parse reply-to: {}", e),
-					Some(e.into()),
-					None,
-				)
-			})?)
-			.subject(&self.subject)
-			.header(ContentType::TEXT_HTML)
-			.body(message.to_owned())
-			.map_err(|e| {
-				NotificationError::notify_failed(
-					format!("Failed to build email message: {}", e),
-					Some(e.into()),
-					None,
-				)
-			})?;
-
-		self.client.send(&email).map_err(|e| {
-			NotificationError::notify_failed(format!("Failed to send email: {}", e), None, None)
-		})?;
-
-		Ok(())
 	}
 }
 

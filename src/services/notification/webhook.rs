@@ -3,7 +3,6 @@
 //! Provides functionality to send formatted messages to webhooks
 //! via incoming webhooks, supporting message templates with variable substitution.
 
-use async_trait::async_trait;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use reqwest::{
@@ -14,10 +13,7 @@ use reqwest_middleware::ClientWithMiddleware;
 use sha2::Sha256;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{
-	models::TriggerTypeConfig,
-	services::notification::{NotificationError, Notifier},
-};
+use crate::{models::TriggerTypeConfig, services::notification::NotificationError};
 
 /// HMAC SHA256 type alias
 type HmacSha256 = Hmac<Sha256>;
@@ -274,51 +270,6 @@ impl WebhookNotifier {
 	}
 }
 
-#[async_trait]
-impl Notifier for WebhookNotifier {
-	/// Sends a formatted message to Webhook
-	///
-	/// # Arguments
-	/// * `message` - The formatted message to send
-	///
-	/// # Returns
-	/// * `Result<(), NotificationError>` - Success or error
-	async fn notify(&self, message: &str) -> Result<(), NotificationError> {
-		// Default payload with title and body
-		let mut payload_fields = HashMap::new();
-		payload_fields.insert("title".to_string(), serde_json::json!(self.title));
-		payload_fields.insert("body".to_string(), serde_json::json!(message));
-
-		self.notify_with_payload(message, payload_fields).await
-	}
-
-	/// Sends a formatted message to Webhook with custom payload fields
-	///
-	/// # Arguments
-	/// * `message` - The formatted message to send
-	/// * `payload_fields` - Additional fields to include in the payload
-	///
-	/// # Returns
-	/// * `Result<(), NotificationError>` - Success or error
-	async fn notify_with_payload(
-		&self,
-		_message: &str,
-		mut payload_fields: HashMap<String, serde_json::Value>,
-	) -> Result<(), NotificationError> {
-		// Merge with default payload fields if they exist
-		if let Some(default_fields) = &self.payload_fields {
-			for (key, value) in default_fields {
-				if !payload_fields.contains_key(key) {
-					payload_fields.insert(key.clone(), value.clone());
-				}
-			}
-		}
-		let payload = serde_json::Value::Object(payload_fields.into_iter().collect());
-
-		self.notify_json(&payload).await
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use crate::{
@@ -467,8 +418,8 @@ mod tests {
 			server.url().as_str(),
 			Some("top-secret"),
 			Some(HashMap::from([(
-					"Content-Type".to_string(),
-					"application/json".to_string(),
+				"Content-Type".to_string(),
+				"application/json".to_string(),
 			)])),
 		);
 
