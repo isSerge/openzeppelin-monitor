@@ -5,7 +5,7 @@
 //! The tests ensure that the Webhook notification system handles template variables correctly
 //! and produces consistent, well-formed output across various input combinations.
 
-use openzeppelin_monitor::services::notification::NotificationService;
+use openzeppelin_monitor::services::notification::payload_builder;
 use proptest::{prelude::*, test_runner::Config};
 use std::collections::HashMap;
 
@@ -26,15 +26,15 @@ proptest! {
 	/// should produce identical results.
 	///
 	/// # Properties tested
-	/// - Multiple calls to format_message with the same variables should return identical results
+	/// - Multiple calls to format_template with the same variables should return identical results
 	/// - Template can contain alphanumeric characters, spaces, $, {, }, and _
 	#[test]
 	fn test_notification_template_idempotency(
 		template in "[a-zA-Z0-9 ${}_]{1,100}",
 		vars in template_variables_strategy()
 	) {
-		let first_pass = NotificationService::format_message(&template, &vars);
-		let second_pass = NotificationService::format_message(&template, &vars);
+		let first_pass = payload_builder::format_template(&template, &vars);
+		let second_pass = payload_builder::format_template(&template, &vars);
 
 		prop_assert_eq!(first_pass, second_pass);
 	}
@@ -50,7 +50,7 @@ proptest! {
 		template in "[a-zA-Z0-9 ]{0,50}\\$\\{[a-z_]+\\}[a-zA-Z0-9 ]{0,50}",
 		vars in template_variables_strategy()
 	) {
-		let formatted = NotificationService::format_message(&template, &vars);
+		let formatted = payload_builder::format_template(&template, &vars);
 
 		// Verify no partial variable substitutions occurred
 		prop_assert!(!formatted.contains("${{"));
@@ -67,7 +67,7 @@ proptest! {
 		template in "[a-zA-Z0-9 ${}_]{1,100}"
 	) {
 		let empty_vars = HashMap::new();
-		let formatted = NotificationService::format_message(&template, &empty_vars);
+		let formatted = payload_builder::format_template(&template, &empty_vars);
 
 		// Template should remain unchanged when no variables are provided
 		prop_assert_eq!(formatted, format!("{}", template));

@@ -22,7 +22,7 @@ mod properties {
 	}
 	mod notifications {
 		mod email;
-		mod webhook;
+		mod payload_builder;
 	}
 	mod repositories {
 		mod monitor;
