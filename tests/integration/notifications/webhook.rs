@@ -13,7 +13,6 @@ use openzeppelin_monitor::{
 		HttpRetryConfig,
 	},
 };
-use serde_json::json;
 use std::collections::HashMap;
 
 use crate::integration::mocks::{create_test_evm_logs, create_test_evm_transaction_receipt};
@@ -40,17 +39,23 @@ fn create_test_evm_match(monitor: Monitor) -> MonitorMatch {
 		matched_on_args: None,
 	}))
 }
+fn create_test_payload() -> serde_json::Value {
+	let title = "Test Title";
+	let body_template = "Test message with value ${value}";
+	let variables = HashMap::from([("value".to_string(), "42".to_string())]);
+	GenericWebhookPayloadBuilder.build_payload(title, body_template, &variables)
+}
 
 #[tokio::test]
 async fn test_webhook_notification_success() {
+	// Create a test payload
+	let payload = create_test_payload();
+
 	// Setup async mock server
 	let mut server = mockito::Server::new_async().await;
 	let mock = server
 		.mock("GET", "/")
-		.match_body(mockito::Matcher::Json(json!({
-			"title": "Test Alert",
-			"body": "Test message with value 42"
-		})))
+		.match_body(mockito::Matcher::Json(payload.clone()))
 		.with_status(200)
 		.create_async()
 		.await;
@@ -67,9 +72,6 @@ async fn test_webhook_notification_success() {
 	};
 	let http_client = get_http_client_from_notification_pool().await;
 	let notifier = WebhookNotifier::new(config, http_client).unwrap();
-
-	let payload =
-		GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message with value 42");
 	let result = notifier.notify_json(&payload).await;
 
 	assert!(result.is_ok());
@@ -102,7 +104,7 @@ async fn test_webhook_notification_failure_retryable_error() {
 	let http_client = get_http_client_from_notification_pool().await;
 	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
-	let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+	let payload = create_test_payload();
 	let result = notifier.notify_json(&payload).await;
 
 	assert!(result.is_err());
@@ -134,7 +136,7 @@ async fn test_webhook_notification_failure_non_retryable_error() {
 	let http_client = get_http_client_from_notification_pool().await;
 	let notifier = WebhookNotifier::new(config, http_client).unwrap();
 
-	let payload = GenericWebhookPayloadBuilder.build_payload("Test Alert", "Test message");
+	let payload = create_test_payload();
 	let result = notifier.notify_json(&payload).await;
 
 	assert!(result.is_err());
