@@ -211,7 +211,7 @@ async fn test_notification_service_webhook_execution_failure() {
 }
 
 #[tokio::test]
-async fn test_notification_service_webhook_execution_invalid_config() {
+async fn test_notification_service_webhook_execution_invalid_url() {
 	let notification_service = NotificationService::new();
 
 	let trigger = TriggerBuilder::new()
@@ -227,12 +227,9 @@ async fn test_notification_service_webhook_execution_invalid_config() {
 		.execute(&trigger, &HashMap::new(), &monitor_match, &HashMap::new())
 		.await;
 
-	// Verify we get the specific "Invalid webhook configuration" error
 	assert!(result.is_err());
-	assert!(result
-		.unwrap_err()
-		.to_string()
-		.contains("Invalid webhook configuration"));
+	let error = result.unwrap_err();
+	assert!(matches!(error, NotificationError::NotifyFailed(_)));
 }
 
 #[tokio::test]
