@@ -1,3 +1,4 @@
+use mockito::{Matcher, Server};
 use openzeppelin_monitor::{
 	models::{EVMMonitorMatch, MatchConditions, Monitor, MonitorMatch, TriggerType},
 	services::notification::{
@@ -52,10 +53,10 @@ async fn test_webhook_notification_success() {
 	let payload = create_test_payload();
 
 	// Setup async mock server
-	let mut server = mockito::Server::new_async().await;
+	let mut server = Server::new_async().await;
 	let mock = server
 		.mock("GET", "/")
-		.match_body(mockito::Matcher::Json(payload.clone()))
+		.match_body(Matcher::Json(payload.clone()))
 		.with_status(200)
 		.create_async()
 		.await;
@@ -81,7 +82,7 @@ async fn test_webhook_notification_success() {
 #[tokio::test]
 async fn test_webhook_notification_failure_retryable_error() {
 	// Setup async mock server to simulate failure
-	let mut server = mockito::Server::new_async().await;
+	let mut server = Server::new_async().await;
 	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 	let mock = server
 		.mock("GET", "/")
@@ -114,7 +115,7 @@ async fn test_webhook_notification_failure_retryable_error() {
 #[tokio::test]
 async fn test_webhook_notification_failure_non_retryable_error() {
 	// Setup async mock server to simulate failure
-	let mut server = mockito::Server::new_async().await;
+	let mut server = Server::new_async().await;
 	let mock = server
 		.mock("GET", "/")
 		.with_status(400)
@@ -146,7 +147,7 @@ async fn test_webhook_notification_failure_non_retryable_error() {
 #[tokio::test]
 async fn test_notification_service_webhook_execution() {
 	let notification_service = NotificationService::new();
-	let mut server = mockito::Server::new_async().await;
+	let mut server = Server::new_async().await;
 
 	// Setup mock webhook server with less strict matching
 	let mock = server
@@ -179,7 +180,7 @@ async fn test_notification_service_webhook_execution() {
 #[tokio::test]
 async fn test_notification_service_webhook_execution_failure() {
 	let notification_service = NotificationService::new();
-	let mut server = mockito::Server::new_async().await;
+	let mut server = Server::new_async().await;
 	let default_retries_count = HttpRetryConfig::default().max_retries as usize;
 
 	// Setup mock webhook server with less strict matching
@@ -232,4 +233,44 @@ async fn test_notification_service_webhook_execution_invalid_url() {
 	assert!(result.is_err());
 	let error = result.unwrap_err();
 	assert!(matches!(error, NotificationError::NotifyFailed(_)));
+}
+
+#[tokio::test]
+async fn test_notify_json_with_url_params() {
+	let mut server = Server::new_async().await;
+
+	// Set up the mock to expect the request with specific URL parameters.
+	let mock = server
+		.mock("POST", "/")
+		.match_query(Matcher::AllOf(vec![
+			Matcher::UrlEncoded("param1".into(), "value1".into()),
+			Matcher::UrlEncoded("param2".into(), "value with spaces".into()),
+		]))
+		.with_status(200)
+		.create_async()
+		.await;
+
+	// Create a WebhookConfig with url_params set.
+	let mut url_params = HashMap::new();
+	url_params.insert("param1".to_string(), "value1".to_string());
+	url_params.insert("param2".to_string(), "value with spaces".to_string());
+
+	let config = WebhookConfig {
+		url: server.url(),
+		url_params: Some(url_params),
+		title: "Alert".to_string(),
+		body_template: "Test message".to_string(),
+		method: Some("POST".to_string()),
+		secret: None,
+		headers: None,
+		payload_fields: None,
+	};
+
+	let http_client = get_http_client_from_notification_pool().await;
+	let notifier = WebhookNotifier::new(config, http_client).unwrap();
+	let payload = serde_json::json!({"test": "data"});
+	let result = notifier.notify_json(&payload).await;
+
+	assert!(result.is_ok());
+	mock.assert();
 }
