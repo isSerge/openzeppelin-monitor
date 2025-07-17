@@ -339,7 +339,9 @@ mod tests {
 	use super::*;
 	use crate::{
 		models::{
-			AddressWithSpec, EVMMonitorMatch, EVMTransactionReceipt, EventCondition, FunctionCondition, MatchConditions, Monitor, MonitorMatch, NotificationMessage, ScriptLanguage, SecretString, SecretValue, TransactionCondition, TriggerType
+			AddressWithSpec, EVMMonitorMatch, EVMTransactionReceipt, EventCondition,
+			FunctionCondition, MatchConditions, Monitor, MonitorMatch, NotificationMessage,
+			ScriptLanguage, SecretString, SecretValue, TransactionCondition, TriggerType,
 		},
 		utils::tests::{
 			builders::{evm::monitor::MonitorBuilder, trigger::TriggerBuilder},
@@ -574,7 +576,9 @@ mod tests {
 	#[test]
 	fn webhookable_trait_for_slack_config() {
 		let slack_config = TriggerTypeConfig::Slack {
-			slack_url: SecretValue::Plain(SecretString::new("https://slack.example.com".to_string())),
+			slack_url: SecretValue::Plain(SecretString::new(
+				"https://slack.example.com".to_string(),
+			)),
 			message: NotificationMessage {
 				title: "Slack Title".to_string(),
 				body: "Slack Body".to_string(),
@@ -607,7 +611,9 @@ mod tests {
 	#[test]
 	fn webhookable_trait_for_discord_config() {
 		let discord_config = TriggerTypeConfig::Discord {
-			discord_url: SecretValue::Plain(SecretString::new("https://discord.example.com".to_string())),
+			discord_url: SecretValue::Plain(SecretString::new(
+				"https://discord.example.com".to_string(),
+			)),
 			message: NotificationMessage {
 				title: "Discord Title".to_string(),
 				body: "Discord Body".to_string(),
@@ -615,8 +621,7 @@ mod tests {
 			retry_policy: HttpRetryConfig::default(),
 		};
 
-		let (webhook_config, _, builder) =
-			discord_config.to_webhook_components().unwrap();
+		let (webhook_config, _, builder) = discord_config.to_webhook_components().unwrap();
 
 		// Assert WebhookConfig is correct
 		assert_eq!(webhook_config.url, "https://discord.example.com");
@@ -674,7 +679,9 @@ mod tests {
 				body: "Generic Body".to_string(),
 			},
 			method: Some("PUT".to_string()),
-			secret: Some(SecretValue::Plain(SecretString::new("my-secret".to_string()))),
+			secret: Some(SecretValue::Plain(SecretString::new(
+				"my-secret".to_string(),
+			))),
 			headers: Some([("X-Custom".to_string(), "Value".to_string())].into()),
 			retry_policy: HttpRetryConfig::default(),
 		};
