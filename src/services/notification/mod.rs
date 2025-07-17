@@ -15,7 +15,9 @@ mod script;
 mod webhook;
 
 use crate::{
-	models::{MonitorMatch, ScriptLanguage, Trigger, TriggerType, TriggerTypeConfig},
+	models::{
+		MonitorMatch, NotificationMessage, ScriptLanguage, Trigger, TriggerType, TriggerTypeConfig,
+	},
 	utils::{normalize_string, HttpRetryConfig},
 };
 
@@ -29,43 +31,35 @@ pub use pool::NotificationClientPool;
 pub use script::ScriptNotifier;
 pub use webhook::{WebhookConfig, WebhookNotifier};
 
+/// A container for all components needed to configure and send a webhook notification.
+struct WebhookComponents {
+	config: WebhookConfig,
+	retry_policy: HttpRetryConfig,
+	builder: Box<dyn WebhookPayloadBuilder>,
+}
+
+/// A type alias to simplify the complex tuple returned by the internal `match` statement.
+type WebhookParts = (
+	String,                          // url
+	NotificationMessage,             // message
+	Option<String>,                  // method
+	Option<String>,                  // secret
+	Option<HashMap<String, String>>, // headers
+	Box<dyn WebhookPayloadBuilder>,  // payload builder
+);
+
 /// A trait for trigger configurations that can be sent via webhook.
 /// This abstracts away the specific details of each webhook provider.
-trait Webhookable {
+trait AsWebhookComponents {
 	/// Consolidates the logic for creating webhook components from a trigger config.
 	/// It returns the generic `WebhookConfig`, HttpRetryConfig and the specific `WebhookPayloadBuilder`
 	/// needed for the given trigger type.
-	fn to_webhook_components(
-		&self,
-	) -> Result<
-		(
-			WebhookConfig,
-			HttpRetryConfig,
-			Box<dyn WebhookPayloadBuilder>,
-		),
-		NotificationError,
-	>;
+	fn as_webhook_components(&self) -> Result<WebhookComponents, NotificationError>;
 }
 
-impl Webhookable for TriggerTypeConfig {
-	fn to_webhook_components(
-		&self,
-	) -> Result<
-		(
-			WebhookConfig,
-			HttpRetryConfig,
-			Box<dyn WebhookPayloadBuilder>,
-		),
-		NotificationError,
-	> {
-		let (url, message, method, secret, headers, builder): (
-			String,
-			crate::models::NotificationMessage,
-			Option<String>,
-			Option<String>,
-			Option<std::collections::HashMap<String, String>>,
-			Box<dyn WebhookPayloadBuilder>,
-		) = match self {
+impl AsWebhookComponents for TriggerTypeConfig {
+	fn as_webhook_components(&self) -> Result<WebhookComponents, NotificationError> {
+		let (url, message, method, secret, headers, builder): WebhookParts = match self {
 			TriggerTypeConfig::Webhook {
 				url,
 				message,
@@ -150,7 +144,11 @@ impl Webhookable for TriggerTypeConfig {
 			)
 		})?;
 
-		Ok((config, retry_policy, builder))
+		Ok(WebhookComponents {
+			config,
+			retry_policy,
+			builder,
+		})
 	}
 }
 
@@ -214,13 +212,12 @@ impl NotificationService {
 			| TriggerType::Webhook
 			| TriggerType::Telegram => {
 				// Use the Webhookable trait to get config, retry policy and payload builder
-				let (webhook_config, retry_policy, payload_builder) =
-					trigger.config.to_webhook_components()?;
+				let components = trigger.config.as_webhook_components()?;
 
 				// Get or create the HTTP client from the pool based on the retry policy
 				let http_client = self
 					.client_pool
-					.get_or_create_http_client(&retry_policy)
+					.get_or_create_http_client(&components.retry_policy)
 					.await
 					.map_err(|e| {
 						NotificationError::execution_error(
@@ -231,14 +228,14 @@ impl NotificationService {
 					})?;
 
 				// Build the payload
-				let payload = payload_builder.build_payload(
-					&webhook_config.title,
-					&webhook_config.body_template,
+				let payload = components.builder.build_payload(
+					&components.config.title,
+					&components.config.body_template,
 					variables,
 				);
 
 				// Create the notifier
-				let notifier = WebhookNotifier::new(webhook_config, http_client)?;
+				let notifier = WebhookNotifier::new(components.config, http_client)?;
 
 				notifier.notify_json(&payload).await?;
 			}
@@ -574,30 +571,34 @@ mod tests {
 	}
 
 	#[test]
-	fn webhookable_trait_for_slack_config() {
+	fn as_webhook_components_trait_for_slack_config() {
+		let title = "Slack Title";
+		let message = "Slack Body";
+
 		let slack_config = TriggerTypeConfig::Slack {
 			slack_url: SecretValue::Plain(SecretString::new(
 				"https://slack.example.com".to_string(),
 			)),
 			message: NotificationMessage {
-				title: "Slack Title".to_string(),
-				body: "Slack Body".to_string(),
+				title: title.to_string(),
+				body: message.to_string(),
 			},
 			retry_policy: HttpRetryConfig::default(),
 		};
 
-		let (webhook_config, _, builder) = slack_config.to_webhook_components().unwrap();
+		let components = slack_config.as_webhook_components().unwrap();
 
 		// Assert WebhookConfig is correct
-		assert_eq!(webhook_config.url, "https://slack.example.com");
-		assert_eq!(webhook_config.title, "Slack Title");
-		assert_eq!(webhook_config.body_template, "Slack Body");
-		assert_eq!(webhook_config.method, Some("POST".to_string()));
-		assert!(webhook_config.secret.is_none());
+		assert_eq!(components.config.url, "https://slack.example.com");
+		assert_eq!(components.config.title, title);
+		assert_eq!(components.config.body_template, message);
+		assert_eq!(components.config.method, Some("POST".to_string()));
+		assert!(components.config.secret.is_none());
 
-		// Assert the correct builder type is returned
-		// We can't directly compare builder types, but we can check the payload it creates.
-		let payload = builder.build_payload("Test Title", "Test Body Template", &HashMap::new());
+		// Assert the builder creates the correct payload
+		let payload = components
+			.builder
+			.build_payload(title, message, &HashMap::new());
 		assert!(
 			payload.get("blocks").is_some(),
 			"Expected a Slack payload with 'blocks'"
@@ -609,28 +610,32 @@ mod tests {
 	}
 
 	#[test]
-	fn webhookable_trait_for_discord_config() {
+	fn as_webhook_components_trait_for_discord_config() {
+		let title = "Discord Title";
+		let message = "Discord Body";
 		let discord_config = TriggerTypeConfig::Discord {
 			discord_url: SecretValue::Plain(SecretString::new(
 				"https://discord.example.com".to_string(),
 			)),
 			message: NotificationMessage {
-				title: "Discord Title".to_string(),
-				body: "Discord Body".to_string(),
+				title: title.to_string(),
+				body: message.to_string(),
 			},
 			retry_policy: HttpRetryConfig::default(),
 		};
 
-		let (webhook_config, _, builder) = discord_config.to_webhook_components().unwrap();
+		let components = discord_config.as_webhook_components().unwrap();
 
 		// Assert WebhookConfig is correct
-		assert_eq!(webhook_config.url, "https://discord.example.com");
-		assert_eq!(webhook_config.title, "Discord Title");
-		assert_eq!(webhook_config.body_template, "Discord Body");
-		assert_eq!(webhook_config.method, Some("POST".to_string()));
+		assert_eq!(components.config.url, "https://discord.example.com");
+		assert_eq!(components.config.title, title);
+		assert_eq!(components.config.body_template, message);
+		assert_eq!(components.config.method, Some("POST".to_string()));
 
-		// Assert the correct builder type is returned
-		let payload = builder.build_payload("Test Title", "Test Body Template", &HashMap::new());
+		// Assert the builder creates the correct payload
+		let payload = components
+			.builder
+			.build_payload(title, message, &HashMap::new());
 		assert!(
 			payload.get("content").is_some(),
 			"Expected a Discord payload with 'content'"
@@ -642,41 +647,48 @@ mod tests {
 	}
 
 	#[test]
-	fn webhookable_trait_for_telegram_config() {
+	fn as_webhook_components_trait_for_telegram_config() {
+		let title = "Telegram Title";
+		let message = "Telegram Body";
 		let telegram_config = TriggerTypeConfig::Telegram {
 			token: SecretValue::Plain(SecretString::new("test-token".to_string())),
 			chat_id: "12345".to_string(),
 			disable_web_preview: Some(true),
 			message: NotificationMessage {
-				title: "TG Title".to_string(),
-				body: "TG Body".to_string(),
+				title: title.to_string(),
+				body: message.to_string(),
 			},
 			retry_policy: HttpRetryConfig::default(),
 		};
 
-		let (webhook_config, _, builder) = telegram_config.to_webhook_components().unwrap();
+		let components = telegram_config.as_webhook_components().unwrap();
 
 		// Assert WebhookConfig is correct
 		assert_eq!(
-			webhook_config.url,
+			components.config.url,
 			"https://api.telegram.org/bottest-token/sendMessage"
 		);
-		assert_eq!(webhook_config.title, "TG Title");
+		assert_eq!(components.config.title, title);
+		assert_eq!(components.config.body_template, message);
 
-		// Assert the correct builder type is returned
-		let payload = builder.build_payload("Test Title", "Test Body Template", &HashMap::new());
+		// Assert the builder creates the correct payload
+		let payload = components
+			.builder
+			.build_payload(title, message, &HashMap::new());
 		assert_eq!(payload.get("chat_id").unwrap(), "12345");
 		assert_eq!(payload.get("disable_web_page_preview").unwrap(), &true);
 		assert!(payload.get("text").is_some());
 	}
 
 	#[test]
-	fn webhookable_trait_for_generic_webhook_config() {
+	fn as_webhook_components_trait_for_generic_webhook_config() {
+		let title = "Generic Title";
+		let body_template = "Generic Body";
 		let webhook_config = TriggerTypeConfig::Webhook {
 			url: SecretValue::Plain(SecretString::new("https://generic.example.com".to_string())),
 			message: NotificationMessage {
-				title: "Generic Title".to_string(),
-				body: "Generic Body".to_string(),
+				title: title.to_string(),
+				body: body_template.to_string(),
 			},
 			method: Some("PUT".to_string()),
 			secret: Some(SecretValue::Plain(SecretString::new(
@@ -686,20 +698,22 @@ mod tests {
 			retry_policy: HttpRetryConfig::default(),
 		};
 
-		let (webhook_config_out, _, builder) = webhook_config.to_webhook_components().unwrap();
+		let components = webhook_config.as_webhook_components().unwrap();
 
 		// Assert WebhookConfig is correct
-		assert_eq!(webhook_config_out.url, "https://generic.example.com");
-		assert_eq!(webhook_config_out.method, Some("PUT".to_string()));
-		assert_eq!(webhook_config_out.secret, Some("my-secret".to_string()));
-		assert!(webhook_config_out.headers.is_some());
+		assert_eq!(components.config.url, "https://generic.example.com");
+		assert_eq!(components.config.method, Some("PUT".to_string()));
+		assert_eq!(components.config.secret, Some("my-secret".to_string()));
+		assert!(components.config.headers.is_some());
 		assert_eq!(
-			webhook_config_out.headers.unwrap().get("X-Custom").unwrap(),
+			components.config.headers.unwrap().get("X-Custom").unwrap(),
 			"Value"
 		);
 
-		// Assert the correct builder type is returned
-		let payload = builder.build_payload("Test Title", "Test Body Template", &HashMap::new());
+		// Assert the builder creates the correct payload
+		let payload = components
+			.builder
+			.build_payload(title, body_template, &HashMap::new());
 		assert!(payload.get("title").is_some());
 		assert!(payload.get("body").is_some());
 	}
