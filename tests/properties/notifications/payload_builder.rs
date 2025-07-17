@@ -1,8 +1,8 @@
-//! Property-based tests for Webhook notifications.
+//! Property-based tests for Webhook payload builder.
 //!
-//! These tests verify the behavior of the Webhook notification system using property testing,
+//! These tests verify the behavior of the Webhook payload builder using property testing,
 //! focusing on template variable substitution, message formatting consistency, and edge cases.
-//! The tests ensure that the Webhook notification system handles template variables correctly
+//! The tests ensure that the Webhook payload builder handles template variables correctly
 //! and produces consistent, well-formed output across various input combinations.
 
 use openzeppelin_monitor::services::notification::payload_builder;
