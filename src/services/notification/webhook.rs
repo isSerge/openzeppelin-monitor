@@ -275,7 +275,7 @@ mod tests {
 	use crate::{
 		models::{NotificationMessage, SecretString, SecretValue},
 		services::notification::{GenericWebhookPayloadBuilder, WebhookPayloadBuilder},
-		utils::{tests::create_test_http_client, HttpRetryConfig},
+		utils::{tests::create_test_http_client, RetryConfig},
 	};
 
 	use super::*;
@@ -311,7 +311,7 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		}
 	}
 
@@ -387,7 +387,7 @@ mod tests {
 				title: "Test Alert".to_string(),
 				body: "Test message ${value}".to_string(),
 			},
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		};
 
 		let http_client = create_test_http_client();

@@ -1,8 +1,7 @@
 use mockall::mock;
 
 use email_address::EmailAddress;
-use lettre::{address::Envelope, Message, Transport};
-use mockall::predicate::*;
+use lettre::{address::Envelope, transport::stub::AsyncStubTransport, Message, Transport};
 use std::collections::HashMap;
 
 use openzeppelin_monitor::{
@@ -13,9 +12,12 @@ use openzeppelin_monitor::{
 	services::notification::{
 		EmailContent, EmailNotifier, NotificationError, NotificationService, SmtpConfig,
 	},
-	utils::tests::{
-		evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
-		trigger::TriggerBuilder,
+	utils::{
+		tests::{
+			evm::{monitor::MonitorBuilder, transaction::TransactionBuilder},
+			trigger::TriggerBuilder,
+		},
+		RetryConfig,
 	},
 };
 
@@ -78,21 +80,17 @@ async fn test_email_notification_success() {
 		recipients: vec![EmailAddress::new_unchecked("recipient@test.com")],
 	};
 
-	let mut mock_transport = MockSmtpTransport::new();
+	let stub_transport = AsyncStubTransport::new_ok();
 
-	mock_transport
-		.expect_send()
-		.times(1)
-		.returning(|_| Ok("250 OK".to_string()));
-
-	let notifier = EmailNotifier::with_transport(email_content, mock_transport);
+	let notifier =
+		EmailNotifier::with_transport(email_content, stub_transport, RetryConfig::default());
 
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_ok());
 }
 
 #[tokio::test]
-async fn test_email_notification_failure() {
+async fn test_email_notification_failure_after_retries() {
 	let email_content = EmailContent {
 		subject: "Test".to_string(),
 		body_template: "Test message".to_string(),
@@ -100,20 +98,29 @@ async fn test_email_notification_failure() {
 		recipients: vec![EmailAddress::new_unchecked("recipient@test.com")],
 	};
 
-	let mut mock_transport = MockSmtpTransport::new();
+	let stub_transport = AsyncStubTransport::new_error();
+	let retry_policy = RetryConfig::default();
+	let default_max_retries = retry_policy.max_retries as usize;
 
-	mock_transport
-		.expect_send()
-		.times(1)
-		.returning(|_| Err("500 Internal Server Error".to_string()));
-
-	let notifier = EmailNotifier::with_transport(email_content, mock_transport);
+	let notifier =
+		EmailNotifier::with_transport(email_content, stub_transport.clone(), retry_policy);
 
 	let result = notifier.notify("Test message").await;
 	assert!(result.is_err());
+	assert_eq!(
+		stub_transport.messages().await.len(),
+		1 + default_max_retries,
+		"Should be called 1 time + default max retries"
+	);
 
 	let error = result.unwrap_err();
-	assert!(matches!(error, NotificationError::NotifyFailed(_)));
+
+	match error {
+		NotificationError::NotifyFailed(ctx) => {
+			assert!(ctx.message.contains("Failed to send email"));
+		}
+		e => panic!("Expected NotifyFailed, got {:?}", e),
+	}
 }
 
 #[tokio::test]
@@ -121,8 +128,8 @@ async fn test_notification_service_email_execution_failure() {
 	let notification_service = NotificationService::new();
 
 	let trigger_config = TriggerTypeConfig::Email {
-		host: "dummy.smtp.host.invalid".to_string(), // Will cause SmtpTransport to fail connection
-		port: Some(587),
+		host: "127.0.0.1".to_string(), // Will cause a connection error
+		port: Some(2525),
 		username: SecretValue::Plain(SecretString::new("user".to_string())),
 		password: SecretValue::Plain(SecretString::new("pass".to_string())),
 		message: NotificationMessage {
@@ -131,6 +138,7 @@ async fn test_notification_service_email_execution_failure() {
 		},
 		sender: "sender@example.com".parse().unwrap(),
 		recipients: vec!["recipient@example.com".parse().unwrap()],
+		retry_policy: RetryConfig::default(),
 	};
 
 	let trigger = TriggerBuilder::new()

@@ -18,7 +18,7 @@ use crate::{
 	models::{
 		MonitorMatch, NotificationMessage, ScriptLanguage, Trigger, TriggerType, TriggerTypeConfig,
 	},
-	utils::{normalize_string, HttpRetryConfig},
+	utils::{normalize_string, RetryConfig},
 };
 
 pub use email::{EmailContent, EmailNotifier, SmtpConfig};
@@ -34,7 +34,7 @@ pub use webhook::{WebhookConfig, WebhookNotifier};
 /// A container for all components needed to configure and send a webhook notification.
 struct WebhookComponents {
 	config: WebhookConfig,
-	retry_policy: HttpRetryConfig,
+	retry_policy: RetryConfig,
 	builder: Box<dyn WebhookPayloadBuilder>,
 }
 
@@ -52,7 +52,7 @@ type WebhookParts = (
 /// This abstracts away the specific details of each webhook provider.
 trait AsWebhookComponents {
 	/// Consolidates the logic for creating webhook components from a trigger config.
-	/// It returns the generic `WebhookConfig`, HttpRetryConfig and the specific `WebhookPayloadBuilder`
+	/// It returns the generic `WebhookConfig`, RetryConfig and the specific `WebhookPayloadBuilder`
 	/// needed for the given trigger type.
 	fn as_webhook_components(&self) -> Result<WebhookComponents, NotificationError>;
 }
@@ -277,7 +277,7 @@ impl NotificationService {
 					})?;
 
 				let notifier = EmailNotifier::from_config(&trigger.config, smtp_client)?;
-				let message = notifier.format_message(variables);
+				let message = EmailNotifier::format_message(notifier.body_template(), variables);
 				notifier.notify(&message).await?;
 			}
 			TriggerType::Script => {
@@ -583,7 +583,7 @@ mod tests {
 				title: title.to_string(),
 				body: message.to_string(),
 			},
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		};
 
 		let components = slack_config.as_webhook_components().unwrap();
@@ -621,7 +621,7 @@ mod tests {
 				title: title.to_string(),
 				body: message.to_string(),
 			},
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		};
 
 		let components = discord_config.as_webhook_components().unwrap();
@@ -658,7 +658,7 @@ mod tests {
 				title: title.to_string(),
 				body: message.to_string(),
 			},
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		};
 
 		let components = telegram_config.as_webhook_components().unwrap();
@@ -695,7 +695,7 @@ mod tests {
 				"my-secret".to_string(),
 			))),
 			headers: Some([("X-Custom".to_string(), "Value".to_string())].into()),
-			retry_policy: HttpRetryConfig::default(),
+			retry_policy: RetryConfig::default(),
 		};
 
 		let components = webhook_config.as_webhook_components().unwrap();
