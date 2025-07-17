@@ -419,7 +419,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Expected retry policy in trigger config"));
+					.contains("Trigger type is not webhook-compatible"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -477,7 +477,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Expected retry policy in trigger config"));
+					.contains("Trigger type is not webhook-compatible"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -507,7 +507,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Expected retry policy in trigger config"));
+					.contains("Trigger type is not webhook-compatible"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
@@ -537,7 +537,7 @@ mod tests {
 			Err(NotificationError::ConfigError(ctx)) => {
 				assert!(ctx
 					.message
-					.contains("Expected retry policy in trigger config"));
+					.contains("Trigger type is not webhook-compatible"));
 			}
 			_ => panic!("Expected ConfigError"),
 		}
