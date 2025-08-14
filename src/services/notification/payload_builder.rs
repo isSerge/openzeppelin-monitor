@@ -6,6 +6,8 @@ use regex::Regex;
 use serde_json::json;
 use std::collections::HashMap;
 
+use super::template_formatter;
+
 /// Trait for building webhook payloads.
 pub trait WebhookPayloadBuilder: Send + Sync {
 	/// Builds a webhook payload by formatting the template and applying channel-specific rules.
@@ -29,11 +31,7 @@ pub trait WebhookPayloadBuilder: Send + Sync {
 
 /// Formats a message by substituting variables in the template.
 pub fn format_template(template: &str, variables: &HashMap<String, String>) -> String {
-	let mut message = template.to_string();
-	for (key, value) in variables {
-		message = message.replace(&format!("${{{}}}", key), value);
-	}
-	message
+	template_formatter::format_template(template, variables)
 }
 
 /// A payload builder for Slack.
@@ -386,5 +384,426 @@ mod tests {
 			TelegramPayloadBuilder::escape_markdown_v2("***"),
 			"**\\*" // First * is preserved as markdown, others escaped
 		);
+	}
+
+	#[test]
+	fn test_events_match_reasons_single_event() {
+		let variables = HashMap::from([
+			(
+				"events.0.signature".to_string(),
+				"Transfer(address,address,uint256)".to_string(),
+			),
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			("events.0.args.to".to_string(), "0x5678".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		assert!(result.is_some());
+		let expected = "\n\n*Matched Events:*\n\n*Reason 1*\n\n*Signature:* `Transfer(address,address,uint256)`\n\n*Params:*\n\nfrom: `0x1234`\nto: `0x5678`";
+		assert_eq!(result.unwrap(), expected);
+	}
+
+	#[test]
+	fn test_events_match_reasons_multiple_events() {
+		let variables = HashMap::from([
+			(
+				"events.0.signature".to_string(),
+				"Transfer(address,address,uint256)".to_string(),
+			),
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			("events.0.args.to".to_string(), "0x5678".to_string()),
+			(
+				"events.1.signature".to_string(),
+				"Approval(address,address,uint256)".to_string(),
+			),
+			(
+				"events.1.args.owner".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			(
+				"events.1.args.spender".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			("events.1.args.value".to_string(), "1000000000".to_string()),
+			(
+				"events.2.signature".to_string(),
+				"ValueChanged(uint256)".to_string(),
+			),
+			("events.2.args.value".to_string(), "1000000000".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		assert!(result.is_some());
+		let expected = "\n\n*Matched Events:*\n\n*Reason 1*\n\n*Signature:* `Transfer(address,address,uint256)`\n\n*Params:*\n\nfrom: `0x1234`\nto: `0x5678`\n\n*Reason 2*\n\n*Signature:* `Approval(address,address,uint256)`\n\n*Params:*\n\nowner: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nspender: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nvalue: `1000000000`\n\n*Reason 3*\n\n*Signature:* `ValueChanged(uint256)`\n\n*Params:*\n\nvalue: `1000000000`";
+		assert_eq!(result.unwrap(), expected);
+	}
+
+	#[test]
+	fn test_events_match_reasons_no_events() {
+		let variables = HashMap::from([
+			("transaction.hash".to_string(), "0x1234".to_string()),
+			("monitor.name".to_string(), "Test Monitor".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn test_events_match_reasons_out_of_order() {
+		let variables = HashMap::from([
+			(
+				"events.2.signature".to_string(),
+				"ValueChanged(uint256)".to_string(),
+			),
+			("events.2.args.value".to_string(), "1000000000".to_string()),
+			(
+				"events.0.signature".to_string(),
+				"Transfer(address,address,uint256)".to_string(),
+			),
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			("events.0.args.to".to_string(), "0x5678".to_string()),
+			(
+				"events.1.signature".to_string(),
+				"Approval(address,address,uint256)".to_string(),
+			),
+			(
+				"events.1.args.owner".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			(
+				"events.1.args.spender".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			("events.1.args.value".to_string(), "1000000000".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		assert!(result.is_some());
+		let expected = "\n\n*Matched Events:*\n\n*Reason 1*\n\n*Signature:* `Transfer(address,address,uint256)`\n\n*Params:*\n\nfrom: `0x1234`\nto: `0x5678`\n\n*Reason 2*\n\n*Signature:* `Approval(address,address,uint256)`\n\n*Params:*\n\nowner: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nspender: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nvalue: `1000000000`\n\n*Reason 3*\n\n*Signature:* `ValueChanged(uint256)`\n\n*Params:*\n\nvalue: `1000000000`";
+		assert_eq!(result.unwrap(), expected);
+	}
+
+	#[test]
+	fn test_format_template_with_all_events() {
+		let template = "Transaction detected: ${transaction.hash}\n\n${events}";
+		let variables = HashMap::from([
+			(
+				"transaction.hash".to_string(),
+				"0x1234567890abcdef".to_string(),
+			),
+			(
+				"events.0.signature".to_string(),
+				"Transfer(address,address,uint256)".to_string(),
+			),
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			("events.0.args.to".to_string(), "0x5678".to_string()),
+			(
+				"events.1.signature".to_string(),
+				"Approval(address,address,uint256)".to_string(),
+			),
+			(
+				"events.1.args.owner".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			(
+				"events.1.args.spender".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			("events.1.args.value".to_string(), "1000000000".to_string()),
+		]);
+
+		let result = format_template(template, &variables);
+		// Since the template contains ${events}, it should get the match reasons section
+		let expected = "Transaction detected: 0x1234567890abcdef\n\n\n\n*Matched Events:*\n\n*Reason 1*\n\n*Signature:* `Transfer(address,address,uint256)`\n\n*Params:*\n\nfrom: `0x1234`\nto: `0x5678`\n\n*Reason 2*\n\n*Signature:* `Approval(address,address,uint256)`\n\n*Params:*\n\nowner: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nspender: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nvalue: `1000000000`";
+		assert_eq!(result, expected);
+	}
+
+	#[test]
+	fn test_functions_match_reasons_single_function() {
+		let variables = HashMap::from([
+			(
+				"functions.0.signature".to_string(),
+				"transfer(address,uint256)".to_string(),
+			),
+			("functions.0.args.to".to_string(), "0x1234".to_string()),
+			("functions.0.args.amount".to_string(), "1000000".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "functions");
+		assert!(result.is_some());
+		let expected = "\n\n*Matched Functions:*\n\n*Reason 1*\n\n*Signature:* `transfer(address,uint256)`\n\n*Params:*\n\namount: `1000000`\nto: `0x1234`";
+		assert_eq!(result.unwrap(), expected);
+	}
+
+	#[test]
+	fn test_functions_match_reasons_multiple_functions() {
+		let variables = HashMap::from([
+			(
+				"functions.0.signature".to_string(),
+				"transfer(address,uint256)".to_string(),
+			),
+			("functions.0.args.to".to_string(), "0x1234".to_string()),
+			("functions.0.args.amount".to_string(), "1000000".to_string()),
+			(
+				"functions.1.signature".to_string(),
+				"approve(address,uint256)".to_string(),
+			),
+			(
+				"functions.1.args.spender".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			("functions.1.args.amount".to_string(), "500000".to_string()),
+			(
+				"functions.2.signature".to_string(),
+				"mint(uint256)".to_string(),
+			),
+			("functions.2.args.amount".to_string(), "1000000".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "functions");
+		assert!(result.is_some());
+		let expected = "\n\n*Matched Functions:*\n\n*Reason 1*\n\n*Signature:* `transfer(address,uint256)`\n\n*Params:*\n\namount: `1000000`\nto: `0x1234`\n\n*Reason 2*\n\n*Signature:* `approve(address,uint256)`\n\n*Params:*\n\namount: `500000`\nspender: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\n\n*Reason 3*\n\n*Signature:* `mint(uint256)`\n\n*Params:*\n\namount: `1000000`";
+		assert_eq!(result.unwrap(), expected);
+	}
+
+	#[test]
+	fn test_functions_match_reasons_no_functions() {
+		let variables = HashMap::from([
+			("transaction.hash".to_string(), "0x1234".to_string()),
+			("monitor.name".to_string(), "Test Monitor".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "functions");
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn test_functions_match_reasons_out_of_order() {
+		let variables = HashMap::from([
+			(
+				"functions.2.signature".to_string(),
+				"mint(uint256)".to_string(),
+			),
+			("functions.2.args.amount".to_string(), "1000000".to_string()),
+			(
+				"functions.0.signature".to_string(),
+				"transfer(address,uint256)".to_string(),
+			),
+			("functions.0.args.to".to_string(), "0x1234".to_string()),
+			("functions.0.args.amount".to_string(), "1000000".to_string()),
+			(
+				"functions.1.signature".to_string(),
+				"approve(address,uint256)".to_string(),
+			),
+			(
+				"functions.1.args.spender".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			("functions.1.args.amount".to_string(), "500000".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "functions");
+		assert!(result.is_some());
+		let expected = "\n\n*Matched Functions:*\n\n*Reason 1*\n\n*Signature:* `transfer(address,uint256)`\n\n*Params:*\n\namount: `1000000`\nto: `0x1234`\n\n*Reason 2*\n\n*Signature:* `approve(address,uint256)`\n\n*Params:*\n\namount: `500000`\nspender: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\n\n*Reason 3*\n\n*Signature:* `mint(uint256)`\n\n*Params:*\n\namount: `1000000`";
+		assert_eq!(result.unwrap(), expected);
+	}
+
+	#[test]
+	fn test_format_template_with_all_functions() {
+		let template = "Transaction detected: ${transaction.hash}\n\n${functions}";
+		let variables = HashMap::from([
+			(
+				"transaction.hash".to_string(),
+				"0x1234567890abcdef".to_string(),
+			),
+			(
+				"functions.0.signature".to_string(),
+				"transfer(address,uint256)".to_string(),
+			),
+			("functions.0.args.to".to_string(), "0x1234".to_string()),
+			("functions.0.args.amount".to_string(), "1000000".to_string()),
+			(
+				"functions.1.signature".to_string(),
+				"approve(address,uint256)".to_string(),
+			),
+			(
+				"functions.1.args.spender".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			("functions.1.args.amount".to_string(), "500000".to_string()),
+		]);
+
+		let result = template_formatter::format_template(template, &variables);
+		// Since the template contains ${functions}, it should get the match reasons section
+		let expected = "Transaction detected: 0x1234567890abcdef\n\n\n\n*Matched Functions:*\n\n*Reason 1*\n\n*Signature:* `transfer(address,uint256)`\n\n*Params:*\n\namount: `1000000`\nto: `0x1234`\n\n*Reason 2*\n\n*Signature:* `approve(address,uint256)`\n\n*Params:*\n\namount: `500000`\nspender: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`";
+		assert_eq!(result, expected);
+	}
+
+	#[test]
+	fn test_format_template_with_functions_and_events() {
+		let template = "Transaction detected: ${transaction.hash}\n\n${functions}\n\n${events}";
+		let variables = HashMap::from([
+			(
+				"transaction.hash".to_string(),
+				"0x1234567890abcdef".to_string(),
+			),
+			(
+				"events.0.signature".to_string(),
+				"Transfer(address,address,uint256)".to_string(),
+			),
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			("events.0.args.to".to_string(), "0x5678".to_string()),
+			("events.0.args.value".to_string(), "1000000".to_string()),
+			(
+				"events.1.signature".to_string(),
+				"Approval(address,address,uint256)".to_string(),
+			),
+			(
+				"events.1.args.owner".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			(
+				"events.1.args.spender".to_string(),
+				"0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6".to_string(),
+			),
+			("events.1.args.value".to_string(), "500000".to_string()),
+			(
+				"functions.0.signature".to_string(),
+				"transfer(address,uint256)".to_string(),
+			),
+			("functions.0.args.to".to_string(), "0x9abc".to_string()),
+			("functions.0.args.amount".to_string(), "750000".to_string()),
+			(
+				"functions.1.signature".to_string(),
+				"mint(uint256)".to_string(),
+			),
+			("functions.1.args.amount".to_string(), "250000".to_string()),
+		]);
+
+		let result = template_formatter::format_template(template, &variables);
+		// The template contains both ${events} and ${functions}, so both sections should be included
+		// Functions are processed before events, so functions section appears first
+		let expected = "Transaction detected: 0x1234567890abcdef\n\n\n\n*Matched Functions:*\n\n*Reason 1*\n\n*Signature:* `transfer(address,uint256)`\n\n*Params:*\n\namount: `750000`\nto: `0x9abc`\n\n*Reason 2*\n\n*Signature:* `mint(uint256)`\n\n*Params:*\n\namount: `250000`\n\n\n\n*Matched Events:*\n\n*Reason 1*\n\n*Signature:* `Transfer(address,address,uint256)`\n\n*Params:*\n\nfrom: `0x1234`\nto: `0x5678`\nvalue: `1000000`\n\n*Reason 2*\n\n*Signature:* `Approval(address,address,uint256)`\n\n*Params:*\n\nowner: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nspender: `0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6`\nvalue: `500000`";
+		assert_eq!(result, expected);
+	}
+
+	#[test]
+	fn test_format_template_with_no_events_removes_variable() {
+		let template = "Transaction detected: ${transaction.hash}\n\n${events}";
+		let variables = HashMap::from([
+			(
+				"transaction.hash".to_string(),
+				"0x1234567890abcdef".to_string(),
+			),
+			// No events variables present
+		]);
+
+		let result = template_formatter::format_template(template, &variables);
+		// Since there are no events, ${events} should be replaced with empty string
+		let expected = "Transaction detected: 0x1234567890abcdef\n\n";
+		assert_eq!(result, expected);
+	}
+
+	#[test]
+	fn test_format_template_with_no_functions_removes_variable() {
+		let template = "Transaction detected: ${transaction.hash}\n\n${functions}";
+		let variables = HashMap::from([
+			(
+				"transaction.hash".to_string(),
+				"0x1234567890abcdef".to_string(),
+			),
+			// No functions variables present
+		]);
+
+		let result = template_formatter::format_template(template, &variables);
+		// Since there are no functions, ${functions} should be replaced with empty string
+		let expected = "Transaction detected: 0x1234567890abcdef\n\n";
+		assert_eq!(result, expected);
+	}
+
+	#[test]
+	fn test_build_match_reasons_no_index_part() {
+		let variables = HashMap::from([
+			// Key that starts with prefix but doesn't end with .signature
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			// Key that doesn't start with prefix
+			("transaction.hash".to_string(), "0x1234".to_string()),
+			// Key that starts with prefix but has wrong format
+			("events.signature".to_string(), "Transfer".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		// Should return None since no valid signature keys were found
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn test_build_match_reasons_no_signature() {
+		let variables = HashMap::from([
+			// Has the signature key structure but no actual signature value
+			("events.0.signature".to_string(), "".to_string()),
+			// Has args but no signature
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			("events.0.args.to".to_string(), "0x5678".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		let result_str = result.unwrap();
+
+		assert!(result_str.contains("\n\n*Matched Events:*\n"));
+	}
+
+	#[test]
+	fn test_build_match_reasons_mixed_valid_and_invalid() {
+		let variables = HashMap::from([
+			// Valid signature
+			(
+				"events.0.signature".to_string(),
+				"Transfer(address,address,uint256)".to_string(),
+			),
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+			// Invalid signature (empty)
+			("events.1.signature".to_string(), "".to_string()),
+			("events.1.args.to".to_string(), "0x5678".to_string()),
+			// Valid signature
+			(
+				"events.2.signature".to_string(),
+				"Approval(address,address,uint256)".to_string(),
+			),
+			("events.2.args.owner".to_string(), "0x9abc".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		// Should only include events 0 and 2, skipping event 1 due to empty signature
+		assert!(result.is_some());
+		let result_str = result.unwrap();
+		assert!(result_str.contains("Transfer(address,address,uint256)"));
+		assert!(!result_str.contains("events.1")); // Should not contain event 1
+		assert!(result_str.contains("Approval(address,address,uint256)"));
+	}
+
+	#[test]
+	fn test_build_match_reasons_invalid_index_format() {
+		let variables = HashMap::from([
+			// Invalid index format - not a number
+			("events.abc.signature".to_string(), "Transfer".to_string()),
+			// Invalid index format - negative number
+			("events.-1.signature".to_string(), "Transfer".to_string()),
+			// Valid index format
+			(
+				"events.0.signature".to_string(),
+				"Transfer(address,address,uint256)".to_string(),
+			),
+			("events.0.args.from".to_string(), "0x1234".to_string()),
+		]);
+
+		let result = template_formatter::build_match_reasons(&variables, "events");
+		// Should only include the valid event 0, skipping invalid formats
+		assert!(result.is_some());
+		let result_str = result.unwrap();
+		assert!(result_str.contains("Transfer(address,address,uint256)"));
+		assert!(!result_str.contains("abc")); // Should not contain invalid index
+		assert!(!result_str.contains("-1")); // Should not contain negative index
 	}
 }

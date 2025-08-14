@@ -42,6 +42,40 @@ To get started immediately, see xref:quickstart.adoc[Quickstart].
 * Use **Rust 2021 edition**, version `1.86` or later.
 * **Docker** (optional, for containerized deployment)
 
+==== System Dependencies (Linux)
+
+For Ubuntu 22.04+ or Debian-based systems (both x86 and ARM64 architectures), install required packages:
+
+**Note:** Python 3.9+ is required for pre-commit hooks compatibility.
+
+[source,bash]
+----
+# Install required packages directly
+sudo apt update
+sudo apt install -y \
+    build-essential \
+    curl \
+    git \
+    pkg-config \
+    libssl-dev \
+    libffi-dev \
+    libyaml-dev \
+    python3 \
+    python3-venv \
+    python3-pip
+----
+
+Or use the provided system package script (automatically ensures Python 3.9+ compatibility):
+
+[source,bash]
+----
+chmod +x ./scripts/linux/sys_pkgs_core.sh
+chmod +x ./scripts/linux/sys_pkgs_dev.sh
+# Installs required packages and ensures compatible Python version
+./scripts/linux/sys_pkgs_core.sh   // For runtime dependencies only
+./scripts/linux/sys_pkgs_dev.sh    // For Python/dev dependencies (calls core script)
+----
+
 === Local Installation
 
 . **Clone the repository:**
@@ -997,11 +1031,11 @@ The monitor uses a structured JSON format with nested objects for template varia
 | `*transaction.hash*`
 | Hash of the transaction
 
-| `*functions.[index].signature*`
-| Function signature
+| `*functions*`
+| All functions matched and their parameters
 
-| `*events.[index].signature*`
-| Event signature
+| `*events*`
+| All events matched and their parameters
 |===
 
 ===== Network-Specific Variables
@@ -1020,8 +1054,14 @@ The monitor uses a structured JSON format with nested objects for template varia
 | `*transaction.value*`
 | Transaction value
 
+| `*events.[index].signature*`
+| Event signature
+
 | `*events.[index].args.[param]*`
 | Event parameters by name
+
+| `*functions.[index].signature*`
+| Function signature
 
 | `*functions.[index].args.[param]*`
 | Function parameters by name
@@ -1414,6 +1454,11 @@ Expressions allow for condition checking of function arguments, event parameters
 | `contains`, `==`, `!=`
 | Behavior of `contains` and `==` differs based on whether the value is CSV or a JSON array string. See "Operations on Complex Types" for details.
 
+| `*Tuple (EVM)*`
+| Ordered list represented as a JSON array string (e.g., `'["Alice", 0x1234..., 25, true, [12,34]]'`).
+| `contains`, `==`, `!=`
+| The `contains` operation performs a case-insensitive deep search through all tuple elements. `==` and `!=` perform comparisons against the entire tuple values. See "Operations on Complex Types" for details.
+
 |===
 
 
@@ -1508,6 +1553,28 @@ When an EVM parameter is an array (often represented internally or configured wi
 - `array_param == '["raw_json_array_string"]'` string comparison of the array's entire JSON string representation against the provided string
 - `array_param != '["raw_json_array_string"]'` the negation of the above
 - `array_param[0]` indexed access
+
+*Tuple Operations (`kind: "tuple"`)*
+
+- `tuple_param contains 'value'` checks if the string `'value'` exists within the tuple.
+- `tuple_param == (12, "hello", "testing", 34)` checks if the tuple is equal.
+- `tuple_param != (12, "hello", "testing", 34)` checks if the tuple is not equal.
+
+Where `tuple_param` is the name of tuple param (we should have only one param for tuples).
+
+*Note on Solidity Structs:* When working with Solidity smart contracts, struct types are automatically converted to tuples during ABI encoding/decoding. For example, a Solidity struct like:
+
+[source,solidity]
+----
+struct User {
+    uint256 id;
+    string name;
+    string email;
+    uint256 age;
+}
+----
+
+Will be represented as a tuple `*(12, "user_name", "user_email", 34)*` where the values correspond to the struct fields in their declaration order. This conversion is handled transparently by the Solidity compiler and Web3 libraries, allowing you to use the tuple operations above to work with struct data returned from smart contract calls.
 
 ===== Stellar Specifics
 
